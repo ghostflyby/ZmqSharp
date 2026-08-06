@@ -13,7 +13,6 @@ public interface IZSocket
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
     ValueTask Send(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
-    ValueTask Send(ZLinkedMessage message, CancellationToken token = default);
     ValueTask Send(ReadOnlySequence<byte> sequence, CancellationToken token = default);
 
     event Func<ReadOnlySequence<byte>, CancellationToken, bool> OnReceive;
@@ -131,7 +130,6 @@ public class ZSocketTransport : IZTransport<ZSocketTransport, EndPoint>, IDispos
     {
         while (!disposed)
         {
-            new ReadOnlySequence<byte>();
             using var owner = ZSocket.MemoryPool.Rent(1024);
             var count = await received.ReceiveAsync(owner.Memory, token);
         }

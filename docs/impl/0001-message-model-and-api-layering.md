@@ -1,52 +1,54 @@
-# 0001 - 消息模型与 API 分层
+# 0001 - Message Model and API Layering
 
-状态:draft
-日期:2026-08-06
+Status: draft
+Date: 2026-08-06
 
-本文档固定 ZMTP 风格 .NET 库的基础设计:API 分层、消息模型、队列语义与
-内存所有权规则。ZMTP 解析细节、pattern 层与路由在后续文档展开。
+This document fixes the foundation design of a ZMTP-style .NET messaging
+library: API layering, message model, queue semantics, and memory ownership
+rules. ZMTP parsing details, the pattern layer, and routing are covered in
+later documents.
 
-## 1. 目标
+## 1. Goals
 
-面向现代 .NET 运行时的 ZMTP / ZeroMQ 风格通信库。
+A ZMTP / ZeroMQ-style messaging library for the modern .NET runtime.
 
-非目标:
+Non-goals:
 
-- 不做 RPC 框架。
-- 不自动 retry。
-- 不提供业务 correlation。
-- 不隐藏业务级 timeout。
+- Not an RPC framework.
+- No automatic retry.
+- No business-level correlation.
+- No hidden business-level timeout policies.
 
-## 2. 分层模型
+## 2. Layered Model
 
 ```text
 Application
   |
-  +-- ZSocketChannel   高层:队列 API(Channel),构造时接管低层回调
-  +-- ZSocket          pattern 层(REQ/REP, DEALER/ROUTER, PUB/SUB)
-  +-- ZMTP Session     单 peer 连接:greeting / handshake / traffic
-  +-- Transport        TCP / IPC / inproc(可插拔)
+  +-- ZSocketChannel   high layer: queue API (Channel), takes over the low-level callback at construction
+  +-- ZSocket          pattern layer (REQ/REP, DEALER/ROUTER, PUB/SUB)
+  +-- ZMTP Session     per-peer connection: greeting / handshake / traffic
+  +-- Transport        TCP / IPC / inproc (pluggable)
 ```
 
-消息面跨两层:
+The message surface spans two layers:
 
-- 低层:borrowed `ZMessageView`,零分配,仅回调期间有效。
-- 高层:owned `ZMessage`(sealed class),可逃逸,消费方负责 Dispose。
+- Low layer: borrowed `ZMessageView`, zero allocation, valid only during the callback.
+- High layer: owned `ZMessage` (sealed class), may escape; the consumer is responsible for Dispose.
 
-## 3. 关键决策
+## 3. Key Decisions
 
-| # | 决策 | 理由 |
-|---|------|------|
-| D1 | 不使用 `System.IO.Pipelines` | 消息协议本质是流式的,帧长前置,按需租用缓冲即足够;Pipe 的保留/Advance 语义带来 borrowed 与连续性的冲突,且其模型对非纯流式应用不够 |
-| D2 | 低层 struct 视图 + 高层 class 包装,单次 move | 内部热路径零分配、可内联;边界一次性转移所有权,无需引用计数 |
-| D3 | multipart 保留,帧为一级公民 | 路由信封、topic、REQ/REP 分隔帧都依赖帧边界(RFC 23) |
-| D4 | 连续性逐帧、消费方驱动 | 帧结构(协议语义)与内存布局(性能)正交;连续隐含物化 |
-| D5 | 原子收发 | RFC 23:message 的全部帧或无一帧 |
-| D6 | pooled/owned 按段;无 Detach | 标准池抽象无逃生口;永久所有权必须在分配前定 |
-| D7 | 背压归 Channel | `capacity` = HWM;满则暂停接收泵 + 迟滞续流;drop 可配置 |
-| D8 | 接收策略可扩展 | 默认固定选项;v2 增加应用层 Decide 钩子 |
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D1 | No `System.IO.Pipelines` | A message protocol is inherently streaming and frame lengths are known up front, so renting buffers on demand is sufficient; Pipe's retain/Advance semantics create a borrowed-vs-contiguous conflict, and its model is a poor fit for non-pure-streaming applications |
+| D2 | Low-layer struct view + high-layer class wrapper, single move | Zero-allocation, inlinable hot path; ownership transfers once at the boundary, no reference counting needed |
+| D3 | Multipart preserved, frames are first-class | Routing envelopes, topics, and REQ/REP delimiter frames depend on frame boundaries (RFC 23) |
+| D4 | Contiguity is per-frame and consumer-driven | Frame structure (protocol semantics) is orthogonal to memory layout (performance); contiguity implies materialization |
+| D5 | Atomic send/receive | RFC 23: all frames of a message or none |
+| D6 | Pooled/owned per segment; no Detach | The standard pool abstractions expose no escape hatch; permanent ownership must be decided before allocation |
+| D7 | Backpressure belongs to the Channel | `capacity` = HWM; pause with hysteresis resume when full; drop configurable |
+| D8 | Receive policy is extensible | Fixed options by default; a v2 application-level Decide hook |
 
-## 4. 低层回调契约
+## 4. Low-Level Callback Contract
 
 ```csharp
 public readonly struct ZMessageView
@@ -56,18 +58,18 @@ public readonly struct ZMessageView
     public bool TryGetContiguousFrame(int i, out ReadOnlyMemory<byte> mem);
 }
 
-public delegate bool ZMessageHandler(ZMessageView message, CancellationToken token);
-// true  = 继续接收
-// false = 暂停接收泵(背压),由外部 Resume() 恢复
+public delegate bool ZBorrowedMessageHandler(ZMessageView message, CancellationToken token);
+// true  = keep receiving
+// false = pause the receive pump (backpressure), resumed via Resume()
 ```
 
-规则:
+Rules:
 
-- borrowed:数据仅在回调执行期间有效,禁止保存引用。
-- 同步、串行调用,不并发。
-- `false` 只表达「暂停」;丢消息是高层 Channel 的策略,不混入低层 bool。
+- Borrowed: data is valid only during the callback; references must not be kept.
+- Synchronous and serialized; never concurrent.
+- `false` only means "pause"; dropping messages is a high-layer Channel policy, never mixed into the low-level bool.
 
-## 5. 高层 Channel 桥
+## 5. High-Level Channel Bridge
 
 ```csharp
 public sealed class ZSocketChannel : IAsyncDisposable
@@ -78,93 +80,82 @@ public sealed class ZSocketChannel : IAsyncDisposable
 }
 ```
 
-- 构造时订阅低层回调;回调内按接收策略物化消息并 `writer.TryWrite`。
-- 满:`TryWrite` 失败 → 回调返回 false(暂停),后台续流等待
-  `writer.WaitToWriteAsync()`,以 `Count <= capacity / 2` 做低水位迟滞,
-  避免在满边界抖动。
-- drop 模式(面向 PUB 类丢消息语义)作为显式选项,默认不启用。
-- 协议异常 → `writer.TryComplete(exception)`,消费者可见。
-- 关闭/完成时排空 Channel 并 Dispose 所有未消费消息,防止池泄漏。
-- 水位线、读写者并发全部由 Channel 决定,库不引入额外信号量。
+- Subscribes to the low-level callback at construction; materializes messages per the receive policy and calls `writer.TryWrite`.
+- Full: `TryWrite` fails -> callback returns false (pause); a background resumer waits on `writer.WaitToWriteAsync()` and resumes with a low-watermark hysteresis at `Count <= capacity / 2` to avoid thrashing at the boundary.
+- Drop mode (for PUB-like lossy semantics) is an explicit option, off by default.
+- Protocol errors -> `writer.TryComplete(exception)`, visible to consumers.
+- On close/completion the Channel is drained and all unconsumed messages are disposed to prevent pool leaks.
+- Watermarks, reader/writer concurrency are fully decided by the Channel; the library adds no extra semaphores.
 
-## 6. 消息模型
+## 6. Message Model
 
 ```csharp
 public enum ZBufferOrigin { Pooled, Owned }
 
 public sealed class ZMessage : IDisposable
 {
-    public static ZMessage FromOwned(byte[] data);           // 发送侧:永久所有权,零拷贝
+    public static ZMessage FromOwned(byte[] data);           // send side: permanent ownership, zero copy
     public int FrameCount { get; }
-    public ZBufferOrigin Origin { get; }                     // 按段
+    public ZBufferOrigin Origin { get; }                     // per segment
     public ReadOnlySequence<byte> Frame(int i);
     public bool TryGetContiguousFrame(int i, out ReadOnlyMemory<byte> mem);
-    public byte[] ToOwnedArray();                            // 保留:拷贝到 GC 存储
-    public bool TryTakeOwner(out IMemoryOwner<byte> owner);  // 单帧:转移归还责任
-    public void Dispose();                                   // 幂等
+    public byte[] ToOwnedArray();                            // retain: copy into GC storage
+    public bool TryTakeOwner(out IMemoryOwner<byte> owner);  // single frame: transfer return responsibility
+    public void Dispose();                                   // idempotent
 }
 ```
 
-不变量:
+Invariants:
 
-- 连续消息 = 每个 frame 单段;否则允许 frame 跨段。
-- 帧结构(协议语义)与内存布局(性能)正交。
-- view 是借用的、绝不 Dispose;class 是唯一的 Dispose 责任点。
-- `Dispose` 幂等(`Interlocked` 守卫),归还所有 Pooled 段;Owned 段仅释放引用。
-- 所有权按段记录,multipart 可混合 Pooled / Owned。
-- 内部表示:view 用帧表(offset/length 数组 + owner 引用),
-  `ReadOnlySequence` 按需构建,避免每帧一个链式堆节点。
+- A contiguous message is one where every frame lies in a single segment; otherwise frames may span segments.
+- Frame structure (protocol semantics) is orthogonal to memory layout (performance).
+- Views are borrowed and never Disposed; the class is the sole Dispose responsibility point.
+- `Dispose` is idempotent (guarded by `Interlocked`) and returns all Pooled segments; Owned segments only drop references.
+- Ownership is recorded per segment; multipart messages may mix Pooled and Owned segments.
 
-所有权路径:
+Ownership paths:
 
-- Pooled:库从 `MemoryPool<byte>` 租,`Dispose` 归还。
-- Owned:`FromOwned`(发送)或 `ToOwnedArray`(接收后保留),GC 管理,不碰池。
-- `TryTakeOwner`:单帧延迟归还(转移归还责任),不是永久所有权。
-- 无 `Detach()`:标准池抽象不支持;永久所有权必须在分配前定。
+- Pooled: rented from a `MemoryPool<byte>`, returned on `Dispose`.
+- Owned: `FromOwned` (send) or `ToOwnedArray` (retain after receive); GC-managed, never touches a pool.
+- `TryTakeOwner`: single-frame deferred return (transfers return responsibility), not permanent ownership.
+- No `Detach()`: the standard pool abstractions do not support it; permanent ownership must be decided before allocation.
 
-## 7. 接收管线(无 Pipe)
+## 7. Receive Pipeline (No Pipe)
 
 ```text
-Socket.ReceiveAsync -> 池化 buffer -> parser -> 策略决策 -> 交付(view 或 owned class)
+Socket.ReceiveAsync -> pooled buffer -> parser -> policy decision -> delivery (view or owned class)
 ```
 
-- 连续帧:帧头已含 size,按帧长 rent 池化 buffer,读满(ReadExactly 语义),
-  单段交付。单次拷贝,交付缓冲即最终缓冲。
-- 分段帧:按固定块(建议 8KB)rent,链成 `ReadOnlySequence<byte>`。
-- `ContiguousFrameLimit` 默认 85,000(LOH 阈值):帧不超过阈值走连续;
-  超过走分段(不进 LOH);超过 1MB(`ArrayPool<byte>.Shared` 的 2^20 上限)
-  强制分段,不尝试连续。
-- 不使用 Pipe 的理由:其模型面向「保留未消费字节」的流式解析;消息协议由
-  帧头可知长度,按需租用更简单。纯流式语义下,分段/连续只是性能参数。
+- Contiguous frames: the header carries the size, so rent a pooled buffer of exactly that size, fill it (ReadExactly semantics), and deliver a single segment. One copy; the delivered buffer is the final buffer.
+- Segmented frames: rent fixed blocks (8KB suggested), chained into a `ReadOnlySequence<byte>`.
+- `ContiguousFrameLimit` defaults to 85,000 (LOH threshold): frames up to the limit are contiguous; larger frames are segmented (stay off the LOH); frames over 1MB (the `ArrayPool<byte>.Shared` 2^20 cap) are forced segmented.
+- No Pipe: its model targets streaming parsers that retain unconsumed bytes; a message protocol knows lengths up front, so renting on demand is simpler. Under pure-streaming semantics, segmentation vs contiguity is only a performance parameter.
 
-## 8. 发送路径
+## 8. Send Path
 
-- `SendAsync(ReadOnlyMemory<byte>)`:库内拷贝(对应 `zmq_msg_init_buffer` 语义),
-  调用方数据不受约束。
-- `SendAsync(ZMessage)`:所有权转移,发送完成后由库 Dispose
-  (对应 `zmq_msg_init_data` 语义)。
-- 单连接单 writer;消息为原子单元;任一帧写失败或对端断开 → 终止连接,
-  Dispose 在途消息,不交付一半。
+- `SendAsync(ReadOnlyMemory<byte>)`: the library copies (like `zmq_msg_init_buffer`); caller data is unconstrained.
+- `SendAsync(ZMessage)`: ownership transfers; the library disposes after sending (like `zmq_msg_init_data`).
+- Single writer per connection; a message is an atomic unit; any frame write failure or peer close terminates the connection and disposes in-flight messages; never deliver half a message.
 
-## 9. 连接与重连
+## 9. Connection and Reconnect
 
-- 生命周期:connect → greeting → handshake → traffic → disconnect。
-- 重连产生新的 ZMTP 连接,重新 greeting / handshake。
-- 意外断连视为临时错误;重连退避随机化,避免连接风暴(RFC 23 Error Handling)。
-- ERROR command 致命:关闭连接,且不以相同凭证重连。
+- Lifecycle: connect -> greeting -> handshake -> traffic -> disconnect.
+- Reconnect produces a new ZMTP connection with a fresh greeting / handshake.
+- Unexpected disconnect is a temporary error; reconnect with randomized backoff to avoid connection storms (RFC 23 Error Handling).
+- An ERROR command is fatal: close the connection and do not reconnect with the same credentials.
 
-## 10. 接收策略与扩展点
+## 10. Receive Policy and Extension Points
 
 ```csharp
-public enum ZReceivePolicy { Borrowed, Pooled }
+public enum ZReceiveMode { Borrowed, Pooled, Owned }
 
 public sealed class ZReceiveOptions
 {
-    public ZReceivePolicy Policy { get; init; } = ZReceivePolicy.Pooled;
-    public int ContiguousFrameLimit { get; init; } = 85_000;   // 0 = 全分段
+    public ZReceiveMode Policy { get; init; } = ZReceiveMode.Pooled;
+    public int ContiguousFrameLimit { get; init; } = 85_000;   // 0 = fully segmented
 
-    // v2:应用层策略钩子,当前保留空位
-    public Func<ZReceiveContext, ZReceiveAction>? Decide { get; init; }
+    // v2: application-level policy hook, reserved for now
+    public ZMessageDecider? Decide { get; init; }
 }
 
 public readonly struct ZReceiveContext
@@ -177,35 +168,28 @@ public readonly struct ZReceiveContext
 
 public readonly struct ZReceiveAction
 {
-    public ZReceivePolicy Policy { get; init; }
+    public ZReceiveMode Mode { get; init; }
     public bool Contiguous { get; init; }
 }
 ```
 
-- 决策点唯一:parser 读到帧头后、物化前。v1 的固定逻辑就是这个点上的分支,
-  加钩子只改一处。
-- 约束:`Borrowed` 与强制连续互斥(连续隐含物化)。
-- 应用层优势:首帧/前缀 + 帧长可预测「缓存 → Owned」「巨大 → 分段流式」;
-  ZMTP 层自身无法预测消息总大小。
+- Single decision point: after the frame header, before materialization. The v1 fixed logic is the branch at this point; adding the hook changes only this spot.
+- Constraint: `Borrowed` and forced contiguity are mutually exclusive (contiguity implies materialization).
+- Application advantage: the first frame/prefix plus the known frame size can predict "cache -> Owned" or "huge -> segmented streaming"; the ZMTP layer alone cannot predict total message size.
 
-## 11. 工程约束
+## 11. Engineering Constraints
 
-权威列表见 AGENTS.md。要点:测试 xUnit + FluentAssertions;不用 `!` 空断言,
-需要时用 `is {}` 模式匹配;集合字面量;`System.Lock`;全异步链路;
-最新 C# 风格;完整 AOT 支持。
+The authoritative list lives in AGENTS.md. Highlights: xUnit tests with FluentAssertions; no `!` null-forgiving operator (`is {}` pattern matching instead); collection literals; `System.Lock`; fully async pipeline; latest C# style; full AOT support.
 
-## 12. 项目结构与命名空间
+## 12. Project Structure and Namespaces
 
-- 项目拆分:v1 保持单库(`ZmqSharp`)+ 测试项目(`ZmqSharp.Tests`)+
-  AOT smoke(`ZmqSharp.AotSmoke`),不拆多个库。
-  理由:库零外部依赖,单程序集对 AOT/裁剪最简单;分层用命名空间与依赖方向约束。
-  拆分触发条件:出现第二个传输实现(如 TLS/QUIC),或协议层出现第二个消费方。
-  届时拆 `ZmqSharp`(核心:消息模型、session、parser、pattern)+
-  `ZmqSharp.Transports`(实现 `IZTransport`),依赖方向 Transports -> Core。
-- 命名空间按层:`ZmqSharp.Messages` / `ZmqSharp.Zmtp` / `ZmqSharp.Transports` /
-  `ZmqSharp.Patterns`。
+- Project split: v1 keeps a single library (`ZmqSharp`) plus a test project (`ZmqSharp.Tests`) and an AOT smoke project (`ZmqSharp.AotSmoke`); no multi-library split.
+  Rationale: the library has zero external dependencies, and a single assembly keeps AOT/trimming simplest; layering is enforced by namespaces and dependency direction.
+  Split triggers: a second transport implementation (e.g. TLS/QUIC), or a second consumer of the protocol layer.
+  When split: `ZmqSharp` (core: message model, session, parser, patterns) + `ZmqSharp.Transports` (implements `IZTransport`), with dependency direction Transports -> Core.
+- Namespaces by layer: `ZmqSharp.Messages` / `ZmqSharp.Zmtp` / `ZmqSharp.Transports` / `ZmqSharp.Patterns`.
 
-## 13. 后续
+## 13. Follow-ups
 
-- pattern 层(routing、REQ/REP 状态机)另立文档。
-- 开放问题:连接级心跳(PING/PONG,ZMTP 3.1)、超大帧(>1MB)的流式消费 API。
+- The pattern layer (routing, REQ/REP state machine) gets its own document.
+- Open questions: connection-level heartbeat (PING/PONG, ZMTP 3.1) and streaming consumption APIs for very large frames (>1MB).
