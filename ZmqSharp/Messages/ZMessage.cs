@@ -10,10 +10,10 @@ namespace ZmqSharp.Messages;
 /// </summary>
 public sealed class ZMessage : IZMessage, IDisposable
 {
-    private readonly ZMessageData _data;
-    private int _disposed;
+    private readonly ZMessageData data;
+    private int disposed;
 
-    internal ZMessage(ZMessageData data) => _data = data;
+    internal ZMessage(ZMessageData data) => this.data = data;
 
     /// <summary>Builds a single-frame Owned message from a caller array (zero copy, Dispose never touches a pool).</summary>
     public static ZMessage FromOwned(byte[] data)
@@ -115,9 +115,9 @@ public sealed class ZMessage : IZMessage, IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        if (Interlocked.Exchange(ref disposed, 1) == 0)
         {
-            _data.Dispose();
+            data.Dispose();
         }
     }
 
@@ -125,12 +125,12 @@ public sealed class ZMessage : IZMessage, IDisposable
     {
         get
         {
-            if (Volatile.Read(ref _disposed) == 1)
+            if (Volatile.Read(ref disposed) == 1)
             {
                 throw new ObjectDisposedException(nameof(ZMessage));
             }
 
-            return _data;
+            return data;
         }
     }
 }
