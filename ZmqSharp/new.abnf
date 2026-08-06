@@ -1,0 +1,49 @@
+;   The protocol consists of zero or more connections
+zmtp = *connection
+
+;   A connection is a greeting, a handshake, and traffic
+connection = greeting handshake traffic
+
+;   The greeting announces the protocol details
+greeting = signature version mechanism as-server filler
+
+signature = %xFF padding %x7F
+padding = 8OCTET        ; Not significant
+
+version = version-major version-minor
+version-major = %x03
+version-minor = %x00
+
+;   The mechanism is a null padded string
+mechanism = 20mechanism-char
+mechanism-char = "A"-"Z" | DIGIT
+    | "-" | "_" | "." | "+" | %x0
+
+;   Is the peer acting as server?
+as-server = %x00 | %x01
+
+;   The filler extends the greeting to 64 octets
+filler = 31%x00             ; 31 zero octets
+
+;   The handshake consists of at least one command
+;   The actual grammar depends on the security mechanism
+handshake = 1*command
+
+;   Traffic consists of commands and messages intermixed
+traffic = *(command | message)
+
+;   A command is a single long or short frame
+command = command-size command-body
+command-size = %x04 short-size | %x06 long-size
+short-size = OCTET          ; Body is 0 to 255 octets
+long-size = 8OCTET          ; Body is 0 to 2^63-1 octets
+command-body = command-name command-data
+command-name = OCTET 1*255command-name-char
+command-name-char = ALPHA
+command-data = *OCTET
+
+;   A message is one or more frames
+message = *message-more message-last
+message-more = ( %x01 short-size | %x03 long-size ) message-body
+message-last = ( %x00 short-size | %x02 long-size ) message-body
+message-body = *OCTET
