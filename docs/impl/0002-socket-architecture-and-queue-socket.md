@@ -4,19 +4,20 @@ Status: draft
 Date: 2026-08-07
 
 Extends 0001 into the socket layer: a low-level callback primitive
-(`IZSocket`) and the high-level queue socket (`ZQueueSocket`) built on top of
-it, following the per-peer queue model of 0004. The transport/connection
-separation matches the current implementation.
+(`IZCallbackSocket`) and the high-level queue socket
+(`ZQueueSocket<TSocket>`) built on top of it, following the per-peer queue
+model of 0004. The transport/connection separation matches the current
+implementation.
 
 ## 1. Layering
 
 ```text
 Application
   |
-  +-- ZQueueSocket       high-level main API: takes over the low-level callback
+  +-- ZQueueSocket<TSocket>  high-level main API: takes over the low-level callback
   |                      at construction; per-peer queues; Channel delivery (0004)
   |
-  +-- IZSocket           low-level primitive: bind/connect, peer management,
+  +-- IZCallbackSocket   low-level primitive: bind/connect, peer management,
   |                      borrowed frame callback, direct send
   |
   +-- ZConnection        per-peer full-duplex session (internal)
@@ -28,10 +29,10 @@ Socket types are subtypes of a shared base (libzmq-style): each type is its
 own class implementing its routing and aggregation semantics; the callback is
 the low-level receive contract and stays independent of the queue tier.
 
-## 2. IZSocket (Low-Level Primitive)
+## 2. IZSocket (Common Contract) and IZCallbackSocket
 
 ```csharp
-public interface IZSocketBase : IAsyncDisposable
+public interface IZSocket : IAsyncDisposable
 {
     Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
@@ -48,7 +49,7 @@ public interface IZSocketBase : IAsyncDisposable
     ValueTask SendAsync(IZMessage message, CancellationToken token = default);
 }
 
-public interface IZSocket : IZSocketBase
+public interface IZCallbackSocket : IZSocket
 {
     // Receive: borrowed streaming frame callback (low-level).
     event ZFrameHandler? OnFrame;
@@ -57,9 +58,9 @@ public interface IZSocket : IZSocketBase
 }
 ```
 
-- `IZSocketBase` is the small common contract (endpoints + direct send) shared
-  by every socket surface.
-- `IZSocket` adds the borrowed receive surface; `OnFrame` delivers each frame
+- `IZSocket` is the small common contract (endpoints + direct send) shared by
+  every socket surface.
+- `IZCallbackSocket` adds the borrowed receive surface; `OnFrame` delivers each frame
   borrowed (valid only during the call); a
   multipart message arrives as consecutive frames until `More` is false.
   Returning false pauses the receive pump; `PeerEnded` reports connection
@@ -67,19 +68,18 @@ public interface IZSocket : IZSocketBase
 - Send is direct and synchronous-with-ownership: the socket type's
   `RouteOutbound` selects the target connection(s) and the message is disposed
   after the last peer send.
-- No queues on this interface; queue semantics live in `ZQueueSocket`.
+- No queues on this interface; queue semantics live in `ZQueueSocket<TSocket>`.
 
-## 3. ZQueueSocket (High-Level Main API)
+## 3. ZQueueSocket (Queue Surface, Main Path)
 
 ```csharp
-public sealed class ZQueueSocket : IZSocketBase
+public sealed class ZQueueSocket<TSocket> : IZSocket
+    where TSocket : ZSocketBase
 {
-    public ZQueueSocket(IZSocket socket, ZQueueSocketOptions? options = null);
-
     public ChannelReader<IZMessage> Messages { get; }       // receive channel
     public ChannelWriter<IZMessage>? Outbound { get; }      // optional send channel
     public ValueTask SendAsync(IZMessage message, CancellationToken token = default);
-    // Bind / Connect / Close forward to the wrapped IZSocket.
+    // Bind / Connect / Close forward to the wrapped TSocket.
 }
 
 public sealed class ZQueueSocketOptions
@@ -90,9 +90,11 @@ public sealed class ZQueueSocketOptions
 }
 ```
 
-- Constructing `ZQueueSocket` takes over the wrapped socket's `OnFrame`
-  callback, so a wrapped `IZSocket` never also delivers frames to a user
-  handler: the two tiers are mutually exclusive by construction.
+- `ZQueueSocket<TSocket>` wraps a concrete socket type (`ZPairSocket`,
+  `ZDealerSocket`, ...); the generic parameter carries the socket type and the
+  wrapped socket is never exposed. Construction takes over the wrapped
+  socket's `OnFrame` callback, so the two tiers are mutually exclusive by
+  construction.
 - Capacity is per peer (each peer gets its own bounded queue with the
   configured HWM), following 0004. `Messages` exposes the socket-level
   aggregated view selected by the socket type (fair-queue, direct, ...).
@@ -125,7 +127,7 @@ As implemented:
 
 ## 6. Receive Pipeline
 
-- Low level: `IZSocket.OnFrame` streams borrowed frames (0001 section 4).
+- Low level: `IZCallbackSocket.OnFrame` streams borrowed frames (0001 section 4).
 - Queue tier: each peer's parser materializes messages directly into its
   receive queue (zero extra copy, 0004 constraint 1), applying the receive
   policy (0003). The socket type aggregates the peer queues (fair-queue,
@@ -149,8 +151,13 @@ As implemented:
 ```csharp
 public static class ZSocket
 {
-    public static IZSocket Create(ZSocketType type, ZSocketOptions? options = null);
-    public static ZQueueSocket CreateQueue(ZSocketType type, ZQueueSocketOptions? options = null);
+    // Queue surface (main path, short names).
+    public static ZQueueSocket<ZPairSocket> CreatePair(ZQueueSocketOptions? options = null);
+    public static ZQueueSocket<ZDealerSocket> CreateDealer(ZQueueSocketOptions? options = null);
+
+    // Callback surface (suffixed).
+    public static ZPairSocket CreatePairCallback(ZSocketOptions? options = null);
+    public static ZDealerSocket CreateDealerCallback(ZSocketOptions? options = null);
 }
 ```
 
@@ -160,24 +167,26 @@ Internally every type is a subtype of `ZSocketBase` overriding
 `Push`, `Pull`, each adding its own outbound selection and inbound
 aggregation (0004 section 1 table).
 
-`CreateQueue` wraps the callback socket returned by `Create` in a
-`ZQueueSocket` (0004).
+The queue surface is the primary path with short factory names; the callback
+surface is created through `*Callback` entries. Each factory constructs a
+socket type subtype and, for the queue surface, wraps it in
+`ZQueueSocket<TSocket>` (0004).
 
 ## 9. Decisions
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D9 | `IZSocketBase` is the small common contract (endpoints + send); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
+| D9 | `IZSocket` is the small common contract (endpoints + send); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
 | D10 | Generic transport factory (`IZTransport<TSelf, TEndpoint>`) is the core | Transports plug in with typed endpoints and compile-time selection |
-| D11 | `ZQueueSocket` is the high-level main API; it takes over the callback at construction | Matches 0001 D7/D8; two tiers are mutually exclusive by construction |
+| D11 | `ZQueueSocket<TSocket>` is the high-level main API; it takes over the callback at construction | Matches 0001 D7/D8; two tiers are mutually exclusive by construction |
 | D12 | Queue capacity is per peer (HWM per peer) | Matches libzmq; per-peer backpressure isolation (0004) |
 | D13 | Connection sessions are internal; direct send is the low-level send path | Keeps the primitive small; queue semantics stay in the wrapper |
 | D14 | String endpoints are a facade over the generic core | User-facing convenience without replacing the generic factory |
 
 ## 10. Test Plan
 
-- TCP loopback round-trip through `IZSocket.OnFrame` (borrowed, multipart
-  streamed) and through `ZQueueSocket.Messages` (assembled).
+- TCP loopback round-trip through `IZCallbackSocket.OnFrame` (borrowed, multipart
+  streamed) and through `ZQueueSocket<TSocket>.Messages` (assembled).
 - Per-peer isolation: one slow peer must not pause another peer's receive
   queue.
 - Channel backpressure: full -> pause that peer -> resume with hysteresis;

@@ -24,8 +24,8 @@ Non-goals:
 ```text
 Application
   |
-  +-- ZQueueSocket     high layer: queue API (Channel), per-peer queues, takes over the low-level callback at construction (0002)
-  +-- IZSocket         low-layer primitive: borrowed frame callback + direct send (0002)
+  +-- ZQueueSocket<TSocket>  high layer: queue API (Channel), per-peer queues, takes over the low-level callback at construction (0002)
+  +-- IZCallbackSocket low-layer primitive: borrowed frame callback (0002)
   +-- ZMTP Session     per-peer connection: greeting / handshake / traffic
   +-- Transport        TCP / IPC / inproc (pluggable)
 ```
@@ -75,7 +75,7 @@ Rules:
 ## 5. High-Level Queue Socket
 
 ```csharp
-public sealed class ZQueueSocket : IAsyncDisposable   // defined in 0002
+public sealed class ZQueueSocket<TSocket> : IAsyncDisposable   // defined in 0002
 {
     // BoundedChannelOptions.Capacity = per-peer HWM
     public ChannelReader<IZMessage> Messages { get; }

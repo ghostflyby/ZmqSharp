@@ -9,15 +9,15 @@ namespace ZmqSharp.Sockets;
 /// <summary>
 /// Shared socket mechanics: calls the transport, stores connections, drives
 /// the handshake externally, and delivers borrowed frames to the OnFrame
-/// callback. Socket types differ only in <see cref="RouteOutbound"/>.
+/// callback. Socket types are subtypes that differ only in
+/// <see cref="RouteOutbound"/>.
 /// </summary>
-internal abstract class ZSocketBase : IZSocket
+public abstract class ZSocketBase : IZCallbackSocket
 {
     private static readonly byte[] ReadyCommand = [.. "READY\0"u8];
 
     private readonly record struct Peer(IZConnection Connection, string Endpoint, ZmtpParser Parser);
 
-    private readonly MemoryPool<byte> pool;
     private readonly Lock stateLock = new();
     private readonly List<Peer> peers = [];
     private readonly List<(IZTransport Listener, string Endpoint)> listeners = [];
@@ -28,9 +28,12 @@ internal abstract class ZSocketBase : IZSocket
     private Action<Exception?>? peerEnded;
     private int closed;
 
+    protected readonly MemoryPool<byte> Pool;
+
     protected ZSocketBase(ZSocketOptions options)
     {
-        pool = options.Pool ?? MemoryPool<byte>.Shared;
+        ArgumentNullException.ThrowIfNull(options);
+        Pool = options.Pool ?? MemoryPool<byte>.Shared;
     }
 
     /// <summary>Selects the outbound connection(s) for a message; empty = drop.</summary>
@@ -71,6 +74,15 @@ internal abstract class ZSocketBase : IZSocket
             {
                 peerEnded -= value;
             }
+        }
+    }
+
+    /// <summary>Resumes every peer receive pump paused by a false <see cref="OnFrame"/> return.</summary>
+    public void ResumePaused()
+    {
+        while (paused.TryDequeue(out var parser))
+        {
+            parser.Resume();
         }
     }
 
@@ -134,7 +146,7 @@ internal abstract class ZSocketBase : IZSocket
         return Task.CompletedTask;
     }
 
-    public async Task CloseAsync(CancellationToken token = default)
+    public virtual async Task CloseAsync(CancellationToken token = default)
     {
         await StopAsync(token);
         await AwaitBackgroundAsync(token);
@@ -143,14 +155,6 @@ internal abstract class ZSocketBase : IZSocket
     public async ValueTask DisposeAsync()
     {
         await CloseAsync(CancellationToken.None);
-    }
-
-    public void ResumePaused()
-    {
-        while (paused.TryDequeue(out var parser))
-        {
-            parser.Resume();
-        }
     }
 
     public async ValueTask SendAsync(IZMessage message, CancellationToken token = default)
@@ -174,7 +178,7 @@ internal abstract class ZSocketBase : IZSocket
     public async ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         ThrowIfClosed();
-        var owner = pool.Rent(bytes.Length);
+        var owner = Pool.Rent(bytes.Length);
         bytes.CopyTo(owner.Memory);
         var message = new ZMessage(new ZBufferRef(owner, owner.Memory[..bytes.Length]));
         await SendAsync(message, token);
@@ -188,8 +192,8 @@ internal abstract class ZSocketBase : IZSocket
 
     private void AddConnection(IZConnection connection, string endpoint)
     {
-        var parser = new ZmtpParser(connection, pool);
-        connection.SetFrameHandler((frame, ct) => DeliverFrame(parser, frame));
+        var parser = new ZmtpParser(connection, Pool);
+        connection.SetFrameHandler((frame, ct) => DeliverFrameCore(parser, frame));
 
         lock (stateLock)
         {
@@ -234,7 +238,7 @@ internal abstract class ZSocketBase : IZSocket
         connection.Dispose();
     }
 
-    private bool DeliverFrame(ZmtpParser parser, ZFrame frame)
+    private bool DeliverFrameCore(ZmtpParser parser, ZFrame frame)
     {
         var keepGoing = RaiseOnFrame(frame);
         if (!keepGoing)
@@ -318,7 +322,7 @@ internal abstract class ZSocketBase : IZSocket
             return;
         }
 
-        await cts.CancelAsync();
+        cts.Cancel();
         List<IZTransport> listenerSnapshot;
         lock (stateLock)
         {
@@ -344,7 +348,9 @@ internal abstract class ZSocketBase : IZSocket
 
     private void ThrowIfClosed()
     {
-        if (Volatile.Read(ref closed) != 1) return;
-        throw new ObjectDisposedException(nameof(ZSocketBase));
+        if (Volatile.Read(ref closed) == 1)
+        {
+            throw new ObjectDisposedException(nameof(ZSocketBase));
+        }
     }
 }

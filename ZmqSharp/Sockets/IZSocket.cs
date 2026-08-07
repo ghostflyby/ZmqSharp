@@ -1,24 +1,31 @@
-using ZmqSharp.Zmtp;
+using ZmqSharp.Messages;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
 /// <summary>
-/// Low-level callback surface: receive via the borrowed frame callback.
-/// Queue semantics live in ZQueueSocket.
+/// Common contract of every socket surface: endpoint management and direct
+/// send. Receive differs by surface (callback vs channel).
 /// </summary>
-public interface IZSocket : IZSocketBase
+public interface IZSocket : IAsyncDisposable
 {
-    /// <summary>
-    /// Borrowed streaming callback: invoked once per frame as it arrives.
-    /// Return false to pause this connection's receive pump (backpressure);
-    /// resume via <see cref="ResumePaused"/>.
-    /// </summary>
-    event ZFrameHandler? OnFrame;
+    Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    /// <summary>Raised when a peer connection ends; null = clean EOF, otherwise the failure.</summary>
-    event Action<Exception?>? PeerEnded;
+    Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    /// <summary>Resumes every peer receive pump paused by a false <see cref="OnFrame"/> return.</summary>
-    void ResumePaused();
+    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
 
+    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+
+    Task CloseAsync(CancellationToken token = default);
+
+    /// <summary>Direct send: transfers ownership; the socket disposes the message after routing.</summary>
+    ValueTask SendAsync(IZMessage message, CancellationToken token = default);
+
+    /// <summary>Direct send: copies the payload into an owned message before routing.</summary>
+    ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
 }

@@ -16,8 +16,8 @@ public sealed class ZSocketTests
     public async Task PairSocket_RoundTripsMultipartOverTcp()
     {
         var port = GetFreePort();
-        await using var server = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
-        await using var client = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
@@ -56,9 +56,9 @@ public sealed class ZSocketTests
     {
         var portA = GetFreePort();
         var portB = GetFreePort();
-        await using var serverA = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
-        await using var serverB = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
-        await using var dealer = ZSocket.CreateQueue(ZSocketType.Dealer, new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var serverA = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var serverB = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var dealer = ZSocket.CreateDealer(new ZQueueSocketOptions { ReceiveCapacity = 16 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await serverA.BindAsync($"tcp://127.0.0.1:{portA}", cts.Token);
@@ -94,7 +94,7 @@ public sealed class ZSocketTests
     public async Task SendAsync_DisposesMessageAfterRouting()
     {
         using var pool = new CountingMemoryPool();
-        await using var socket = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { Pool = pool });
+        await using var socket = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
         var message = MessageFactory.PooledSingleFrame(pool, "hello"u8.ToArray());
 
         await socket.SendAsync(message);
@@ -105,7 +105,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task Close_CompletesReceiveChannel()
     {
-        await using var socket = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         await socket.CloseAsync();
         socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
@@ -114,7 +114,7 @@ public sealed class ZSocketTests
     public async Task ProtocolError_CompletesChannelWithException()
     {
         var port = GetFreePort();
-        await using var server = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
         using var raw = new TcpClient();
@@ -128,7 +128,7 @@ public sealed class ZSocketTests
         await FluentActions.Awaiting(() => messages.Completion).Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
-    private static async Task EchoAsync(ZQueueSocket server, ChannelReader<IZMessage> messages, CancellationToken token)
+    private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<IZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
         {
@@ -136,7 +136,7 @@ public sealed class ZSocketTests
         }
     }
 
-    private static async Task DrainAsync(ZQueueSocket socket, Action onMessage, CancellationToken token)
+    private static async Task DrainAsync(ZQueueSocket<ZPairSocket> socket, Action onMessage, CancellationToken token)
     {
         var messages = socket.Messages;
         await foreach (var message in messages.ReadAllAsync(token))

@@ -1,24 +1,20 @@
 namespace ZmqSharp.Sockets;
 
-/// <summary>Socket factory: each socket type is its own subtype (libzmq-style).</summary>
+/// <summary>
+/// Socket factory: the queue surface is the primary path with short names;
+/// the callback surface is created through the *Callback entry points.
+/// </summary>
 public static class ZSocket
 {
-    public static IZSocket Create(ZSocketType type, ZSocketOptions? options = null)
-    {
-        options ??= new ZSocketOptions();
-        return type switch
-        {
-            ZSocketType.Pair => new ZPairSocket(options),
-            ZSocketType.Dealer => new ZDealerSocket(options),
-            _ => throw new ArgumentOutOfRangeException(nameof(type)),
-        };
-    }
+    public static ZQueueSocket<ZPairSocket> CreatePair(ZQueueSocketOptions? options = null)
+        => new(new ZPairSocket(new ZSocketOptions { Pool = options?.Pool }), options);
 
-    /// <summary>Creates a queue socket: wraps the low-level socket and takes over its receive callback.</summary>
-    public static ZQueueSocket CreateQueue(ZSocketType type, ZQueueSocketOptions? options = null)
-    {
-        options ??= new ZQueueSocketOptions();
-        var socket = Create(type, new ZSocketOptions { Pool = options.Pool });
-        return new ZQueueSocket(socket, options);
-    }
+    public static ZQueueSocket<ZDealerSocket> CreateDealer(ZQueueSocketOptions? options = null)
+        => new(new ZDealerSocket(new ZSocketOptions { Pool = options?.Pool }), options);
+
+    public static ZPairSocket CreatePairCallback(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
+
+    public static ZDealerSocket CreateDealerCallback(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
 }

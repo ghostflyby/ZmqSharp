@@ -3,16 +3,17 @@
 Status: draft
 Date: 2026-08-07
 
-Defines how the queue tier (`ZQueueSocket`, 0002) materializes received
-messages: per message, whether the result is pooled or owned, and how frame
-continuity is chosen. The low-level borrowed callback is a separate, complete
-mode on `IZSocket`; this document covers the materialization policy only.
+Defines how the queue tier (`ZQueueSocket<TSocket>`, 0002) materializes
+received messages: per message, whether the result is pooled or owned, and
+how frame continuity is chosen. The low-level borrowed callback is a
+separate, complete mode on `IZCallbackSocket`; this document covers the
+materialization policy only.
 
 ## 1. Context
 
 Receive has two tiers, aligned with 0002 and 0004:
 
-- Low tier: `IZSocket.OnFrame` delivers borrowed frames, zero copy, always.
+- Low tier: `IZCallbackSocket.OnFrame` delivers borrowed frames, zero copy, always.
   The caller owns everything it does with a frame during the callback.
 - Queue tier: each peer's parser materializes messages directly into that
   peer's bounded receive queue, then the socket type aggregates the peer
@@ -71,13 +72,13 @@ public sealed class ZReceiveOptions
 ```
 
 - Carried by `ZQueueSocketOptions.ReceivePolicy` (0002); the low-tier
-  `IZSocket.OnFrame` is not involved and stays borrowed.
+  `IZCallbackSocket.OnFrame` is not involved and stays borrowed.
 - `Decide` is invoked once per message, with the context of its first frame
   (`IsFirstFrame == true`, `HasMore` set from that frame). A message's mode is
   fixed for all of its frames; a mode split inside one multipart message is
   not supported.
 - `Borrowed` is not a mode here: borrowed delivery is the identity of the
-  `IZSocket` tier, not an option of queue materialization.
+  `IZCallbackSocket` tier, not an option of queue materialization.
 
 ### 4.2 Continuity policy
 

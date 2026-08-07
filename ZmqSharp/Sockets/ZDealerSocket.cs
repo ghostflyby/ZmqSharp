@@ -4,7 +4,7 @@ using ZmqSharp.Transports;
 namespace ZmqSharp.Sockets;
 
 /// <summary>Fair dispatch: round-robin outbound, fair-queue inbound (DEALER semantics).</summary>
-internal sealed class ZDealerSocket(ZSocketOptions options) : ZSocketBase(options)
+public sealed class ZDealerSocket(ZSocketOptions options) : ZSocketBase(options)
 {
     private int next;
 

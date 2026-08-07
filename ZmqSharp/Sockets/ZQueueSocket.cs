@@ -7,14 +7,15 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Sockets;
 
 /// <summary>
-/// High-level queue socket: takes over the low-level frame callback at
-/// construction, materializes messages per peer (0004), and delivers them
-/// through a bounded Channel. Send is either direct or via an optional
-/// bounded outbound channel.
+/// High-level queue surface: wraps a callback socket type, takes over its
+/// frame callback at construction, materializes messages per peer (0004), and
+/// delivers them through a bounded Channel. The wrapped socket is never
+/// exposed; connection and direct send forward to it.
 /// </summary>
-public sealed class ZQueueSocket : IZSocketBase
+public sealed class ZQueueSocket<TSocket> : IZSocket
+    where TSocket : ZSocketBase
 {
-    private readonly IZSocket socket;
+    private readonly TSocket socket;
     private readonly MemoryPool<byte> pool;
     private readonly Channel<IZMessage> receiveChannel;
     private readonly Channel<IZMessage>? sendChannel;
@@ -25,7 +26,7 @@ public sealed class ZQueueSocket : IZSocketBase
     private readonly CancellationTokenSource cts = new();
     private int closed;
 
-    public ZQueueSocket(IZSocket socket, ZQueueSocketOptions? options = null)
+    internal ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(socket);
         this.socket = socket;
