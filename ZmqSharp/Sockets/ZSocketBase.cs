@@ -13,7 +13,7 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 internal sealed class ZSocketBase : IZSocket
 {
-    private static readonly byte[] NullGreeting = BuildNullGreeting();
+    private static readonly byte[] ReadyCommand = [.. "READY\0"u8];
 
     private readonly record struct Peer(IZConnection Connection, string Endpoint, ZmtpParser Parser);
 
@@ -202,8 +202,8 @@ internal sealed class ZSocketBase : IZSocket
     {
         try
         {
-            await connection.WriteAsync(NullGreeting, cts.Token);
-            await connection.SendCommandAsync("READY\0"u8.ToArray(), cts.Token);
+            await connection.WriteAsync(ZmtpFrameEncoder.NullGreeting, cts.Token);
+            await connection.SendCommandAsync(ReadyCommand, cts.Token);
             if (await parser.EstablishAsync(cts.Token))
             {
                 await parser.ParseAsync(cts.Token);
@@ -405,16 +405,6 @@ internal sealed class ZSocketBase : IZSocket
         {
             return [.. peers.Select(peer => peer.Connection)];
         }
-    }
-
-    private static byte[] BuildNullGreeting()
-    {
-        var greeting = new byte[64];
-        greeting[0] = 0xFF;
-        greeting[9] = 0x7F;
-        greeting[10] = 3;
-        "NULL"u8.CopyTo(greeting.AsSpan(12, 4));
-        return greeting;
     }
 
     private void ThrowIfClosed()

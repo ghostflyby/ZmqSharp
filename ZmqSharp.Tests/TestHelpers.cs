@@ -201,7 +201,11 @@ internal static class ZmtpTestData
     public static byte[] Frame(byte[] body, bool more = false, bool command = false, byte flagsOverride = 0)
     {
         var isLong = body.Length > 255;
-        var flags = (byte)((more ? 0b0001 : 0) | (isLong ? 0b0010 : 0) | (command ? 0b0100 : 0) | flagsOverride);
+        var flags = (byte)(
+            (more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None)
+            | (isLong ? ZmtpFrameFlags.LongSize : ZmtpFrameFlags.None)
+            | (command ? ZmtpFrameFlags.Command : ZmtpFrameFlags.None)
+            | (ZmtpFrameFlags)flagsOverride);
         if (!isLong)
         {
             var result = new byte[2 + body.Length];

@@ -3,16 +3,11 @@ using System.Buffers;
 namespace ZmqSharp.Messages;
 
 /// <summary>
-/// Common contract for assembled messages: frame count, per-frame access, and
-/// the whole payload. A frame is contiguous unless it spans several segments.
+/// Common contract for assembled messages: a read-only list of frames with a
+/// zero-copy contiguous-frame probe. A frame is contiguous unless it spans
+/// several segments.
 /// </summary>
-public interface IZMessage : IDisposable
+public interface IZMessage : IReadOnlyList<ReadOnlySequence<byte>>, IDisposable
 {
-    int FrameCount { get; }
-
-    ReadOnlySequence<byte> GetFrame(int index);
-
     bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory);
-
-    ReadOnlySequence<byte> Payload { get; }
 }

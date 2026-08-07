@@ -12,15 +12,13 @@ public sealed class ZmtpFrameEncoder(Stream stream)
 {
     private readonly byte[] header = new byte[9];
 
+    /// <summary>ZMTP 3.0 greeting with the NULL mechanism; fixed wire constant.</summary>
+    internal static readonly byte[] NullGreeting = BuildNullGreeting();
+
     /// <summary>Writes the 64-byte ZMTP 3.0 greeting (NULL mechanism).</summary>
     public async ValueTask WriteGreetingAsync(CancellationToken token = default)
     {
-        var greeting = new byte[64];
-        greeting[0] = 0xFF;
-        greeting[9] = 0x7F;
-        greeting[10] = 3;
-        "NULL"u8.CopyTo(greeting.AsSpan(12, 4));
-        await stream.WriteAsync(greeting, token);
+        await stream.WriteAsync(NullGreeting, token);
     }
 
     /// <summary>Writes a command frame (body = name + NUL + data, e.g. READY).</summary>
@@ -29,13 +27,13 @@ public sealed class ZmtpFrameEncoder(Stream stream)
         long length = body.Length;
         if (length > 255)
         {
-            header[0] = 0b0110; // command + long size
+            header[0] = (byte)(ZmtpFrameFlags.Command | ZmtpFrameFlags.LongSize);
             BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1, 8), length);
             await stream.WriteAsync(header.AsMemory(0, 9), token);
         }
         else
         {
-            header[0] = 0b0100; // command
+            header[0] = (byte)ZmtpFrameFlags.Command;
             header[1] = (byte)length;
             await stream.WriteAsync(header.AsMemory(0, 2), token);
         }
@@ -45,33 +43,67 @@ public sealed class ZmtpFrameEncoder(Stream stream)
 
     public async ValueTask WriteMessageAsync(IZMessage message, CancellationToken token = default)
     {
-        for (int i = 0; i < message.FrameCount; i++)
+        if (message is ZMessage single)
         {
-            bool more = i < message.FrameCount - 1;
-            await WriteFrameAsync(message.GetFrame(i), more, token);
+            await WriteSingleMessageAsync(single, token);
+            return;
+        }
+
+        for (int i = 0; i < message.Count; i++)
+        {
+            bool more = i < message.Count - 1;
+            await WriteFrameAsync(message[i], more, token);
         }
     }
 
     public async ValueTask WriteFrameAsync(ReadOnlySequence<byte> frame, bool more, CancellationToken token = default)
     {
-        long length = frame.Length;
+        await WriteFrameHeaderAsync(frame.Length, more, token);
+        foreach (var memory in frame)
+        {
+            await stream.WriteAsync(memory, token);
+        }
+    }
+
+    private async ValueTask WriteSingleMessageAsync(ZMessage message, CancellationToken token)
+    {
+        var length = 0L;
+        for (var i = 0; i < message.SegmentCount; i++)
+        {
+            length += message.GetSegment(i).Memory.Length;
+        }
+
+        await WriteFrameHeaderAsync(length, more: false, token);
+        for (var i = 0; i < message.SegmentCount; i++)
+        {
+            await stream.WriteAsync(message.GetSegment(i).Memory, token);
+        }
+    }
+
+    private async ValueTask WriteFrameHeaderAsync(long length, bool more, CancellationToken token)
+    {
         bool isLong = length > 255;
         if (isLong)
         {
-            header[0] = (byte)((more ? 0b0001 : 0) | 0b0010);
+            header[0] = (byte)((more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None) | ZmtpFrameFlags.LongSize);
             BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1, 8), length);
             await stream.WriteAsync(header.AsMemory(0, 9), token);
         }
         else
         {
-            header[0] = (byte)(more ? 0b0001 : 0);
+            header[0] = (byte)(more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None);
             header[1] = (byte)length;
             await stream.WriteAsync(header.AsMemory(0, 2), token);
         }
+    }
 
-        foreach (var memory in frame)
-        {
-            await stream.WriteAsync(memory, token);
-        }
+    private static byte[] BuildNullGreeting()
+    {
+        var greeting = new byte[64];
+        greeting[0] = 0xFF;
+        greeting[9] = 0x7F;
+        greeting[10] = 3;
+        "NULL"u8.CopyTo(greeting.AsSpan(12, 4));
+        return greeting;
     }
 }

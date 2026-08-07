@@ -62,9 +62,9 @@ public sealed class ZSocketTests
         }
 
         var received = echo ?? throw new InvalidOperationException("no echo received within timeout");
-        received.FrameCount.Should().Be(2);
-        received.GetFrame(0).ToArray().Should().Equal(frames[0]);
-        received.GetFrame(1).ToArray().Should().Equal(frames[1]);
+        received.Count.Should().Be(2);
+        received[0].ToArray().Should().Equal(frames[0]);
+        received[1].ToArray().Should().Equal(frames[1]);
         received.Dispose();
 
         cts.Cancel();

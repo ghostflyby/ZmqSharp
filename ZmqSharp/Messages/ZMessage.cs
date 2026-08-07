@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections;
 
 namespace ZmqSharp.Messages;
 
@@ -26,7 +27,7 @@ public sealed class ZMessage : IZMessage
         return new ZMessage(new ZBufferRef(data, data));
     }
 
-    public int FrameCount
+    public int Count
     {
         get
         {
@@ -35,17 +36,73 @@ public sealed class ZMessage : IZMessage
         }
     }
 
-    public ReadOnlySequence<byte> GetFrame(int index)
+    public ReadOnlySequence<byte> this[int index]
+    {
+        get
+        {
+            ThrowIfDisposed();
+            ArgumentOutOfRangeException.ThrowIfNotEqual(index, 0);
+
+            return more is null
+                ? new ReadOnlySequence<byte>(first.Memory)
+                : BuildSequence();
+        }
+    }
+
+    public Enumerator GetEnumerator()
     {
         ThrowIfDisposed();
-        if (index != 0)
+        return new Enumerator(this);
+    }
+
+    IEnumerator<ReadOnlySequence<byte>> IEnumerable<ReadOnlySequence<byte>>.GetEnumerator() => GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    /// <summary>Struct enumerator: zero allocation for foreach.</summary>
+    public struct Enumerator : IEnumerator<ReadOnlySequence<byte>>
+    {
+        private readonly ZMessage message;
+        private int state;
+
+        internal Enumerator(ZMessage message)
         {
-            throw new ArgumentOutOfRangeException(nameof(index));
+            this.message = message;
+            state = 0;
         }
 
-        return more is null
-            ? new ReadOnlySequence<byte>(first.Memory)
-            : BuildSequence();
+        public ReadOnlySequence<byte> Current
+        {
+            get
+            {
+                if (state != 1)
+                {
+                    throw new InvalidOperationException("enumeration has not started or has already finished");
+                }
+
+                return message[0];
+            }
+        }
+
+        object IEnumerator.Current => Current;
+
+        public bool MoveNext()
+        {
+            if (state == 0)
+            {
+                state = 1;
+                return true;
+            }
+
+            state = 2;
+            return false;
+        }
+
+        public void Reset() => state = 0;
+
+        public void Dispose()
+        {
+        }
     }
 
     public bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory)
@@ -61,32 +118,49 @@ public sealed class ZMessage : IZMessage
         return true;
     }
 
-    public ReadOnlySequence<byte> Payload => GetFrame(0);
+    internal int SegmentCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return 1 + (more?.Length ?? 0);
+        }
+    }
+
+    internal ZBufferRef GetSegment(int index)
+    {
+        ThrowIfDisposed();
+        if (index == 0)
+        {
+            return first;
+        }
+
+        if (more is not null && index <= more.Length)
+        {
+            return more[index - 1];
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(index));
+    }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref disposed, 1) == 0)
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        first.Release();
+        if (more is null) return;
+        foreach (var segment in more)
         {
-            first.Release();
-            if (more is not null)
-            {
-                foreach (var segment in more)
-                {
-                    segment.Release();
-                }
-            }
+            segment.Release();
         }
     }
 
     private ReadOnlySequence<byte> BuildSequence()
     {
         var segments = new List<ReadOnlyMemory<byte>>(1 + (more?.Length ?? 0)) { first.Memory };
-        if (more is not null)
+        if (more is null) return ZSequence.Build([.. segments]);
+        foreach (var segment in more)
         {
-            foreach (var segment in more)
-            {
-                segments.Add(segment.Memory);
-            }
+            segments.Add(segment.Memory);
         }
 
         return ZSequence.Build([.. segments]);

@@ -48,4 +48,23 @@ public sealed class ZmtpFrameEncoderTests
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal(payload);
     }
+
+    [Fact]
+    public async Task SegmentedSingleFrame_RoundTripsAsOneFrame()
+    {
+        using var message = MessageFactory.SegmentedFrame("hel"u8.ToArray(), "lo"u8.ToArray(), "!"u8.ToArray());
+        using var stream = new MemoryStream();
+        await stream.WriteAsync(ZmtpTestData.Greeting());
+        await stream.WriteAsync(ZmtpTestData.Ready());
+        var encoder = new ZmtpFrameEncoder(stream);
+        await encoder.WriteMessageAsync(message);
+        stream.Position = 0;
+
+        using var connection = new ZConnection(stream);
+        var recorder = new FrameRecorder();
+        await ZmtpTestRunner.RunParserAsync(connection, recorder);
+
+        recorder.Frames.Should().HaveCount(1);
+        recorder.Frames[0].Should().Equal("hello!"u8.ToArray());
+    }
 }

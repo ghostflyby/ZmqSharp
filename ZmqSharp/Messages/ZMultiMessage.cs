@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections;
 
 namespace ZmqSharp.Messages;
 
@@ -14,7 +15,7 @@ public sealed class ZMultiMessage : IZMessage
 
     internal ZMultiMessage(ZBufferRef[] frames) => this.frames = frames;
 
-    public int FrameCount
+    public int Count
     {
         get
         {
@@ -23,15 +24,74 @@ public sealed class ZMultiMessage : IZMessage
         }
     }
 
-    public ReadOnlySequence<byte> GetFrame(int index)
+    public ReadOnlySequence<byte> this[int index]
+    {
+        get
+        {
+            ThrowIfDisposed();
+            if (index < 0 || index >= frames.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+
+            return new ReadOnlySequence<byte>(frames[index].Memory);
+        }
+    }
+
+    public Enumerator GetEnumerator()
     {
         ThrowIfDisposed();
-        if (index < 0 || index >= frames.Length)
+        return new Enumerator(frames);
+    }
+
+    IEnumerator<ReadOnlySequence<byte>> IEnumerable<ReadOnlySequence<byte>>.GetEnumerator() => GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    /// <summary>Struct enumerator: zero allocation for foreach.</summary>
+    public struct Enumerator : IEnumerator<ReadOnlySequence<byte>>
+    {
+        private readonly ZBufferRef[] frames;
+        private int index;
+
+        internal Enumerator(ZBufferRef[] frames)
         {
-            throw new ArgumentOutOfRangeException(nameof(index));
+            this.frames = frames;
+            index = -1;
         }
 
-        return new ReadOnlySequence<byte>(frames[index].Memory);
+        public ReadOnlySequence<byte> Current
+        {
+            get
+            {
+                if (index < 0 || index >= frames.Length)
+                {
+                    throw new InvalidOperationException("enumeration has not started or has already finished");
+                }
+
+                return new ReadOnlySequence<byte>(frames[index].Memory);
+            }
+        }
+
+        object IEnumerator.Current => Current;
+
+        public bool MoveNext()
+        {
+            if (index + 1 < frames.Length)
+            {
+                index++;
+                return true;
+            }
+
+            index = frames.Length;
+            return false;
+        }
+
+        public void Reset() => index = -1;
+
+        public void Dispose()
+        {
+        }
     }
 
     public bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory)
@@ -47,36 +107,18 @@ public sealed class ZMultiMessage : IZMessage
         return true;
     }
 
-    public ReadOnlySequence<byte> Payload
-    {
-        get
-        {
-            ThrowIfDisposed();
-            if (frames.Length == 1)
-            {
-                return new ReadOnlySequence<byte>(frames[0].Memory);
-            }
-
-            return ZSequence.Build([.. frames.Select(frame => frame.Memory)]);
-        }
-    }
-
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref disposed, 1) == 0)
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        foreach (var frame in frames)
         {
-            foreach (var frame in frames)
-            {
-                frame.Release();
-            }
+            frame.Release();
         }
     }
 
     private void ThrowIfDisposed()
     {
-        if (Volatile.Read(ref disposed) == 1)
-        {
-            throw new ObjectDisposedException(nameof(ZMultiMessage));
-        }
+        if (Volatile.Read(ref disposed) != 1) return;
+        throw new ObjectDisposedException(nameof(ZMultiMessage));
     }
 }
