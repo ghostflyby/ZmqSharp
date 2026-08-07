@@ -3,7 +3,7 @@ using FluentAssertions;
 using Xunit;
 using ZmqSharp.Messages;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Messages;
 
 public sealed class ZMessageTests
 {

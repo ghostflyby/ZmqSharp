@@ -10,7 +10,7 @@ namespace ZmqSharp.Zmtp;
 /// policy-driven materialization, and dual-mode delivery. Call ParseAsync once
 /// per connection; borrowed mode reuses a scratch buffer with zero steady-state
 /// allocation. EOF is treated as connection close (partial data is discarded and
-/// never delivered); protocol violations throw ZeroMQProtocolException.
+/// never delivered); protocol violations throw ZeroMqProtocolException.
 /// </summary>
 public sealed class ZmtpParser : IDisposable
 {
@@ -18,7 +18,7 @@ public sealed class ZmtpParser : IDisposable
     private const int InitialScratchSize = 4096;
     private const int ScratchShrinkThreshold = 1 << 20;
 
-    private readonly IZByteSource source;
+    private readonly Stream stream;
     private readonly ZReceiveOptions options;
     private readonly MemoryPool<byte> pool;
     private readonly byte[] headerBuffer = new byte[9];
@@ -39,11 +39,11 @@ public sealed class ZmtpParser : IDisposable
     private static TaskCompletionSource CreateGate()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public ZmtpParser(IZByteSource source, ZReceiveOptions options, MemoryPool<byte>? pool = null)
+    public ZmtpParser(Stream stream, ZReceiveOptions options, MemoryPool<byte>? pool = null)
     {
-        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(options);
-        this.source = source;
+        this.stream = stream;
         this.options = options;
         this.pool = pool ?? MemoryPool<byte>.Shared;
     }
@@ -322,7 +322,7 @@ public sealed class ZmtpParser : IDisposable
             return true;
         }
 
-        var data = ownedData!;
+        var data = ownedData ?? throw new InvalidOperationException("message data is not initialized");
         var contiguous = action.Contiguous && length <= options.ContiguousFrameLimit;
         if (contiguous)
         {
@@ -402,7 +402,7 @@ public sealed class ZmtpParser : IDisposable
             return;
         }
 
-        var data = ownedData!;
+        var data = ownedData ?? throw new InvalidOperationException("message data is not initialized");
         ownedData = null;
         var message = new ZMessage(data);
         if (!sink.OnOwned(message, token))
@@ -426,7 +426,7 @@ public sealed class ZmtpParser : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await source.ReadAsync(target[filled..], token);
+            var count = await stream.ReadAsync(target[filled..], token);
             if (count == 0)
             {
                 return false;

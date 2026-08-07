@@ -6,24 +6,51 @@ using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
 
-/// <summary>In-memory byte source; caps the chunk size to simulate partial TCP reads.</summary>
-internal sealed class MemoryByteSource(byte[] data, int maxChunkSize = 0) : IZByteSource
+/// <summary>In-memory stream; caps the chunk size to simulate partial TCP reads.</summary>
+internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : Stream
 {
     private int position;
 
-    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => data.Length;
+
+    public override long Position
+    {
+        get => position;
+        set => throw new NotSupportedException();
+    }
+
+    public override void Flush()
+    {
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+        => ReadInternal(buffer.AsSpan(offset, count));
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(ReadInternal(buffer.Span));
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    private int ReadInternal(Span<byte> buffer)
     {
         if (position >= data.Length)
         {
-            return ValueTask.FromResult(0);
+            return 0;
         }
 
         var available = data.Length - position;
         var chunk = maxChunkSize > 0 ? Math.Min(maxChunkSize, available) : available;
         var count = Math.Min(buffer.Length, chunk);
-        data.AsMemory(position, count).CopyTo(buffer);
+        data.AsSpan(position, count).CopyTo(buffer);
         position += count;
-        return ValueTask.FromResult(count);
+        return count;
     }
 }
 

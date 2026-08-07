@@ -4,7 +4,7 @@ using Xunit;
 using ZmqSharp.Messages;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Zmtp;
 
 public sealed class ZmtpParserTests
 {
@@ -14,12 +14,12 @@ public sealed class ZmtpParserTests
     public async Task SingleFrame_Pooled_IsDelivered()
     {
         var payload = "hello"u8.ToArray();
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -35,7 +35,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task Multipart_IsAssembledAtLastFrame()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("A"u8.ToArray(), more: true),
             ZmtpTestData.Frame("B"u8.ToArray(), more: true),
@@ -43,7 +43,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -65,11 +65,11 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("A"u8.ToArray(), more: true),
             ZmtpTestData.Frame("B"u8.ToArray()));
-        var source = new MemoryByteSource(wire, maxChunkSize: 1);
+        var source = new ChunkedMemoryStream(wire, maxChunkSize: 1);
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -85,14 +85,14 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task BorrowedMode_DeliversFrames_ValidDuringCallback()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("ping"u8.ToArray(), more: true),
             ZmtpTestData.Frame("pong"u8.ToArray())));
         using var parser = new ZmtpParser(source, new ZReceiveOptions { Policy = ZReceiveMode.Borrowed });
         var captured = new List<byte[]>();
 
-        await parser.ParseAsync(new ZCallbackSink(borrowed: (view, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(borrowed: (view, _) =>
         {
             view.FrameCount.Should().Be(2);
             captured.Add(view.GetFrame(0).ToArray());
@@ -110,14 +110,14 @@ public sealed class ZmtpParserTests
     public async Task PooledMessages_ReturnBuffersOnDispose()
     {
         using var pool = new CountingMemoryPool();
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("one"u8.ToArray()),
             ZmtpTestData.Frame("two"u8.ToArray())));
         var parser = new ZmtpParser(source, new ZReceiveOptions(), pool);
         var messages = new List<ZMessage>();
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             messages.Add(message);
             return true;
@@ -137,18 +137,18 @@ public sealed class ZmtpParserTests
     public async Task Decide_ReturningOwned_DeliversOwnedMessage()
     {
         using var pool = new CountingMemoryPool();
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame("keep"u8.ToArray())));
         var parser = new ZmtpParser(source, new ZReceiveOptions(), pool);
         ZMessage? received = null;
 
         var sink = new ZCallbackSink(
-            owned: (message, ct) =>
+            owned: (message, _) =>
             {
                 received = message;
                 return true;
             },
-            decide: static (in ZReceiveContext context) =>
+            decide: static (in ZReceiveContext _) =>
                 new ZReceiveAction { Mode = ZReceiveMode.Owned, Contiguous = true });
 
         await parser.ParseAsync(sink);
@@ -165,12 +165,12 @@ public sealed class ZmtpParserTests
     public async Task FrameWithinLimit_IsContiguous()
     {
         var payload = Payload(100);
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -186,12 +186,12 @@ public sealed class ZmtpParserTests
     public async Task FrameOverLimit_IsSegmented()
     {
         var payload = Payload(100_000);
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -207,12 +207,12 @@ public sealed class ZmtpParserTests
     public async Task LimitZero_SmallFrame_FitsSingleBlock()
     {
         var payload = Payload(100);
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions { ContiguousFrameLimit = 0 });
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -228,12 +228,12 @@ public sealed class ZmtpParserTests
     public async Task LimitZero_LargeFrame_IsSegmented()
     {
         var payload = Payload(20_000);
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions { ContiguousFrameLimit = 0 });
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -249,12 +249,12 @@ public sealed class ZmtpParserTests
     public async Task LongFrame_IsDelivered()
     {
         var payload = Payload(300);
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         ZMessage? received = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             received = message;
             return true;
@@ -271,7 +271,7 @@ public sealed class ZmtpParserTests
     {
         var greeting = ZmtpTestData.Greeting();
         greeting[0] = 0x00;
-        using var parser = new ZmtpParser(new MemoryByteSource(greeting), new ZReceiveOptions());
+        using var parser = new ZmtpParser(new ChunkedMemoryStream(greeting), new ZReceiveOptions());
         var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
@@ -281,7 +281,7 @@ public sealed class ZmtpParserTests
     {
         var greeting = ZmtpTestData.Greeting();
         greeting[10] = 2;
-        using var parser = new ZmtpParser(new MemoryByteSource(greeting), new ZReceiveOptions());
+        using var parser = new ZmtpParser(new ChunkedMemoryStream(greeting), new ZReceiveOptions());
         var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
@@ -291,7 +291,7 @@ public sealed class ZmtpParserTests
     {
         var greeting = ZmtpTestData.Greeting();
         "CURVE"u8.CopyTo(greeting.AsSpan(12, 5));
-        using var parser = new ZmtpParser(new MemoryByteSource(greeting), new ZReceiveOptions());
+        using var parser = new ZmtpParser(new ChunkedMemoryStream(greeting), new ZReceiveOptions());
         var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
@@ -299,7 +299,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task ReservedFrameFlags_Throw()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], flagsOverride: 0b1000_0000)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
@@ -309,7 +309,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task CommandFrameWithMore_Throws()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], more: true, command: true)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
@@ -319,7 +319,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task ErrorCommandInHandshake_Throws()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>()
@@ -329,7 +329,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task CommandInsideMessage_Throws()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("A"u8.ToArray(), more: true),
             ZmtpTestData.Frame("PING"u8.ToArray(), command: true)));
@@ -341,14 +341,14 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task CommandFrameInTraffic_IsSkipped()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("PING"u8.ToArray(), command: true),
             ZmtpTestData.Frame("hello"u8.ToArray())));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         var delivered = 0;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             delivered++;
             message.Dispose();
@@ -361,7 +361,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task EmptySource_ReturnsCleanly()
     {
-        using var parser = new ZmtpParser(new MemoryByteSource([]), new ZReceiveOptions());
+        using var parser = new ZmtpParser(new ChunkedMemoryStream([]), new ZReceiveOptions());
         await parser.ParseAsync(new ZCallbackSink());
     }
 
@@ -373,10 +373,10 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Ready(),
             ZmtpTestData.Frame(new byte[10]));
         var truncated = wire[..^5];
-        using var parser = new ZmtpParser(new MemoryByteSource(truncated), new ZReceiveOptions());
+        using var parser = new ZmtpParser(new ChunkedMemoryStream(truncated), new ZReceiveOptions());
         var delivered = 0;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             delivered++;
             message.Dispose();
@@ -389,12 +389,12 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task EofAtBoundary_EndsAfterLastMessage()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame("last"u8.ToArray())));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
         var delivered = 0;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             delivered++;
             message.Dispose();
@@ -407,14 +407,14 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task BorrowedPause_PausesAndResumes()
     {
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("one"u8.ToArray()),
             ZmtpTestData.Frame("two"u8.ToArray())));
         using var parser = new ZmtpParser(source, new ZReceiveOptions { Policy = ZReceiveMode.Borrowed });
         var firstDelivered = new TaskCompletionSource();
         var frames = new List<byte[]>();
-        var sink = new ZCallbackSink(borrowed: (view, ct) =>
+        var sink = new ZCallbackSink(borrowed: (view, _) =>
         {
             frames.Add(view.GetFrame(0).ToArray());
             if (frames.Count == 1)
@@ -441,14 +441,14 @@ public sealed class ZmtpParserTests
     public async Task OwnedRejected_DisposesAndContinues()
     {
         using var pool = new CountingMemoryPool();
-        var source = new MemoryByteSource(ZmtpTestData.Concat(
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
             ZmtpTestData.Frame("a"u8.ToArray()),
             ZmtpTestData.Frame("b"u8.ToArray())));
         var parser = new ZmtpParser(source, new ZReceiveOptions(), pool);
         ZMessage? accepted = null;
 
-        await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
+        await parser.ParseAsync(new ZCallbackSink(owned: (message, _) =>
         {
             if (message.GetFrame(0).FirstSpan[0] == (byte)'a')
             {
