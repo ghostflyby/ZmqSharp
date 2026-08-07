@@ -22,6 +22,19 @@ public static class ZSocketExtensions
         }
     }
 
+    extension(ZQueueSocket socket)
+    {
+        public Task ConnectAsync(string endpoint, CancellationToken token = default)
+        {
+            return ConnectQueueCore(socket, endpoint, token);
+        }
+
+        public Task BindAsync(string endpoint, CancellationToken token = default)
+        {
+            return BindQueueCore(socket, endpoint, token);
+        }
+    }
+
     private static async Task ConnectAsyncCore(IZSocket socket, string endpoint, CancellationToken token)
     {
         var parsed = await ParseEndpointAsync(endpoint, token);
@@ -29,6 +42,18 @@ public static class ZSocketExtensions
     }
 
     private static async Task BindAsyncCore(IZSocket socket, string endpoint, CancellationToken token)
+    {
+        var parsed = await ParseEndpointAsync(endpoint, token);
+        await socket.BindAsync<EndPoint, SocketTransport>(parsed, token);
+    }
+
+    private static async Task ConnectQueueCore(ZQueueSocket socket, string endpoint, CancellationToken token)
+    {
+        var parsed = await ParseEndpointAsync(endpoint, token);
+        await socket.ConnectAsync<EndPoint, SocketTransport>(parsed, token);
+    }
+
+    private static async Task BindQueueCore(ZQueueSocket socket, string endpoint, CancellationToken token)
     {
         var parsed = await ParseEndpointAsync(endpoint, token);
         await socket.BindAsync<EndPoint, SocketTransport>(parsed, token);

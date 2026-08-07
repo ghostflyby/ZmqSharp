@@ -6,7 +6,6 @@ using FluentAssertions;
 using Xunit;
 using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
@@ -14,43 +13,18 @@ namespace ZmqSharp.Tests;
 public sealed class ZSocketTests
 {
     [Fact]
-    public async Task FairPolicy_RoundRobinsAcrossPeers()
-    {
-        using var connA = CreateConnection();
-        using var connB = CreateConnection();
-        var policy = new FairPolicy();
-        var peers = new List<ZConnection> { connA, connB };
-        using var message = ZMessage.FromOwned([1]);
-
-        policy.RouteOutbound(message, peers).Should().ContainSingle().Which.Should().BeSameAs(connA);
-        policy.RouteOutbound(message, peers).Should().ContainSingle().Which.Should().BeSameAs(connB);
-        policy.RouteOutbound(message, peers).Should().ContainSingle().Which.Should().BeSameAs(connA);
-    }
-
-    [Fact]
-    public async Task PairPolicy_RoutesToSinglePeer()
-    {
-        using var connA = CreateConnection();
-        var policy = new PairPolicy();
-        var peers = new List<ZConnection> { connA };
-        using var message = ZMessage.FromOwned([1]);
-
-        policy.RouteOutbound(message, peers).Should().ContainSingle().Which.Should().BeSameAs(connA);
-    }
-
-    [Fact]
     public async Task PairSocket_RoundTripsMultipartOverTcp()
     {
         var port = GetFreePort();
-        await using var server = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
-        await using var client = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
+        await using var server = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var client = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        var serverMessages = server.Messages ?? throw new InvalidOperationException("receive channel not configured");
-        var clientMessages = client.Messages ?? throw new InvalidOperationException("receive channel not configured");
+        var serverMessages = server.Messages;
+        var clientMessages = client.Messages;
         var echoTask = EchoAsync(server, serverMessages, cts.Token);
         byte[][] frames = ["ping"u8.ToArray(), "pong"u8.ToArray()];
 
@@ -82,9 +56,9 @@ public sealed class ZSocketTests
     {
         var portA = GetFreePort();
         var portB = GetFreePort();
-        await using var serverA = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
-        await using var serverB = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
-        await using var dealer = ZSocket.Create(ZSocketType.Dealer, new ZSocketOptions { ReceiveChannelCapacity = 16 });
+        await using var serverA = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var serverB = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var dealer = ZSocket.CreateQueue(ZSocketType.Dealer, new ZQueueSocketOptions { ReceiveCapacity = 16 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await serverA.BindAsync($"tcp://127.0.0.1:{portA}", cts.Token);
@@ -131,17 +105,16 @@ public sealed class ZSocketTests
     [Fact]
     public async Task Close_CompletesReceiveChannel()
     {
-        await using var socket = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 4 });
+        await using var socket = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 4 });
         await socket.CloseAsync();
-        var messages = socket.Messages ?? throw new InvalidOperationException("receive channel not configured");
-        messages.Completion.IsCompleted.Should().BeTrue();
+        socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
 
     [Fact]
     public async Task ProtocolError_CompletesChannelWithException()
     {
         var port = GetFreePort();
-        await using var server = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
+        await using var server = ZSocket.CreateQueue(ZSocketType.Pair, new ZQueueSocketOptions { ReceiveCapacity = 16 });
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
         using var raw = new TcpClient();
@@ -151,11 +124,11 @@ public sealed class ZSocketTests
         await stream.WriteAsync(badGreeting);
         await stream.FlushAsync();
 
-        var messages = server.Messages ?? throw new InvalidOperationException("receive channel not configured");
+        var messages = server.Messages;
         await FluentActions.Awaiting(() => messages.Completion).Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
-    private static async Task EchoAsync(IZSocket server, ChannelReader<IZMessage> messages, CancellationToken token)
+    private static async Task EchoAsync(ZQueueSocket server, ChannelReader<IZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
         {
@@ -163,9 +136,9 @@ public sealed class ZSocketTests
         }
     }
 
-    private static async Task DrainAsync(IZSocket socket, Action onMessage, CancellationToken token)
+    private static async Task DrainAsync(ZQueueSocket socket, Action onMessage, CancellationToken token)
     {
-        var messages = socket.Messages ?? throw new InvalidOperationException("receive channel not configured");
+        var messages = socket.Messages;
         await foreach (var message in messages.ReadAllAsync(token))
         {
             onMessage();
@@ -189,9 +162,6 @@ public sealed class ZSocketTests
             return null;
         }
     }
-
-    private static ZConnection CreateConnection()
-        => new(new MemoryStream());
 
     private static int GetFreePort()
     {

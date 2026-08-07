@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Threading.Channels;
 using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
@@ -8,16 +7,16 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Sockets;
 
 /// <summary>
-/// Shared socket mechanics: calls the transport, stores connections, drives the
-/// handshake externally, and orchestrates policy dispatch and backpressure.
+/// Shared socket mechanics: calls the transport, stores connections, drives
+/// the handshake externally, and delivers borrowed frames to the OnFrame
+/// callback. Socket types differ only in <see cref="RouteOutbound"/>.
 /// </summary>
-internal sealed class ZSocketBase : IZSocket
+internal abstract class ZSocketBase : IZSocket
 {
     private static readonly byte[] ReadyCommand = [.. "READY\0"u8];
 
     private readonly record struct Peer(IZConnection Connection, string Endpoint, ZmtpParser Parser);
 
-    private readonly IZSchedulingPolicy policy;
     private readonly MemoryPool<byte> pool;
     private readonly Lock stateLock = new();
     private readonly List<Peer> peers = [];
@@ -25,30 +24,19 @@ internal sealed class ZSocketBase : IZSocket
     private readonly List<Task> backgroundTasks = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
     private readonly CancellationTokenSource cts = new();
-    private readonly Channel<IZMessage>? receiveChannel;
-    private readonly Channel<IZMessage>? sendChannel;
-    private readonly Task? sendPump;
     private ZFrameHandler? onFrame;
+    private Action<Exception?>? peerEnded;
     private int closed;
 
-    internal ZSocketBase(IZSchedulingPolicy policy, ZSocketOptions options)
+    protected ZSocketBase(ZSocketOptions options)
     {
-        this.policy = policy;
         pool = options.Pool ?? MemoryPool<byte>.Shared;
-
-        if (options.ReceiveChannelCapacity is { } receiveCapacity)
-        {
-            receiveChannel = Channel.CreateBounded<IZMessage>(
-                new BoundedChannelOptions(receiveCapacity) { SingleReader = true });
-        }
-
-        if (options.SendChannelCapacity is { } sendCapacity)
-        {
-            sendChannel = Channel.CreateBounded<IZMessage>(
-                new BoundedChannelOptions(sendCapacity));
-            sendPump = SendPumpAsync(cts.Token);
-        }
     }
+
+    /// <summary>Selects the outbound connection(s) for a message; empty = drop.</summary>
+    protected abstract IReadOnlyList<IZConnection> RouteOutbound(
+        IZMessage message,
+        IReadOnlyList<IZConnection> peers);
 
     public event ZFrameHandler? OnFrame
     {
@@ -68,9 +56,23 @@ internal sealed class ZSocketBase : IZSocket
         }
     }
 
-    public ChannelReader<IZMessage>? Messages => receiveChannel?.Reader;
-
-    public ChannelWriter<IZMessage>? Outbound => sendChannel?.Writer;
+    public event Action<Exception?>? PeerEnded
+    {
+        add
+        {
+            lock (stateLock)
+            {
+                peerEnded += value;
+            }
+        }
+        remove
+        {
+            lock (stateLock)
+            {
+                peerEnded -= value;
+            }
+        }
+    }
 
     public async Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
@@ -143,13 +145,21 @@ internal sealed class ZSocketBase : IZSocket
         await CloseAsync(CancellationToken.None);
     }
 
+    public void ResumePaused()
+    {
+        while (paused.TryDequeue(out var parser))
+        {
+            parser.Resume();
+        }
+    }
+
     public async ValueTask SendAsync(IZMessage message, CancellationToken token = default)
     {
         ThrowIfClosed();
         ArgumentNullException.ThrowIfNull(message);
         try
         {
-            var targets = policy.RouteOutbound(message, SnapshotPeers());
+            var targets = RouteOutbound(message, SnapshotPeers());
             foreach (var target in targets)
             {
                 await target.SendAsync(message, token);
@@ -170,12 +180,6 @@ internal sealed class ZSocketBase : IZSocket
         await SendAsync(message, token);
     }
 
-    public bool TrySend(IZMessage message)
-    {
-        ThrowIfClosed();
-        return sendChannel?.Writer.TryWrite(message) ?? false;
-    }
-
     private ValueTask AcceptConnection(IZConnection connection, CancellationToken token)
     {
         AddConnection(connection, string.Empty);
@@ -185,9 +189,7 @@ internal sealed class ZSocketBase : IZSocket
     private void AddConnection(IZConnection connection, string endpoint)
     {
         var parser = new ZmtpParser(connection, pool);
-        var accumulator = new List<ZBufferRef>();
-        connection.SetFrameHandler((frame, ct) => DeliverFrame(parser, frame, accumulator));
-        connection.SetConnectionEndedHandler(() => Release(accumulator));
+        connection.SetFrameHandler((frame, ct) => DeliverFrame(parser, frame));
 
         lock (stateLock)
         {
@@ -200,6 +202,7 @@ internal sealed class ZSocketBase : IZSocket
 
     private async Task RunConnectionAsync(IZConnection connection, ZmtpParser parser)
     {
+        Exception? failure = null;
         try
         {
             await connection.WriteAsync(ZmtpFrameEncoder.NullGreeting, cts.Token);
@@ -214,11 +217,13 @@ internal sealed class ZSocketBase : IZSocket
         }
         catch (ZeroMqProtocolException ex)
         {
-            Fail(ex);
+            failure = ex;
+            TrackBackground(StopAsync(CancellationToken.None));
         }
         finally
         {
             connection.OnConnectionEnded();
+            RaisePeerEnded(failure);
             lock (stateLock)
             {
                 peers.RemoveAll(peer => peer.Connection == connection);
@@ -229,12 +234,12 @@ internal sealed class ZSocketBase : IZSocket
         connection.Dispose();
     }
 
-    private bool DeliverFrame(ZmtpParser parser, ZFrame frame, List<ZBufferRef> accumulator)
+    private bool DeliverFrame(ZmtpParser parser, ZFrame frame)
     {
         var keepGoing = RaiseOnFrame(frame);
-        if (receiveChannel is not null)
+        if (!keepGoing)
         {
-            keepGoing &= Accumulate(parser, frame, accumulator);
+            paused.Enqueue(parser);
         }
 
         return keepGoing;
@@ -262,65 +267,15 @@ internal sealed class ZSocketBase : IZSocket
         return keepGoing;
     }
 
-    private bool Accumulate(ZmtpParser parser, ZFrame frame, List<ZBufferRef> accumulator)
+    private void RaisePeerEnded(Exception? failure)
     {
-        var owner = pool.Rent(frame.Memory.Length);
-        frame.Memory.CopyTo(owner.Memory);
-        accumulator.Add(new ZBufferRef(owner, owner.Memory[..frame.Memory.Length]));
-
-        if (frame.More)
+        Action<Exception?>? handler;
+        lock (stateLock)
         {
-            return true;
+            handler = peerEnded;
         }
 
-        IZMessage message = accumulator.Count == 1
-            ? new ZMessage(accumulator[0])
-            : new ZMultiMessage([.. accumulator]);
-        accumulator.Clear();
-
-        if (receiveChannel!.Writer.TryWrite(message))
-        {
-            return true;
-        }
-
-        message.Dispose();
-        paused.Enqueue(parser);
-        TrackBackground(ResumePausedAsync());
-        return false;
-    }
-
-    private void Release(List<ZBufferRef> accumulator)
-    {
-        foreach (var frame in accumulator)
-        {
-            frame.Release();
-        }
-
-        accumulator.Clear();
-    }
-
-    private async Task SendPumpAsync(CancellationToken token)
-    {
-        var channel = sendChannel ?? throw new InvalidOperationException("send channel is not configured");
-        await foreach (var message in channel.Reader.ReadAllAsync(token))
-        {
-            await SendAsync(message, token);
-        }
-    }
-
-    private async Task ResumePausedAsync()
-    {
-        var channel = receiveChannel;
-        if (channel is null)
-        {
-            return;
-        }
-
-        while (paused.TryDequeue(out var parser))
-        {
-            await channel.Writer.WaitToWriteAsync(cts.Token);
-            parser.Resume();
-        }
+        handler?.Invoke(failure);
     }
 
     private void TrackBackground(Task task)
@@ -356,13 +311,6 @@ internal sealed class ZSocketBase : IZSocket
         }
     }
 
-    private void Fail(ZeroMqProtocolException ex)
-    {
-        receiveChannel?.Writer.TryComplete(ex);
-        sendChannel?.Writer.TryComplete(ex);
-        TrackBackground(StopAsync(CancellationToken.None));
-    }
-
     private async Task StopAsync(CancellationToken token)
     {
         if (Interlocked.Exchange(ref closed, 1) != 0)
@@ -370,7 +318,7 @@ internal sealed class ZSocketBase : IZSocket
             return;
         }
 
-        cts.Cancel();
+        await cts.CancelAsync();
         List<IZTransport> listenerSnapshot;
         lock (stateLock)
         {
@@ -381,19 +329,6 @@ internal sealed class ZSocketBase : IZSocket
         foreach (var listener in listenerSnapshot)
         {
             listener.Dispose();
-        }
-
-        receiveChannel?.Writer.TryComplete();
-        sendChannel?.Writer.TryComplete();
-        if (sendPump is not null)
-        {
-            try
-            {
-                await sendPump;
-            }
-            catch (OperationCanceledException)
-            {
-            }
         }
 
         cts.Dispose();
@@ -409,9 +344,7 @@ internal sealed class ZSocketBase : IZSocket
 
     private void ThrowIfClosed()
     {
-        if (Volatile.Read(ref closed) == 1)
-        {
-            throw new ObjectDisposedException(nameof(ZSocketBase));
-        }
+        if (Volatile.Read(ref closed) != 1) return;
+        throw new ObjectDisposedException(nameof(ZSocketBase));
     }
 }

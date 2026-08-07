@@ -10,4 +10,11 @@ namespace ZmqSharp.Messages;
 public interface IZMessage : IReadOnlyList<ReadOnlySequence<byte>>, IDisposable
 {
     bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory);
+
+    /// <summary>
+    /// Gets the backing array of an owned, single-segment frame without
+    /// copying. Returns false for pooled frames and for segmented frames.
+    /// The array may be longer than the frame's content.
+    /// </summary>
+    bool TryGetOwnedArray(int index, out byte[] array);
 }

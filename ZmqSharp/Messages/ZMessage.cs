@@ -109,6 +109,19 @@ public sealed class ZMessage : IZMessage
         return true;
     }
 
+    public bool TryGetOwnedArray(int index, out byte[] array)
+    {
+        ThrowIfDisposed();
+        if (index != 0 || more is not null || first.Owner is not byte[] owned)
+        {
+            array = [];
+            return false;
+        }
+
+        array = owned;
+        return true;
+    }
+
     internal int SegmentCount
     {
         get

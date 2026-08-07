@@ -104,4 +104,52 @@ public sealed class ZMessageTests
         message.Dispose();
         pool.Outstanding.Should().Be(0);
     }
+
+    [Fact]
+    public void TryGetOwnedArray_ReturnsBackingArrayForOwnedSingleFrame()
+    {
+        byte[] source = [1, 2, 3];
+        using var message = ZMessage.FromOwned(source);
+
+        message.TryGetOwnedArray(0, out var array).Should().BeTrue();
+        array.Should().BeSameAs(source);
+    }
+
+    [Fact]
+    public void TryGetOwnedArray_ReturnsEachOwnedMultipartFrame()
+    {
+        using var message = MessageFactory.Multipart("ab"u8.ToArray(), "cde"u8.ToArray());
+
+        message.TryGetOwnedArray(0, out var first).Should().BeTrue();
+        first.Should().Equal("ab"u8.ToArray());
+        message.TryGetOwnedArray(1, out var second).Should().BeTrue();
+        second.Should().Equal("cde"u8.ToArray());
+    }
+
+    [Fact]
+    public void TryGetOwnedArray_FailsForPooledFrame()
+    {
+        using var pool = new CountingMemoryPool();
+        using var message = MessageFactory.PooledSingleFrame(pool, "x"u8.ToArray());
+
+        message.TryGetOwnedArray(0, out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetOwnedArray_FailsForSegmentedFrame()
+    {
+        using var message = MessageFactory.SegmentedFrame([1], [2]);
+
+        message.TryGetOwnedArray(0, out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetOwnedArray_ThrowsAfterDispose()
+    {
+        var message = ZMessage.FromOwned([1]);
+        message.Dispose();
+
+        var act = () => message.TryGetOwnedArray(0, out _);
+        act.Should().Throw<ObjectDisposedException>();
+    }
 }

@@ -24,14 +24,14 @@ Application
   +-- IZTransport        pluggable bottom layer (connect / bind / accept)
 ```
 
-Socket types differ only in the selection policy over per-peer queues (0004
-section 1). The callback is the low-level receive contract and stays
-independent of the queue tier.
+Socket types are subtypes of a shared base (libzmq-style): each type is its
+own class implementing its routing and aggregation semantics; the callback is
+the low-level receive contract and stays independent of the queue tier.
 
 ## 2. IZSocket (Low-Level Primitive)
 
 ```csharp
-public interface IZSocket : IAsyncDisposable
+public interface IZSocketBase : IAsyncDisposable
 {
     Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
@@ -43,26 +43,36 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
     Task CloseAsync(CancellationToken token = default);
 
-    // Receive: borrowed streaming frame callback (low-level).
-    event ZFrameHandler? OnFrame;
-
     // Send: direct, ownership transfers.
     ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
     ValueTask SendAsync(IZMessage message, CancellationToken token = default);
 }
+
+public interface IZSocket : IZSocketBase
+{
+    // Receive: borrowed streaming frame callback (low-level).
+    event ZFrameHandler? OnFrame;
+    event Action<Exception?>? PeerEnded;
+    void ResumePaused();
+}
 ```
 
-- `OnFrame` delivers each frame borrowed (valid only during the call); a
+- `IZSocketBase` is the small common contract (endpoints + direct send) shared
+  by every socket surface.
+- `IZSocket` adds the borrowed receive surface; `OnFrame` delivers each frame
+  borrowed (valid only during the call); a
   multipart message arrives as consecutive frames until `More` is false.
-  Returning false pauses the receive pump.
-- Send is direct and synchronous-with-ownership: the socket routes through the
-  policy and disposes the message after the last peer send.
+  Returning false pauses the receive pump; `PeerEnded` reports connection
+  teardown; `ResumePaused` resumes paused pumps.
+- Send is direct and synchronous-with-ownership: the socket type's
+  `RouteOutbound` selects the target connection(s) and the message is disposed
+  after the last peer send.
 - No queues on this interface; queue semantics live in `ZQueueSocket`.
 
 ## 3. ZQueueSocket (High-Level Main API)
 
 ```csharp
-public sealed class ZQueueSocket : IAsyncDisposable
+public sealed class ZQueueSocket : IZSocketBase
 {
     public ZQueueSocket(IZSocket socket, ZQueueSocketOptions? options = null);
 
@@ -92,8 +102,9 @@ public sealed class ZQueueSocketOptions
 ## 4. Per-Peer Queue Model
 
 The queue model is defined by 0004: each peer owns a bounded receive queue and
-a bounded send queue; socket types are selection policies over these queues.
-This document adopts that model without restating it.
+a bounded send queue; socket types implement outbound selection and inbound
+aggregation over these queues. This document adopts that model without
+restating it.
 
 ## 5. Transport and Connection Separation
 
@@ -124,8 +135,9 @@ As implemented:
 
 ## 7. Send Path
 
-- Direct send on `IZSocket`: routes through the selection policy, writes each
-  selected connection, disposes the message after the last peer send.
+- Direct send on `IZSocket`: the socket type's `RouteOutbound` selects the
+  connection(s), writes each selected connection, disposes the message after
+  the last peer send.
 - Queue tier: `Outbound` is bounded; the socket routes each message into the
   selected peers' send queues, drained by one pump per peer. A full send
   queue is handled per socket type (PUB drops, DEALER picks another peer).
@@ -142,15 +154,20 @@ public static class ZSocket
 }
 ```
 
-`ZSocketType` (v1): `Pair`, `Dealer`. Later: `Router`, `Req`, `Rep`, `Pub`,
-`Sub`, `Push`, `Pull`. Each type maps to a selection policy (0004 section 1
-table).
+Internally every type is a subtype of `ZSocketBase` overriding
+`RouteOutbound` (libzmq-style `pair_t`, `dealer_t`, ...). v1:
+`ZPairSocket`, `ZDealerSocket`. Later: `Router`, `Req`, `Rep`, `Pub`, `Sub`,
+`Push`, `Pull`, each adding its own outbound selection and inbound
+aggregation (0004 section 1 table).
+
+`CreateQueue` wraps the callback socket returned by `Create` in a
+`ZQueueSocket` (0004).
 
 ## 9. Decisions
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D9 | `IZSocket` is the low-level primitive; socket types differ only by selection policy | ZMQ architecture: socket = pattern + routing + N connections |
+| D9 | `IZSocketBase` is the small common contract (endpoints + send); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
 | D10 | Generic transport factory (`IZTransport<TSelf, TEndpoint>`) is the core | Transports plug in with typed endpoints and compile-time selection |
 | D11 | `ZQueueSocket` is the high-level main API; it takes over the callback at construction | Matches 0001 D7/D8; two tiers are mutually exclusive by construction |
 | D12 | Queue capacity is per peer (HWM per peer) | Matches libzmq; per-peer backpressure isolation (0004) |

@@ -107,6 +107,19 @@ public sealed class ZMultiMessage : IZMessage
         return true;
     }
 
+    public bool TryGetOwnedArray(int index, out byte[] array)
+    {
+        ThrowIfDisposed();
+        if (index < 0 || index >= frames.Length || frames[index].Owner is not byte[] owned)
+        {
+            array = [];
+            return false;
+        }
+
+        array = owned;
+        return true;
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
