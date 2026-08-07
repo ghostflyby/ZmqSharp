@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using ZmqSharp.Messages;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Zmtp;
 
@@ -17,7 +18,7 @@ public sealed class ZmtpParser : IDisposable
     private const int InitialScratchSize = 4096;
     private const int ScratchShrinkThreshold = 1 << 20;
 
-    private readonly Stream stream;
+    private readonly IZConnection connection;
     private readonly MemoryPool<byte> pool;
     private readonly byte[] headerBuffer = new byte[9];
 
@@ -31,10 +32,10 @@ public sealed class ZmtpParser : IDisposable
     private static TaskCompletionSource CreateGate()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public ZmtpParser(Stream stream, MemoryPool<byte>? pool = null)
+    public ZmtpParser(IZConnection connection, MemoryPool<byte>? pool = null)
     {
-        ArgumentNullException.ThrowIfNull(stream);
-        this.stream = stream;
+        ArgumentNullException.ThrowIfNull(connection);
+        this.connection = connection;
         this.pool = pool ?? MemoryPool<byte>.Shared;
     }
 
@@ -68,13 +69,12 @@ public sealed class ZmtpParser : IDisposable
     }
 
     /// <summary>
-    /// Streams message frames; the caller is responsible for completing
-    /// EstablishAsync first so the stream is positioned at traffic.
+    /// Streams message frames to the connection's receive callbacks; the caller
+    /// is responsible for completing EstablishAsync first.
     /// </summary>
-    public async ValueTask ParseAsync(IZMessageSink sink, CancellationToken token = default)
+    public async ValueTask ParseAsync(CancellationToken token = default)
     {
-        ArgumentNullException.ThrowIfNull(sink);
-        await ReadTrafficAsync(sink, token);
+        await ReadTrafficAsync(token);
     }
 
     public void Dispose()
@@ -189,7 +189,7 @@ public sealed class ZmtpParser : IDisposable
 
     // ---- Traffic ----
 
-    private async ValueTask ReadTrafficAsync(IZMessageSink sink, CancellationToken token)
+    private async ValueTask ReadTrafficAsync(CancellationToken token)
     {
         while (true)
         {
@@ -221,7 +221,7 @@ public sealed class ZmtpParser : IDisposable
             var frame = new ZFrame(
                 scratch[scratchUsed..(scratchUsed + length)],
                 header.Value.Flags.HasFlag(ZmtpFrameFlags.More));
-            var keepGoing = sink.OnFrame(frame, token);
+            var keepGoing = connection.OnFrame(frame, token);
             scratchUsed = 0;
             MaybeShrinkScratch();
             if (!keepGoing)
@@ -238,7 +238,7 @@ public sealed class ZmtpParser : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await stream.ReadAsync(target[filled..], token);
+            var count = await connection.ReadAsync(target[filled..], token);
             if (count == 0)
             {
                 return false;

@@ -16,8 +16,8 @@ public sealed class ZSocketTests
     [Fact]
     public async Task FairPolicy_RoundRobinsAcrossPeers()
     {
-        await using var connA = CreateConnection();
-        await using var connB = CreateConnection();
+        using var connA = CreateConnection();
+        using var connB = CreateConnection();
         var policy = new FairPolicy();
         var peers = new List<ZConnection> { connA, connB };
         using var message = ZMessage.FromOwned([1]);
@@ -30,7 +30,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task PairPolicy_RoutesToSinglePeer()
     {
-        await using var connA = CreateConnection();
+        using var connA = CreateConnection();
         var policy = new PairPolicy();
         var peers = new List<ZConnection> { connA };
         using var message = ZMessage.FromOwned([1]);
@@ -191,7 +191,7 @@ public sealed class ZSocketTests
     }
 
     private static ZConnection CreateConnection()
-        => new(new FakeTransport(new MemoryStream()), MemoryPool<byte>.Shared);
+        => new(new MemoryStream());
 
     private static int GetFreePort()
     {
@@ -202,13 +202,4 @@ public sealed class ZSocketTests
         return port;
     }
 
-    private sealed class FakeTransport(Stream stream) : IZTransport
-    {
-        public Stream? Stream { get; } = stream;
-
-        public ValueTask<IZTransport> AcceptAsync(CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public void Dispose() => Stream?.Dispose();
-    }
 }

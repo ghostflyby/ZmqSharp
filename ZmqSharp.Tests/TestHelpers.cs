@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using ZmqSharp.Messages;
+using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
@@ -155,11 +156,26 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
 
 internal static class ZmtpTestRunner
 {
-    public static async Task RunParserAsync(ZmtpParser parser, IZMessageSink sink)
+    public static ZmtpParser CreateParser(IZConnection connection, IZMessageSink sink)
+    {
+        connection.SetFrameHandler((frame, ct) => sink.OnFrame(frame, ct));
+        return new ZmtpParser(connection);
+    }
+
+    public static async Task RunParserAsync(IZConnection connection, IZMessageSink sink)
+    {
+        using var parser = CreateParser(connection, sink);
+        if (await parser.EstablishAsync())
+        {
+            await parser.ParseAsync();
+        }
+    }
+
+    public static async Task RunParserAsync(ZmtpParser parser)
     {
         if (await parser.EstablishAsync())
         {
-            await parser.ParseAsync(sink);
+            await parser.ParseAsync();
         }
     }
 }

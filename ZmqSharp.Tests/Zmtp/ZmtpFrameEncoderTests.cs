@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Xunit;
+using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
@@ -17,9 +18,9 @@ public sealed class ZmtpFrameEncoderTests
         await encoder.WriteMessageAsync(message);
         stream.Position = 0;
 
-        using var parser = new ZmtpParser(stream);
+        using var connection = new ZConnection(stream);
         var recorder = new FrameRecorder();
-        await ZmtpTestRunner.RunParserAsync(parser, recorder);
+        await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
         recorder.Frames.Should().HaveCount(3);
         recorder.Frames[0].Should().Equal("A"u8.ToArray());
@@ -40,9 +41,9 @@ public sealed class ZmtpFrameEncoderTests
         await encoder.WriteMessageAsync(message);
         stream.Position = 0;
 
-        using var parser = new ZmtpParser(stream);
+        using var connection = new ZConnection(stream);
         var recorder = new FrameRecorder();
-        await ZmtpTestRunner.RunParserAsync(parser, recorder);
+        await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal(payload);

@@ -1,4 +1,5 @@
 using ZmqSharp.Messages;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
@@ -7,7 +8,7 @@ internal sealed class FairPolicy : IZSchedulingPolicy
 {
     private int next;
 
-    public IReadOnlyList<ZConnection> RouteOutbound(IZMessage message, IReadOnlyList<ZConnection> peers)
+    public IReadOnlyList<IZConnection> RouteOutbound(IZMessage message, IReadOnlyList<IZConnection> peers)
     {
         if (peers.Count == 0)
         {
@@ -18,5 +19,5 @@ internal sealed class FairPolicy : IZSchedulingPolicy
         return [peers[index]];
     }
 
-    public ZMessage? OnInbound(ZMessage message, ZConnection peer) => message;
+    public ZMessage? OnInbound(ZMessage message, IZConnection peer) => message;
 }

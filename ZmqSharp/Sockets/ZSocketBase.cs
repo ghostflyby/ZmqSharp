@@ -8,18 +8,22 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Sockets;
 
 /// <summary>
-/// Shared socket mechanics: endpoint management, connection sessions, parser
-/// integration, policy dispatch, two-layer send/receive, and backpressure.
+/// Shared socket mechanics: calls the transport, stores connections, drives the
+/// handshake externally, and orchestrates policy dispatch and backpressure.
 /// </summary>
 internal sealed class ZSocketBase : IZSocket
 {
+    private static readonly byte[] NullGreeting = BuildNullGreeting();
+
+    private readonly record struct Peer(IZConnection Connection, string Endpoint, ZmtpParser Parser);
+
     private readonly IZSchedulingPolicy policy;
     private readonly MemoryPool<byte> pool;
     private readonly Lock stateLock = new();
-    private readonly List<ZConnection> peers = [];
+    private readonly List<Peer> peers = [];
     private readonly List<(IZTransport Listener, string Endpoint)> listeners = [];
     private readonly List<Task> backgroundTasks = [];
-    private readonly ConcurrentQueue<ZConnection> paused = [];
+    private readonly ConcurrentQueue<ZmtpParser> paused = [];
     private readonly CancellationTokenSource cts = new();
     private readonly Channel<IZMessage>? receiveChannel;
     private readonly Channel<IZMessage>? sendChannel;
@@ -72,22 +76,23 @@ internal sealed class ZSocketBase : IZSocket
         where TTransport : IZTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
-        var transport = await TTransport.ConnectAsync(this, endpoint, token);
-        AddConnection(transport, endpoint?.ToString() ?? string.Empty);
+        var connection = await TTransport.ConnectAsync(endpoint, new ZTransportOptions(), token);
+        AddConnection(connection, endpoint?.ToString() ?? string.Empty);
     }
 
     public async Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
-        var listener = await TTransport.BindAsync(this, endpoint, token);
+        var listener = await TTransport.BindAsync(endpoint, new ZTransportOptions(), token);
+        listener.OnAccept += AcceptConnection;
         lock (stateLock)
         {
             ThrowIfClosed();
             listeners.Add((listener, endpoint?.ToString() ?? string.Empty));
         }
 
-        TrackBackground(AcceptLoopAsync(listener));
+        TrackBackground(listener.StartAsync(cts.Token).AsTask());
     }
 
     public Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
@@ -113,15 +118,15 @@ internal sealed class ZSocketBase : IZSocket
         where TTransport : IZTransport<TTransport, TEndpoint>
     {
         var key = endpoint?.ToString() ?? string.Empty;
-        List<ZConnection> matches;
+        List<IZConnection> matches;
         lock (stateLock)
         {
-            matches = [.. peers.Where(peer => peer.Endpoint == key)];
+            matches = [.. peers.Where(peer => peer.Endpoint == key).Select(peer => peer.Connection)];
         }
 
         foreach (var match in matches)
         {
-            match.Abort();
+            match.Dispose();
         }
 
         return Task.CompletedTask;
@@ -171,12 +176,65 @@ internal sealed class ZSocketBase : IZSocket
         return sendChannel?.Writer.TryWrite(message) ?? false;
     }
 
-    internal bool DeliverFrame(ZConnection peer, ZFrame frame, List<ZBufferRef> accumulator)
+    private ValueTask AcceptConnection(IZConnection connection, CancellationToken token)
+    {
+        AddConnection(connection, string.Empty);
+        return ValueTask.CompletedTask;
+    }
+
+    private void AddConnection(IZConnection connection, string endpoint)
+    {
+        var parser = new ZmtpParser(connection, pool);
+        var accumulator = new List<ZBufferRef>();
+        connection.SetFrameHandler((frame, ct) => DeliverFrame(parser, frame, accumulator));
+        connection.SetConnectionEndedHandler(() => Release(accumulator));
+
+        lock (stateLock)
+        {
+            ThrowIfClosed();
+            peers.Add(new Peer(connection, endpoint, parser));
+        }
+
+        TrackBackground(RunConnectionAsync(connection, parser));
+    }
+
+    private async Task RunConnectionAsync(IZConnection connection, ZmtpParser parser)
+    {
+        try
+        {
+            await connection.WriteAsync(NullGreeting, cts.Token);
+            await connection.SendCommandAsync("READY\0"u8.ToArray(), cts.Token);
+            if (await parser.EstablishAsync(cts.Token))
+            {
+                await parser.ParseAsync(cts.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ZeroMqProtocolException ex)
+        {
+            Fail(ex);
+        }
+        finally
+        {
+            connection.OnConnectionEnded();
+            lock (stateLock)
+            {
+                peers.RemoveAll(peer => peer.Connection == connection);
+            }
+        }
+
+        parser.Dispose();
+        connection.Dispose();
+    }
+
+    private bool DeliverFrame(ZmtpParser parser, ZFrame frame, List<ZBufferRef> accumulator)
     {
         var keepGoing = RaiseOnFrame(frame);
         if (receiveChannel is not null)
         {
-            keepGoing &= Accumulate(peer, frame, accumulator);
+            keepGoing &= Accumulate(parser, frame, accumulator);
         }
 
         return keepGoing;
@@ -204,7 +262,7 @@ internal sealed class ZSocketBase : IZSocket
         return keepGoing;
     }
 
-    private bool Accumulate(ZConnection peer, ZFrame frame, List<ZBufferRef> accumulator)
+    private bool Accumulate(ZmtpParser parser, ZFrame frame, List<ZBufferRef> accumulator)
     {
         var owner = pool.Rent(frame.Memory.Length);
         frame.Memory.CopyTo(owner.Memory);
@@ -226,9 +284,19 @@ internal sealed class ZSocketBase : IZSocket
         }
 
         message.Dispose();
-        paused.Enqueue(peer);
+        paused.Enqueue(parser);
         TrackBackground(ResumePausedAsync());
         return false;
+    }
+
+    private void Release(List<ZBufferRef> accumulator)
+    {
+        foreach (var frame in accumulator)
+        {
+            frame.Release();
+        }
+
+        accumulator.Clear();
     }
 
     private async Task SendPumpAsync(CancellationToken token)
@@ -240,138 +308,6 @@ internal sealed class ZSocketBase : IZSocket
         }
     }
 
-    private async Task AcceptLoopAsync(IZTransport listener)
-    {
-        try
-        {
-            while (Volatile.Read(ref closed) == 0)
-            {
-                var transport = await listener.AcceptAsync(cts.Token);
-                AddConnection(transport, string.Empty);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (IOException)
-        {
-        }
-        finally
-        {
-            lock (stateLock)
-            {
-                listeners.RemoveAll(entry => entry.Listener == listener);
-            }
-        }
-    }
-
-    private void AddConnection(IZTransport transport, string endpoint)
-    {
-        var connection = new ZConnection(transport, pool)
-        {
-            Endpoint = endpoint,
-        };
-        connection.Sink = new SocketSink(this, connection);
-
-        lock (stateLock)
-        {
-            ThrowIfClosed();
-            peers.Add(connection);
-        }
-
-        TrackBackground(RunConnectionAsync(connection));
-    }
-
-    private async Task RunConnectionAsync(ZConnection connection)
-    {
-        var runTask = connection.RunAsync(cts.Token);
-        connection.RunTask = runTask;
-        try
-        {
-            await runTask;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ZeroMqProtocolException ex)
-        {
-            Fail(ex);
-        }
-        finally
-        {
-            lock (stateLock)
-            {
-                peers.Remove(connection);
-            }
-        }
-
-        await connection.DisposeAsync();
-    }
-
-    private void Fail(ZeroMqProtocolException ex)
-    {
-        receiveChannel?.Writer.TryComplete(ex);
-        sendChannel?.Writer.TryComplete(ex);
-        TrackBackground(StopAsync(CancellationToken.None));
-    }
-
-    private async Task StopAsync(CancellationToken token)
-    {
-        if (Interlocked.Exchange(ref closed, 1) != 0)
-        {
-            return;
-        }
-
-        await cts.CancelAsync();
-        List<IZTransport> listenerSnapshot;
-        Task[] tasks;
-        lock (stateLock)
-        {
-            listenerSnapshot = [.. listeners.Select(entry => entry.Listener)];
-            listeners.Clear();
-            tasks = [.. peers.Select(peer => peer.RunTask ?? Task.CompletedTask)];
-        }
-
-        foreach (var listener in listenerSnapshot)
-        {
-            listener.Dispose();
-        }
-
-        if (tasks.Length > 0)
-        {
-            try
-            {
-                await Task.WhenAll(tasks).WaitAsync(token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Parser reads abort with cancellation during shutdown.
-            }
-            catch (ZeroMqProtocolException)
-            {
-                // Already surfaced via Fail; the raw parser task faults with it.
-            }
-        }
-
-        receiveChannel?.Writer.TryComplete();
-        sendChannel?.Writer.TryComplete();
-        if (sendPump is not null)
-        {
-            try
-            {
-                await sendPump;
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        cts.Dispose();
-    }
-
     private async Task ResumePausedAsync()
     {
         var channel = receiveChannel;
@@ -380,10 +316,10 @@ internal sealed class ZSocketBase : IZSocket
             return;
         }
 
-        while (paused.TryDequeue(out var peer))
+        while (paused.TryDequeue(out var parser))
         {
             await channel.Writer.WaitToWriteAsync(cts.Token);
-            peer.Resume();
+            parser.Resume();
         }
     }
 
@@ -414,25 +350,78 @@ internal sealed class ZSocketBase : IZSocket
         }
         catch (OperationCanceledException)
         {
-            // Expected during shutdown.
         }
         catch (ZeroMqProtocolException)
         {
-            // Already surfaced via the receive channel by Fail.
         }
     }
 
-    private List<ZConnection> SnapshotPeers()
+    private void Fail(ZeroMqProtocolException ex)
+    {
+        receiveChannel?.Writer.TryComplete(ex);
+        sendChannel?.Writer.TryComplete(ex);
+        TrackBackground(StopAsync(CancellationToken.None));
+    }
+
+    private async Task StopAsync(CancellationToken token)
+    {
+        if (Interlocked.Exchange(ref closed, 1) != 0)
+        {
+            return;
+        }
+
+        cts.Cancel();
+        List<IZTransport> listenerSnapshot;
+        lock (stateLock)
+        {
+            listenerSnapshot = [.. listeners.Select(entry => entry.Listener)];
+            listeners.Clear();
+        }
+
+        foreach (var listener in listenerSnapshot)
+        {
+            listener.Dispose();
+        }
+
+        receiveChannel?.Writer.TryComplete();
+        sendChannel?.Writer.TryComplete();
+        if (sendPump is not null)
+        {
+            try
+            {
+                await sendPump;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        cts.Dispose();
+    }
+
+    private List<IZConnection> SnapshotPeers()
     {
         lock (stateLock)
         {
-            return [.. peers];
+            return [.. peers.Select(peer => peer.Connection)];
         }
+    }
+
+    private static byte[] BuildNullGreeting()
+    {
+        var greeting = new byte[64];
+        greeting[0] = 0xFF;
+        greeting[9] = 0x7F;
+        greeting[10] = 3;
+        "NULL"u8.CopyTo(greeting.AsSpan(12, 4));
+        return greeting;
     }
 
     private void ThrowIfClosed()
     {
-        if (Volatile.Read(ref closed) != 1) return;
-        throw new ObjectDisposedException(nameof(ZSocketBase));
+        if (Volatile.Read(ref closed) == 1)
+        {
+            throw new ObjectDisposedException(nameof(ZSocketBase));
+        }
     }
 }

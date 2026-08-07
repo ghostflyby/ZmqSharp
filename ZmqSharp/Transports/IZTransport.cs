@@ -1,35 +1,31 @@
-using ZmqSharp.Sockets;
-
 namespace ZmqSharp.Transports;
 
 /// <summary>
-/// Byte transport with unified send/receive over a Stream. After BindAsync the
-/// same transport acts as a listener: AcceptAsync yields connected transports.
+/// A bound transport: accepts peers and reports each accepted connection via
+/// OnAccept after StartAsync runs.
 /// </summary>
 public interface IZTransport : IDisposable
 {
-    /// <summary>Non-null when connected (ConnectAsync or AcceptAsync).</summary>
-    Stream? Stream { get; }
+    event Func<IZConnection, CancellationToken, ValueTask>? OnAccept;
 
-    /// <summary>Accepts a connected transport; valid only after BindAsync.</summary>
-    ValueTask<IZTransport> AcceptAsync(CancellationToken token = default);
+    ValueTask StartAsync(CancellationToken token = default);
 }
 
 /// <summary>
-/// Generic transport factory (core contract): transports plug in with typed
-/// endpoints and compile-time selection; both ConnectAsync and BindAsync return
-/// the same transport type.
+/// Generic transport factory: ConnectAsync yields a connected connection;
+/// BindAsync yields a listening transport (OnAccept + StartAsync). Transport
+/// strategy and socket queues are not its concern.
 /// </summary>
 public interface IZTransport<TSelf, in TEndpoint> : IZTransport
     where TSelf : IZTransport<TSelf, TEndpoint>
 {
-    static abstract ValueTask<TSelf> ConnectAsync(
-        IZSocket zsocket,
+    static abstract ValueTask<IZConnection> ConnectAsync(
         TEndpoint endpoint,
+        ZTransportOptions options,
         CancellationToken token = default);
 
     static abstract ValueTask<TSelf> BindAsync(
-        IZSocket zsocket,
         TEndpoint endpoint,
+        ZTransportOptions options,
         CancellationToken token = default);
 }

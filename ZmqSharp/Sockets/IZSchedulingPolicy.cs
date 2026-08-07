@@ -1,4 +1,5 @@
 using ZmqSharp.Messages;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
@@ -8,8 +9,8 @@ namespace ZmqSharp.Sockets;
 internal interface IZSchedulingPolicy
 {
     /// <summary>Select the outbound connection(s) for a message; empty = drop.</summary>
-    IReadOnlyList<ZConnection> RouteOutbound(IZMessage message, IReadOnlyList<ZConnection> peers);
+    IReadOnlyList<IZConnection> RouteOutbound(IZMessage message, IReadOnlyList<IZConnection> peers);
 
     /// <summary>Transform or drop an inbound message from a peer; null = drop.</summary>
-    ZMessage? OnInbound(ZMessage message, ZConnection peer);
+    ZMessage? OnInbound(ZMessage message, IZConnection peer);
 }
