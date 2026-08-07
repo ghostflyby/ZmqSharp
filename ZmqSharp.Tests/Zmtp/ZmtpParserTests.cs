@@ -13,7 +13,7 @@ public sealed class ZmtpParserTests
     [Fact]
     public async Task SingleFrame_Pooled_IsDelivered()
     {
-        byte[] payload = "hello"u8.ToArray();
+        var payload = "hello"u8.ToArray();
         var source = new MemoryByteSource(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame(payload)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
@@ -272,7 +272,7 @@ public sealed class ZmtpParserTests
         var greeting = ZmtpTestData.Greeting();
         greeting[0] = 0x00;
         using var parser = new ZmtpParser(new MemoryByteSource(greeting), new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -282,7 +282,7 @@ public sealed class ZmtpParserTests
         var greeting = ZmtpTestData.Greeting();
         greeting[10] = 2;
         using var parser = new ZmtpParser(new MemoryByteSource(greeting), new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -292,7 +292,7 @@ public sealed class ZmtpParserTests
         var greeting = ZmtpTestData.Greeting();
         "CURVE"u8.CopyTo(greeting.AsSpan(12, 5));
         using var parser = new ZmtpParser(new MemoryByteSource(greeting), new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -302,7 +302,7 @@ public sealed class ZmtpParserTests
         var source = new MemoryByteSource(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], flagsOverride: 0b1000_0000)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -312,7 +312,7 @@ public sealed class ZmtpParserTests
         var source = new MemoryByteSource(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], more: true, command: true)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -321,7 +321,7 @@ public sealed class ZmtpParserTests
     {
         var source = new MemoryByteSource(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>()
             .WithMessage("*boom*");
     }
@@ -334,7 +334,7 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Frame("A"u8.ToArray(), more: true),
             ZmtpTestData.Frame("PING"u8.ToArray(), command: true)));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
-        Func<Task> act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
+        var act = () => parser.ParseAsync(new ZCallbackSink()).AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -346,7 +346,7 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Frame("PING"u8.ToArray(), command: true),
             ZmtpTestData.Frame("hello"u8.ToArray())));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
-        int delivered = 0;
+        var delivered = 0;
 
         await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
         {
@@ -374,7 +374,7 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Frame(new byte[10]));
         var truncated = wire[..^5];
         using var parser = new ZmtpParser(new MemoryByteSource(truncated), new ZReceiveOptions());
-        int delivered = 0;
+        var delivered = 0;
 
         await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
         {
@@ -392,7 +392,7 @@ public sealed class ZmtpParserTests
         var source = new MemoryByteSource(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame("last"u8.ToArray())));
         using var parser = new ZmtpParser(source, new ZReceiveOptions());
-        int delivered = 0;
+        var delivered = 0;
 
         await parser.ParseAsync(new ZCallbackSink(owned: (message, ct) =>
         {

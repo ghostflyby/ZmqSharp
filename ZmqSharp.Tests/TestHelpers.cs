@@ -18,9 +18,9 @@ internal sealed class MemoryByteSource(byte[] data, int maxChunkSize = 0) : IZBy
             return ValueTask.FromResult(0);
         }
 
-        int available = data.Length - position;
-        int chunk = maxChunkSize > 0 ? Math.Min(maxChunkSize, available) : available;
-        int count = Math.Min(buffer.Length, chunk);
+        var available = data.Length - position;
+        var chunk = maxChunkSize > 0 ? Math.Min(maxChunkSize, available) : available;
+        var count = Math.Min(buffer.Length, chunk);
         data.AsMemory(position, count).CopyTo(buffer);
         position += count;
         return ValueTask.FromResult(count);
@@ -122,7 +122,7 @@ internal static class MessageFactory
     public static ZMessage SegmentedFrame(params byte[][] segments)
     {
         var data = new ZMessageData();
-        int total = 0;
+        var total = 0;
         foreach (var segment in segments)
         {
             data.AddSegment(new ZSegment { Origin = ZBufferOrigin.Owned, Memory = segment });
@@ -154,8 +154,8 @@ internal static class ZmtpTestData
 
     public static byte[] Frame(byte[] body, bool more = false, bool command = false, byte flagsOverride = 0)
     {
-        bool isLong = body.Length > 255;
-        byte flags = (byte)((more ? 0b0001 : 0) | (isLong ? 0b0010 : 0) | (command ? 0b0100 : 0) | flagsOverride);
+        var isLong = body.Length > 255;
+        var flags = (byte)((more ? 0b0001 : 0) | (isLong ? 0b0010 : 0) | (command ? 0b0100 : 0) | flagsOverride);
         if (!isLong)
         {
             var result = new byte[2 + body.Length];
@@ -175,7 +175,7 @@ internal static class ZmtpTestData
     public static byte[] Concat(params byte[][] parts)
     {
         var result = new byte[parts.Sum(part => part.Length)];
-        int offset = 0;
+        var offset = 0;
         foreach (var part in parts)
         {
             part.CopyTo(result.AsSpan(offset));

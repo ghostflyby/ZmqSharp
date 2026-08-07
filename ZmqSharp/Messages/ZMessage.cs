@@ -63,14 +63,14 @@ public sealed class ZMessage : IZMessage, IDisposable
     {
         var data = Data;
         long total = 0;
-        for (int i = 0; i < data.FrameCount; i++)
+        for (var i = 0; i < data.FrameCount; i++)
         {
             total += data.GetFrame(i).Length;
         }
 
         var result = GC.AllocateUninitializedArray<byte>(checked((int)total));
-        int offset = 0;
-        for (int i = 0; i < data.FrameCount; i++)
+        var offset = 0;
+        for (var i = 0; i < data.FrameCount; i++)
         {
             var frame = data.GetFrame(i);
             foreach (var memory in frame)

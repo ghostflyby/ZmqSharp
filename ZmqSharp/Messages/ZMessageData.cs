@@ -95,12 +95,12 @@ internal sealed class ZMessageData
         long running = 0;
         ZSequenceSegment? head = null;
         ZSequenceSegment? tail = null;
-        int segmentIndex = entry.Segment;
-        int offset = entry.Offset;
+        var segmentIndex = entry.Segment;
+        var offset = entry.Offset;
         while (remaining > 0 && segmentIndex < segments.Count)
         {
             var memory = segments[segmentIndex].Memory;
-            int take = (int)Math.Min(remaining, memory.Length - offset);
+            var take = (int)Math.Min(remaining, memory.Length - offset);
             var node = new ZSequenceSegment(memory.Slice(offset, take), running);
             if (head is null)
             {
@@ -143,9 +143,9 @@ internal sealed class ZMessageData
             {
                 head = node;
             }
-            else if (tail is { } previous)
+            else
             {
-                previous.SetNext(node);
+                tail?.SetNext(node);
             }
 
             tail = node;

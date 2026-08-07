@@ -128,7 +128,7 @@ public sealed class ZmtpParser : IDisposable
             return false;
         }
 
-        for (int i = 4; i < mechanism.Length; i++)
+        for (var i = 4; i < mechanism.Length; i++)
         {
             if (mechanism[i] != 0)
             {
@@ -188,7 +188,7 @@ public sealed class ZmtpParser : IDisposable
     private static string ErrorReason(ReadOnlyMemory<byte> body)
     {
         var span = body.Span;
-        int separator = span.IndexOf((byte)0);
+        var separator = span.IndexOf((byte)0);
         return separator < 0 ? string.Empty : Encoding.UTF8.GetString(span[(separator + 1)..]);
     }
 
@@ -235,7 +235,7 @@ public sealed class ZmtpParser : IDisposable
 
         var header = first;
         long bytesSeen = 0;
-        int framesSeen = 0;
+        var framesSeen = 0;
         while (true)
         {
             var action = firstAction;
@@ -305,7 +305,7 @@ public sealed class ZmtpParser : IDisposable
             throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
         }
 
-        int length = (int)header.Size;
+        var length = (int)header.Size;
 
         if (action.Mode == ZReceiveMode.Borrowed)
         {
@@ -323,7 +323,7 @@ public sealed class ZmtpParser : IDisposable
         }
 
         var data = ownedData!;
-        bool contiguous = action.Contiguous && length <= options.ContiguousFrameLimit;
+        var contiguous = action.Contiguous && length <= options.ContiguousFrameLimit;
         if (contiguous)
         {
             var segment = await ReadContiguousAsync(length, action.Mode, token);
@@ -337,11 +337,11 @@ public sealed class ZmtpParser : IDisposable
             return true;
         }
 
-        int firstSegment = data.SegmentCount;
+        var firstSegment = data.SegmentCount;
         long remaining = length;
         while (remaining > 0)
         {
-            int blockLength = (int)Math.Min(remaining, SegmentBlockSize);
+            var blockLength = (int)Math.Min(remaining, SegmentBlockSize);
             var segment = await ReadContiguousAsync(blockLength, action.Mode, token);
             if (segment is null)
             {
@@ -390,7 +390,7 @@ public sealed class ZmtpParser : IDisposable
         {
             borrowedSegment.Memory = scratch[..scratchUsed];
             var view = new ZMessageView(borrowedData);
-            bool keepGoing = sink.OnBorrowed(view, token);
+            var keepGoing = sink.OnBorrowed(view, token);
             borrowedData.Reset();
             scratchUsed = 0;
             MaybeShrinkScratch();
@@ -423,10 +423,10 @@ public sealed class ZmtpParser : IDisposable
 
     private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)
     {
-        int filled = 0;
+        var filled = 0;
         while (filled < target.Length)
         {
-            int count = await source.ReadAsync(target[filled..], token);
+            var count = await source.ReadAsync(target[filled..], token);
             if (count == 0)
             {
                 return false;
@@ -458,14 +458,14 @@ public sealed class ZmtpParser : IDisposable
             throw new ZeroMqProtocolException("command frame cannot carry the MORE flag");
         }
 
-        bool isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);
-        int sizeLength = isLong ? 8 : 1;
+        var isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);
+        var sizeLength = isLong ? 8 : 1;
         if (!await TryReadExactlyAsync(headerBuffer.AsMemory(1, sizeLength), token))
         {
             return null;
         }
 
-        long size = isLong
+        var size = isLong
             ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
             : headerBuffer[1];
         if (size < 0)
@@ -485,7 +485,7 @@ public sealed class ZmtpParser : IDisposable
             throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
         }
 
-        int length = (int)header.Size;
+        var length = (int)header.Size;
         EnsureScratchCapacity(checked(scratchUsed + length));
         var target = scratch.Slice(scratchUsed, length);
         if (!await TryReadExactlyAsync(target, token))
@@ -505,7 +505,7 @@ public sealed class ZmtpParser : IDisposable
             return;
         }
 
-        int newSize = Math.Max(required, Math.Max(InitialScratchSize, scratch.Length * 2));
+        var newSize = Math.Max(required, Math.Max(InitialScratchSize, scratch.Length * 2));
         var newOwner = pool.Rent(newSize);
         var newScratch = newOwner.Memory;
         scratch[..scratchUsed].CopyTo(newScratch);
