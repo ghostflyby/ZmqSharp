@@ -38,11 +38,10 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
     Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-    Task CloseAsync(CancellationToken token = default);
 
     // Send: direct, ownership transfers.
     ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
@@ -76,7 +75,7 @@ public interface IZCallbackSocket : IZSocket
 public sealed class ZQueueSocket<TSocket> : IZSocket
     where TSocket : ZSocketBase
 {
-    public ChannelReader<IZMessage> Messages { get; }       // receive channel
+    public ChannelReader<IZMessage> Messages { get; }       // aggregate reader over peer queues
     public ChannelWriter<IZMessage>? Outbound { get; }      // optional send channel
     public ValueTask SendAsync(IZMessage message, CancellationToken token = default);
     // Bind / Connect / Close forward to the wrapped TSocket.
@@ -93,13 +92,14 @@ public sealed class ZQueueSocketOptions
 - `ZQueueSocket<TSocket>` wraps a concrete socket type (`ZPairSocket`,
   `ZDealerSocket`, ...); the generic parameter carries the socket type and the
   wrapped socket is never exposed. Construction takes over the wrapped
-  socket's `OnFrame` callback, so the two tiers are mutually exclusive by
-  construction.
+  socket's per-peer frame delivery (SetFrameSink), so the two tiers are
+  mutually exclusive by construction.
 - Capacity is per peer (each peer gets its own bounded queue with the
   configured HWM), following 0004. `Messages` exposes the socket-level
   aggregated view selected by the socket type (fair-queue, direct, ...).
 - When `SendCapacity` is set, producers write to `Outbound`; the socket
-  routes each message into the selected peers' send queues.
+  routes each message to the selected peers (direct write today; per-peer
+  send queues are 0004/D2).
 
 ## 4. Per-Peer Queue Model
 
@@ -140,9 +140,9 @@ As implemented:
 - Direct send on `IZSocket`: the socket type's `RouteOutbound` selects the
   connection(s), writes each selected connection, disposes the message after
   the last peer send.
-- Queue tier: `Outbound` is bounded; the socket routes each message into the
-  selected peers' send queues, drained by one pump per peer. A full send
-  queue is handled per socket type (PUB drops, DEALER picks another peer).
+- Queue tier: `Outbound` is bounded; the socket routes each message to the
+  selected peers (direct write today; per-peer send queues with one pump per
+  peer are 0004/D2).
 - A message is written atomically per connection (single writer, never
   interleaved).
 

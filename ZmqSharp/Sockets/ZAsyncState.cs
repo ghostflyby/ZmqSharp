@@ -10,18 +10,13 @@ namespace ZmqSharp.Sockets;
 /// Public only because public socket types derive from it; the members are
 /// protected and are not part of the consumer-facing API.
 /// </summary>
-public abstract class ZAsyncState
+public abstract class ZAsyncState(MemoryPool<byte> pool)
 {
-    protected readonly MemoryPool<byte> Pool;
+    protected readonly MemoryPool<byte> Pool = pool;
     protected readonly Lock StateLock = new();
     protected readonly List<Task> BackgroundTasks = [];
     protected readonly CancellationTokenSource Cts = new();
     protected int Closed;
-
-    protected ZAsyncState(MemoryPool<byte> pool)
-    {
-        Pool = pool;
-    }
 
     protected void TrackBackground(Task task)
     {
@@ -31,7 +26,7 @@ public abstract class ZAsyncState
         }
     }
 
-    protected async Task AwaitBackgroundAsync(CancellationToken token)
+    protected async Task AwaitBackgroundAsync()
     {
         Task[] tasks;
         lock (StateLock)
@@ -46,7 +41,7 @@ public abstract class ZAsyncState
 
         try
         {
-            await Task.WhenAll(tasks).WaitAsync(token);
+            await Task.WhenAll(tasks);
         }
         catch (OperationCanceledException)
         {
@@ -58,9 +53,6 @@ public abstract class ZAsyncState
 
     protected void ThrowIfClosed()
     {
-        if (Volatile.Read(ref Closed) == 1)
-        {
-            throw new ObjectDisposedException(GetType().Name);
-        }
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref Closed) == 1, this);
     }
 }

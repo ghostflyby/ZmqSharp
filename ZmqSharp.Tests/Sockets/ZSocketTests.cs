@@ -41,7 +41,7 @@ public sealed class ZSocketTests
         received[1].ToArray().Should().Equal(frames[1]);
         received.Dispose();
 
-        cts.Cancel();
+        await cts.CancelAsync();
         try
         {
             await echoTask;
@@ -80,7 +80,7 @@ public sealed class ZSocketTests
         countA.Should().BeGreaterThanOrEqualTo(1);
         countB.Should().BeGreaterThanOrEqualTo(1);
 
-        cts.Cancel();
+        await cts.CancelAsync();
         try
         {
             await Task.WhenAll(drainA, drainB);
@@ -88,6 +88,45 @@ public sealed class ZSocketTests
         catch (OperationCanceledException)
         {
         }
+    }
+
+    [Fact]
+    public async Task DealerSocket_ReceivesFromBothPeers()
+    {
+        var portA = GetFreePort();
+        var portB = GetFreePort();
+        await using var serverA = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var serverB = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        await using var dealer = ZSocket.CreateDealer(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        await serverA.BindAsync($"tcp://127.0.0.1:{portA}", cts.Token);
+        await serverB.BindAsync($"tcp://127.0.0.1:{portB}", cts.Token);
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{portA}", cts.Token);
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
+
+        var messages = dealer.Messages;
+        var received = new List<byte[]>();
+        for (var attempt = 0; attempt < 50 && received.Count < 2; attempt++)
+        {
+            await serverA.SendAsync(ZMessage.FromOwned("a"u8.ToArray()), cts.Token);
+            await serverB.SendAsync(ZMessage.FromOwned("b"u8.ToArray()), cts.Token);
+
+            for (var i = 0; i < 2; i++)
+            {
+                var message = await TryReadAsync(messages, TimeSpan.FromMilliseconds(200), cts.Token);
+                if (message is null)
+                {
+                    break;
+                }
+
+                received.Add(message[0].ToArray());
+                message.Dispose();
+            }
+        }
+
+        received.Any(frame => frame.AsSpan().SequenceEqual("a"u8)).Should().BeTrue();
+        received.Any(frame => frame.AsSpan().SequenceEqual("b"u8)).Should().BeTrue();
     }
 
     [Fact]
@@ -106,7 +145,7 @@ public sealed class ZSocketTests
     public async Task Close_CompletesReceiveChannel()
     {
         await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
-        await socket.CloseAsync();
+        await socket.DisposeAsync();
         socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
 

@@ -15,13 +15,11 @@ public interface IZSocket : IAsyncDisposable
     Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-
-    Task CloseAsync(CancellationToken token = default);
 
     /// <summary>Direct send: transfers ownership; the socket disposes the message after routing.</summary>
     ValueTask SendAsync(IZMessage message, CancellationToken token = default);
