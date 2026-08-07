@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Threading.Channels;
 using ZmqSharp.Messages;
 using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Sockets;
 
@@ -12,26 +11,21 @@ namespace ZmqSharp.Sockets;
 /// delivers them through a bounded Channel. The wrapped socket is never
 /// exposed; connection and direct send forward to it.
 /// </summary>
-public sealed class ZQueueSocket<TSocket> : IZSocket
+public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     where TSocket : ZSocketBase
 {
     private readonly TSocket socket;
-    private readonly MemoryPool<byte> pool;
     private readonly Channel<IZMessage> receiveChannel;
     private readonly Channel<IZMessage>? sendChannel;
     private readonly Task? sendPump;
     private readonly List<ZBufferRef> accumulator = [];
-    private readonly List<Task> backgroundTasks = [];
-    private readonly Lock stateLock = new();
-    private readonly CancellationTokenSource cts = new();
-    private int closed;
 
     internal ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
+        : base(options?.Pool ?? MemoryPool<byte>.Shared)
     {
         ArgumentNullException.ThrowIfNull(socket);
         this.socket = socket;
         options ??= new ZQueueSocketOptions();
-        pool = options.Pool ?? MemoryPool<byte>.Shared;
 
         receiveChannel = Channel.CreateBounded<IZMessage>(
             new BoundedChannelOptions(options.ReceiveCapacity) { SingleReader = true });
@@ -39,7 +33,7 @@ public sealed class ZQueueSocket<TSocket> : IZSocket
         if (options.SendCapacity is { } sendCapacity)
         {
             sendChannel = Channel.CreateBounded<IZMessage>(new BoundedChannelOptions(sendCapacity));
-            sendPump = SendPumpAsync(cts.Token);
+            sendPump = SendPumpAsync(Cts.Token);
         }
 
         socket.OnFrame += OnFrameHandler;
@@ -74,14 +68,14 @@ public sealed class ZQueueSocket<TSocket> : IZSocket
 
     public async Task CloseAsync(CancellationToken token = default)
     {
-        if (Interlocked.Exchange(ref closed, 1) != 0)
+        if (Interlocked.Exchange(ref Closed, 1) != 0)
         {
             return;
         }
 
         socket.OnFrame -= OnFrameHandler;
         socket.PeerEnded -= OnPeerEnded;
-        await cts.CancelAsync();
+        Cts.Cancel();
         receiveChannel.Writer.TryComplete();
         sendChannel?.Writer.TryComplete();
 
@@ -98,34 +92,15 @@ public sealed class ZQueueSocket<TSocket> : IZSocket
             }
         }
 
-        Task[] tasks;
-        lock (stateLock)
-        {
-            tasks = [.. backgroundTasks];
-        }
-
-        if (tasks.Length > 0)
-        {
-            try
-            {
-                await Task.WhenAll(tasks).WaitAsync(token);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (ZeroMqProtocolException)
-            {
-            }
-        }
-
-        cts.Dispose();
+        await AwaitBackgroundAsync(token);
+        Cts.Dispose();
     }
 
     public async ValueTask DisposeAsync() => await CloseAsync(CancellationToken.None);
 
     private bool OnFrameHandler(ZFrame frame, CancellationToken token)
     {
-        var owner = pool.Rent(frame.Memory.Length);
+        var owner = Pool.Rent(frame.Memory.Length);
         frame.Memory.CopyTo(owner.Memory);
         accumulator.Add(new ZBufferRef(owner, owner.Memory[..frame.Memory.Length]));
 
@@ -170,7 +145,7 @@ public sealed class ZQueueSocket<TSocket> : IZSocket
 
     private async Task ResumePausedAsync()
     {
-        await receiveChannel.Writer.WaitToWriteAsync(cts.Token);
+        await receiveChannel.Writer.WaitToWriteAsync(Cts.Token);
         socket.ResumePaused();
     }
 
@@ -180,14 +155,6 @@ public sealed class ZQueueSocket<TSocket> : IZSocket
         await foreach (var message in channel.Reader.ReadAllAsync(token))
         {
             await socket.SendAsync(message, token);
-        }
-    }
-
-    private void TrackBackground(Task task)
-    {
-        lock (stateLock)
-        {
-            backgroundTasks.Add(task);
         }
     }
 }

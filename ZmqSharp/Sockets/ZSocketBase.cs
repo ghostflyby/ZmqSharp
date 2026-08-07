@@ -12,28 +12,22 @@ namespace ZmqSharp.Sockets;
 /// callback. Socket types are subtypes that differ only in
 /// <see cref="RouteOutbound"/>.
 /// </summary>
-public abstract class ZSocketBase : IZCallbackSocket
+public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 {
     private static readonly byte[] ReadyCommand = [.. "READY\0"u8];
 
     private readonly record struct Peer(IZConnection Connection, string Endpoint, ZmtpParser Parser);
 
-    private readonly Lock stateLock = new();
     private readonly List<Peer> peers = [];
     private readonly List<(IZTransport Listener, string Endpoint)> listeners = [];
-    private readonly List<Task> backgroundTasks = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
-    private readonly CancellationTokenSource cts = new();
     private ZFrameHandler? onFrame;
     private Action<Exception?>? peerEnded;
-    private int closed;
-
-    protected readonly MemoryPool<byte> Pool;
 
     protected ZSocketBase(ZSocketOptions options)
+        : base(options.Pool ?? MemoryPool<byte>.Shared)
     {
         ArgumentNullException.ThrowIfNull(options);
-        Pool = options.Pool ?? MemoryPool<byte>.Shared;
     }
 
     /// <summary>Selects the outbound connection(s) for a message; empty = drop.</summary>
@@ -45,14 +39,14 @@ public abstract class ZSocketBase : IZCallbackSocket
     {
         add
         {
-            lock (stateLock)
+            lock (StateLock)
             {
                 onFrame += value;
             }
         }
         remove
         {
-            lock (stateLock)
+            lock (StateLock)
             {
                 onFrame -= value;
             }
@@ -63,14 +57,14 @@ public abstract class ZSocketBase : IZCallbackSocket
     {
         add
         {
-            lock (stateLock)
+            lock (StateLock)
             {
                 peerEnded += value;
             }
         }
         remove
         {
-            lock (stateLock)
+            lock (StateLock)
             {
                 peerEnded -= value;
             }
@@ -100,13 +94,13 @@ public abstract class ZSocketBase : IZCallbackSocket
         ThrowIfClosed();
         var listener = await TTransport.BindAsync(endpoint, new ZTransportOptions(), token);
         listener.OnAccept += AcceptConnection;
-        lock (stateLock)
+        lock (StateLock)
         {
             ThrowIfClosed();
             listeners.Add((listener, endpoint?.ToString() ?? string.Empty));
         }
 
-        TrackBackground(listener.StartAsync(cts.Token).AsTask());
+        TrackBackground(listener.StartAsync(Cts.Token).AsTask());
     }
 
     public Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
@@ -114,7 +108,7 @@ public abstract class ZSocketBase : IZCallbackSocket
     {
         var key = endpoint?.ToString() ?? string.Empty;
         IZTransport? listener = null;
-        lock (stateLock)
+        lock (StateLock)
         {
             var index = listeners.FindIndex(entry => entry.Endpoint == key);
             if (index >= 0)
@@ -133,7 +127,7 @@ public abstract class ZSocketBase : IZCallbackSocket
     {
         var key = endpoint?.ToString() ?? string.Empty;
         List<IZConnection> matches;
-        lock (stateLock)
+        lock (StateLock)
         {
             matches = [.. peers.Where(peer => peer.Endpoint == key).Select(peer => peer.Connection)];
         }
@@ -146,7 +140,7 @@ public abstract class ZSocketBase : IZCallbackSocket
         return Task.CompletedTask;
     }
 
-    public virtual async Task CloseAsync(CancellationToken token = default)
+    public async Task CloseAsync(CancellationToken token = default)
     {
         await StopAsync(token);
         await AwaitBackgroundAsync(token);
@@ -195,7 +189,7 @@ public abstract class ZSocketBase : IZCallbackSocket
         var parser = new ZmtpParser(connection, Pool);
         connection.SetFrameHandler((frame, ct) => DeliverFrameCore(parser, frame));
 
-        lock (stateLock)
+        lock (StateLock)
         {
             ThrowIfClosed();
             peers.Add(new Peer(connection, endpoint, parser));
@@ -209,11 +203,11 @@ public abstract class ZSocketBase : IZCallbackSocket
         Exception? failure = null;
         try
         {
-            await connection.WriteAsync(ZmtpFrameEncoder.NullGreeting, cts.Token);
-            await connection.SendCommandAsync(ReadyCommand, cts.Token);
-            if (await parser.EstablishAsync(cts.Token))
+            await connection.WriteAsync(ZmtpFrameEncoder.NullGreeting, Cts.Token);
+            await connection.SendCommandAsync(ReadyCommand, Cts.Token);
+            if (await parser.EstablishAsync(Cts.Token))
             {
-                await parser.ParseAsync(cts.Token);
+                await parser.ParseAsync(Cts.Token);
             }
         }
         catch (OperationCanceledException)
@@ -228,7 +222,7 @@ public abstract class ZSocketBase : IZCallbackSocket
         {
             connection.OnConnectionEnded();
             RaisePeerEnded(failure);
-            lock (stateLock)
+            lock (StateLock)
             {
                 peers.RemoveAll(peer => peer.Connection == connection);
             }
@@ -252,7 +246,7 @@ public abstract class ZSocketBase : IZCallbackSocket
     private bool RaiseOnFrame(ZFrame frame)
     {
         ZFrameHandler? handler;
-        lock (stateLock)
+        lock (StateLock)
         {
             handler = onFrame;
         }
@@ -265,7 +259,7 @@ public abstract class ZSocketBase : IZCallbackSocket
         var keepGoing = true;
         foreach (Delegate item in handler.GetInvocationList())
         {
-            keepGoing &= ((ZFrameHandler)item)(frame, cts.Token);
+            keepGoing &= ((ZFrameHandler)item)(frame, Cts.Token);
         }
 
         return keepGoing;
@@ -274,7 +268,7 @@ public abstract class ZSocketBase : IZCallbackSocket
     private void RaisePeerEnded(Exception? failure)
     {
         Action<Exception?>? handler;
-        lock (stateLock)
+        lock (StateLock)
         {
             handler = peerEnded;
         }
@@ -282,49 +276,16 @@ public abstract class ZSocketBase : IZCallbackSocket
         handler?.Invoke(failure);
     }
 
-    private void TrackBackground(Task task)
-    {
-        lock (stateLock)
-        {
-            backgroundTasks.Add(task);
-        }
-    }
-
-    private async Task AwaitBackgroundAsync(CancellationToken token)
-    {
-        Task[] tasks;
-        lock (stateLock)
-        {
-            tasks = [.. backgroundTasks];
-        }
-
-        if (tasks.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            await Task.WhenAll(tasks).WaitAsync(token);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ZeroMqProtocolException)
-        {
-        }
-    }
-
     private async Task StopAsync(CancellationToken token)
     {
-        if (Interlocked.Exchange(ref closed, 1) != 0)
+        if (Interlocked.Exchange(ref Closed, 1) != 0)
         {
             return;
         }
 
-        cts.Cancel();
+        Cts.Cancel();
         List<IZTransport> listenerSnapshot;
-        lock (stateLock)
+        lock (StateLock)
         {
             listenerSnapshot = [.. listeners.Select(entry => entry.Listener)];
             listeners.Clear();
@@ -335,22 +296,14 @@ public abstract class ZSocketBase : IZCallbackSocket
             listener.Dispose();
         }
 
-        cts.Dispose();
+        Cts.Dispose();
     }
 
     private List<IZConnection> SnapshotPeers()
     {
-        lock (stateLock)
+        lock (StateLock)
         {
             return [.. peers.Select(peer => peer.Connection)];
-        }
-    }
-
-    private void ThrowIfClosed()
-    {
-        if (Volatile.Read(ref closed) == 1)
-        {
-            throw new ObjectDisposedException(nameof(ZSocketBase));
         }
     }
 }
