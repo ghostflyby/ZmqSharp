@@ -19,7 +19,7 @@ public sealed class ZmtpFrameEncoderTests
 
         using var parser = new ZmtpParser(stream);
         var recorder = new FrameRecorder();
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(3);
         recorder.Frames[0].Should().Equal("A"u8.ToArray());
@@ -42,7 +42,7 @@ public sealed class ZmtpFrameEncoderTests
 
         using var parser = new ZmtpParser(stream);
         var recorder = new FrameRecorder();
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal(payload);

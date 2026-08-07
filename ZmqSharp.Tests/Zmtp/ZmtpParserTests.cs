@@ -16,7 +16,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source);
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal("hello"u8.ToArray());
@@ -34,7 +34,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source);
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(3);
         recorder.Frames[0].Should().Equal("A"u8.ToArray());
@@ -54,7 +54,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source);
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(2);
         recorder.Frames[0].Should().Equal("A"u8.ToArray());
@@ -70,7 +70,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source);
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal(payload);
@@ -98,7 +98,7 @@ public sealed class ZmtpParserTests
             return true;
         });
 
-        var parseTask = parser.ParseAsync(recorder).AsTask();
+        var parseTask = ZmtpTestRunner.RunParserAsync(parser, recorder);
         await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         frames.Should().HaveCount(1);
         parseTask.IsCompleted.Should().BeFalse();
@@ -115,7 +115,7 @@ public sealed class ZmtpParserTests
         var greeting = ZmtpTestData.Greeting();
         greeting[0] = 0x00;
         using var parser = new ZmtpParser(new ChunkedMemoryStream(greeting));
-        Func<Task> act = () => parser.ParseAsync(new FrameRecorder()).AsTask();
+        Func<Task> act = () => parser.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -125,7 +125,7 @@ public sealed class ZmtpParserTests
         var greeting = ZmtpTestData.Greeting();
         greeting[10] = 2;
         using var parser = new ZmtpParser(new ChunkedMemoryStream(greeting));
-        Func<Task> act = () => parser.ParseAsync(new FrameRecorder()).AsTask();
+        Func<Task> act = () => parser.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -135,7 +135,7 @@ public sealed class ZmtpParserTests
         var greeting = ZmtpTestData.Greeting();
         "CURVE"u8.CopyTo(greeting.AsSpan(12, 5));
         using var parser = new ZmtpParser(new ChunkedMemoryStream(greeting));
-        Func<Task> act = () => parser.ParseAsync(new FrameRecorder()).AsTask();
+        Func<Task> act = () => parser.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -145,7 +145,7 @@ public sealed class ZmtpParserTests
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], flagsOverride: 0b1000_0000)));
         using var parser = new ZmtpParser(source);
-        Func<Task> act = () => parser.ParseAsync(new FrameRecorder()).AsTask();
+        Func<Task> act = () => ZmtpTestRunner.RunParserAsync(parser, new FrameRecorder());
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -155,7 +155,7 @@ public sealed class ZmtpParserTests
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], more: true, command: true)));
         using var parser = new ZmtpParser(source);
-        Func<Task> act = () => parser.ParseAsync(new FrameRecorder()).AsTask();
+        Func<Task> act = () => ZmtpTestRunner.RunParserAsync(parser, new FrameRecorder());
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -164,7 +164,7 @@ public sealed class ZmtpParserTests
     {
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
         using var parser = new ZmtpParser(source);
-        Func<Task> act = () => parser.ParseAsync(new FrameRecorder()).AsTask();
+        Func<Task> act = () => parser.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>()
             .WithMessage("*boom*");
     }
@@ -179,7 +179,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source);
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal("hello"u8.ToArray());
@@ -189,7 +189,7 @@ public sealed class ZmtpParserTests
     public async Task EmptySource_ReturnsCleanly()
     {
         using var parser = new ZmtpParser(new ChunkedMemoryStream([]));
-        await parser.ParseAsync(new FrameRecorder());
+        await ZmtpTestRunner.RunParserAsync(parser, new FrameRecorder());
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(new ChunkedMemoryStream(truncated));
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().BeEmpty();
     }
@@ -216,7 +216,7 @@ public sealed class ZmtpParserTests
         using var parser = new ZmtpParser(source);
         var recorder = new FrameRecorder();
 
-        await parser.ParseAsync(recorder);
+        await ZmtpTestRunner.RunParserAsync(parser, recorder);
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal("last"u8.ToArray());

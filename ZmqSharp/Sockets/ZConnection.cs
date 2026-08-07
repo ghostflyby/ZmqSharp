@@ -27,9 +27,20 @@ internal sealed class ZConnection(IZTransport transport, MemoryPool<byte> pool)
 
     private async Task RunCoreAsync(CancellationToken token)
     {
-        await encoder.WriteGreetingAsync(token);
-        await encoder.WriteCommandAsync("READY\0"u8.ToArray(), token);
-        await parser.ParseAsync(Sink ?? throw new InvalidOperationException("sink is not set"), token);
+        var sink = Sink ?? throw new InvalidOperationException("sink is not set");
+        try
+        {
+            await encoder.WriteGreetingAsync(token);
+            await encoder.WriteCommandAsync("READY\0"u8.ToArray(), token);
+            if (await parser.EstablishAsync(token))
+            {
+                await parser.ParseAsync(sink, token);
+            }
+        }
+        finally
+        {
+            sink.OnConnectionEnded();
+        }
     }
 
     /// <summary>Resumes this connection after backpressure paused it.</summary>

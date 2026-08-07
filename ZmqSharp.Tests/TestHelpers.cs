@@ -153,6 +153,17 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
     }
 }
 
+internal static class ZmtpTestRunner
+{
+    public static async Task RunParserAsync(ZmtpParser parser, IZMessageSink sink)
+    {
+        if (await parser.EstablishAsync())
+        {
+            await parser.ParseAsync(sink);
+        }
+    }
+}
+
 /// <summary>ZMTP wire encoding helpers (tests only).</summary>
 internal static class ZmtpTestData
 {

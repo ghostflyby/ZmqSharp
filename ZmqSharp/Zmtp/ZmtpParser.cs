@@ -48,27 +48,33 @@ public sealed class ZmtpParser : IDisposable
         }
     }
 
+    /// <summary>
+    /// Completes the greeting and the NULL handshake. Returns false when the peer
+    /// closed during establishment.
+    /// </summary>
+    public async ValueTask<bool> EstablishAsync(CancellationToken token = default)
+    {
+        if (!await ReadGreetingAsync(token))
+        {
+            return false;
+        }
+
+        if (!await ReadHandshakeAsync(token))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Streams message frames; the caller is responsible for completing
+    /// EstablishAsync first so the stream is positioned at traffic.
+    /// </summary>
     public async ValueTask ParseAsync(IZMessageSink sink, CancellationToken token = default)
     {
         ArgumentNullException.ThrowIfNull(sink);
-        try
-        {
-            if (!await ReadGreetingAsync(token))
-            {
-                return;
-            }
-
-            if (!await ReadHandshakeAsync(token))
-            {
-                return;
-            }
-
-            await ReadTrafficAsync(sink, token);
-        }
-        finally
-        {
-            sink.OnConnectionEnded();
-        }
+        await ReadTrafficAsync(sink, token);
     }
 
     public void Dispose()
