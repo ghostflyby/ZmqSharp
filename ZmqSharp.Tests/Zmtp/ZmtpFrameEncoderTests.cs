@@ -1,10 +1,8 @@
-using System.Buffers;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Messages;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Tests.Zmtp;
+namespace ZmqSharp.Tests;
 
 public sealed class ZmtpFrameEncoderTests
 {
@@ -19,20 +17,15 @@ public sealed class ZmtpFrameEncoderTests
         await encoder.WriteMessageAsync(message);
         stream.Position = 0;
 
-        using var parser = new ZmtpParser(stream, new ZReceiveOptions());
-        ZMessage? received = null;
-        await parser.ParseAsync(new ZCallbackSink(owned: (m, _) =>
-        {
-            received = m;
-            return true;
-        }));
+        using var parser = new ZmtpParser(stream);
+        var recorder = new FrameRecorder();
+        await parser.ParseAsync(recorder);
 
-        var parsed = received ?? throw new InvalidOperationException("no message parsed");
-        parsed.FrameCount.Should().Be(3);
-        parsed.GetFrame(0).ToArray().Should().Equal("A"u8.ToArray());
-        parsed.GetFrame(1).ToArray().Should().Equal("B"u8.ToArray());
-        parsed.GetFrame(2).ToArray().Should().Equal("C"u8.ToArray());
-        parsed.Dispose();
+        recorder.Frames.Should().HaveCount(3);
+        recorder.Frames[0].Should().Equal("A"u8.ToArray());
+        recorder.Frames[1].Should().Equal("B"u8.ToArray());
+        recorder.Frames[2].Should().Equal("C"u8.ToArray());
+        recorder.MoreFlags.Should().Equal(true, true, false);
     }
 
     [Fact]
@@ -47,16 +40,11 @@ public sealed class ZmtpFrameEncoderTests
         await encoder.WriteMessageAsync(message);
         stream.Position = 0;
 
-        using var parser = new ZmtpParser(stream, new ZReceiveOptions());
-        ZMessage? received = null;
-        await parser.ParseAsync(new ZCallbackSink(owned: (m, _) =>
-        {
-            received = m;
-            return true;
-        }));
+        using var parser = new ZmtpParser(stream);
+        var recorder = new FrameRecorder();
+        await parser.ParseAsync(recorder);
 
-        var parsed = received ?? throw new InvalidOperationException("no message parsed");
-        parsed.GetFrame(0).ToArray().Should().Equal(payload);
-        parsed.Dispose();
+        recorder.Frames.Should().HaveCount(1);
+        recorder.Frames[0].Should().Equal(payload);
     }
 }

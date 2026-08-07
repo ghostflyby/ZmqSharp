@@ -6,12 +6,11 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Sockets;
 
 /// <summary>Internal per-peer session: byte channel + parser + encoder + queue.</summary>
-internal sealed class ZConnection(IZTransport transport, ZReceiveOptions receiveOptions, MemoryPool<byte> pool)
+internal sealed class ZConnection(IZTransport transport, MemoryPool<byte> pool)
     : IAsyncDisposable
 {
     private readonly ZmtpParser parser = new(
         transport.Stream ?? throw new InvalidOperationException("connection requires a connected transport"),
-        receiveOptions,
         pool);
     private readonly ZmtpFrameEncoder encoder = new(
         transport.Stream ?? throw new InvalidOperationException("connection requires a connected transport"));
@@ -39,7 +38,7 @@ internal sealed class ZConnection(IZTransport transport, ZReceiveOptions receive
     /// <summary>Closes the underlying transport; the parse loop ends with EOF.</summary>
     public void Abort() => transport.Dispose();
 
-    public async ValueTask SendAsync(ZMessage message, CancellationToken token)
+    public async ValueTask SendAsync(IZMessage message, CancellationToken token)
     {
         await sendGate.WaitAsync(token);
         try

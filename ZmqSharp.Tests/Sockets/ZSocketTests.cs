@@ -9,7 +9,7 @@ using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Tests.Sockets;
+namespace ZmqSharp.Tests;
 
 public sealed class ZSocketTests
 {
@@ -41,7 +41,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task PairSocket_RoundTripsMultipartOverTcp()
     {
-        int port = GetFreePort();
+        var port = GetFreePort();
         await using var server = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
         await using var client = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -54,8 +54,8 @@ public sealed class ZSocketTests
         var echoTask = EchoAsync(server, serverMessages, cts.Token);
         byte[][] frames = ["ping"u8.ToArray(), "pong"u8.ToArray()];
 
-        ZMessage? echo = null;
-        for (int attempt = 0; attempt < 50 && echo is null; attempt++)
+        IZMessage? echo = null;
+        for (var attempt = 0; attempt < 50 && echo is null; attempt++)
         {
             await client.SendAsync(MessageFactory.Multipart([..frames]), cts.Token);
             echo = await TryReadAsync(clientMessages, TimeSpan.FromMilliseconds(200), cts.Token);
@@ -80,8 +80,8 @@ public sealed class ZSocketTests
     [Fact]
     public async Task DealerSocket_FairDispatch_ReachesBothPeers()
     {
-        int portA = GetFreePort();
-        int portB = GetFreePort();
+        var portA = GetFreePort();
+        var portB = GetFreePort();
         await using var serverA = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
         await using var serverB = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
         await using var dealer = ZSocket.Create(ZSocketType.Dealer, new ZSocketOptions { ReceiveChannelCapacity = 16 });
@@ -92,12 +92,12 @@ public sealed class ZSocketTests
         await dealer.ConnectAsync($"tcp://127.0.0.1:{portA}", cts.Token);
         await dealer.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
 
-        int countA = 0;
-        int countB = 0;
+        var countA = 0;
+        var countB = 0;
         var drainA = DrainAsync(serverA, () => Interlocked.Increment(ref countA), cts.Token);
         var drainB = DrainAsync(serverB, () => Interlocked.Increment(ref countB), cts.Token);
 
-        for (int attempt = 0; attempt < 100 && (countA < 1 || countB < 1); attempt++)
+        for (var attempt = 0; attempt < 100 && (countA < 1 || countB < 1); attempt++)
         {
             await dealer.SendAsync(ZMessage.FromOwned([1]), cts.Token);
             await Task.Delay(50, cts.Token);
@@ -140,7 +140,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task ProtocolError_CompletesChannelWithException()
     {
-        int port = GetFreePort();
+        var port = GetFreePort();
         await using var server = ZSocket.Create(ZSocketType.Pair, new ZSocketOptions { ReceiveChannelCapacity = 16 });
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
@@ -155,7 +155,7 @@ public sealed class ZSocketTests
         await FluentActions.Awaiting(() => messages.Completion).Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
-    private static async Task EchoAsync(IZSocket server, ChannelReader<ZMessage> messages, CancellationToken token)
+    private static async Task EchoAsync(IZSocket server, ChannelReader<IZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
         {
@@ -173,8 +173,8 @@ public sealed class ZSocketTests
         }
     }
 
-    private static async Task<ZMessage?> TryReadAsync(
-        ChannelReader<ZMessage> reader,
+    private static async Task<IZMessage?> TryReadAsync(
+        ChannelReader<IZMessage> reader,
         TimeSpan timeout,
         CancellationToken token)
     {
@@ -191,16 +191,13 @@ public sealed class ZSocketTests
     }
 
     private static ZConnection CreateConnection()
-        => new(
-            new FakeTransport(new MemoryStream()),
-            new ZReceiveOptions { Policy = ZReceiveMode.Borrowed },
-            MemoryPool<byte>.Shared);
+        => new(new FakeTransport(new MemoryStream()), MemoryPool<byte>.Shared);
 
     private static int GetFreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
     }

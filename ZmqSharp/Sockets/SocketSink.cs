@@ -3,17 +3,21 @@ using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Sockets;
 
-/// <summary>Forwards one connection's parser output into the socket dispatcher.</summary>
+/// <summary>Streams a connection's frames into the socket dispatcher and assembles owned messages.</summary>
 internal sealed class SocketSink(ZSocketBase socket, ZConnection peer) : IZMessageSink
 {
-    public ZReceiveAction? Decide(in ZReceiveContext context) => null;
+    private readonly List<ZBufferRef> frames = [];
 
-    public bool OnBorrowed(ZMessageView message, CancellationToken token) => socket.Deliver(peer, message);
+    public bool OnFrame(ZFrame frame, CancellationToken token)
+        => socket.DeliverFrame(peer, frame, frames);
 
-    public bool OnOwned(ZMessage message, CancellationToken token)
+    public void OnConnectionEnded()
     {
-        // The socket always runs connections in Borrowed mode; this is defensive.
-        message.Dispose();
-        return true;
+        foreach (var frame in frames)
+        {
+            frame.Release();
+        }
+
+        frames.Clear();
     }
 }

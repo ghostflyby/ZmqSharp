@@ -3,7 +3,7 @@ using FluentAssertions;
 using Xunit;
 using ZmqSharp.Messages;
 
-namespace ZmqSharp.Tests.Messages;
+namespace ZmqSharp.Tests;
 
 public sealed class ZMessageTests
 {
@@ -13,64 +13,36 @@ public sealed class ZMessageTests
         byte[] source = [1, 2, 3];
         using var message = ZMessage.FromOwned(source);
         message.FrameCount.Should().Be(1);
-        message.GetOrigin(0).Should().Be(ZBufferOrigin.Owned);
         message.GetFrame(0).ToArray().Should().Equal(source);
-        message.Whole.ToArray().Should().Equal(source);
+        message.Payload.ToArray().Should().Equal(source);
+        message.TryGetContiguousFrame(0, out var memory).Should().BeTrue();
+        memory.ToArray().Should().Equal(source);
 
         source[1] = 9;
         message.GetFrame(0).FirstSpan[1].Should().Be(9);
     }
 
     [Fact]
-    public void ToOwnedArray_IsIndependentCopy()
-    {
-        byte[] source = [1, 2, 3];
-        using var message = ZMessage.FromOwned(source);
-        var copy = message.ToOwnedArray();
-        copy.Should().Equal(source);
-
-        copy[0] = 42;
-        message.GetFrame(0).FirstSpan[0].Should().Be(1);
-    }
-
-    [Fact]
-    public void ToOwnedArray_Multipart_ConcatenatesInOrder()
+    public void Multipart_FramesAreAccessibleAndPayloadConcatenates()
     {
         using var message = MessageFactory.Multipart("ab"u8.ToArray(), "cde"u8.ToArray());
-        message.ToOwnedArray().Should().Equal("abcde"u8.ToArray());
+        message.FrameCount.Should().Be(2);
+        message.GetFrame(0).ToArray().Should().Equal("ab"u8.ToArray());
+        message.GetFrame(1).ToArray().Should().Equal("cde"u8.ToArray());
+        message.Payload.ToArray().Should().Equal("abcde"u8.ToArray());
+        message.TryGetContiguousFrame(1, out var memory).Should().BeTrue();
+        memory.ToArray().Should().Equal("cde"u8.ToArray());
     }
 
     [Fact]
-    public void TryTakeOwner_SingleFramePooled_TransfersAndMessageDoesNotReturn()
+    public void SegmentedFrame_IsNotContiguous_ButReadable()
     {
-        using var pool = new CountingMemoryPool();
-        var message = MessageFactory.PooledSingleFrame(pool, "hello"u8.ToArray());
-
-        message.TryTakeOwner(out var owner).Should().BeTrue();
-        var taken = owner ?? throw new InvalidOperationException("expected an owner");
-
-        message.Dispose();
-        pool.Outstanding.Should().Be(1);
-        taken.Dispose();
-        pool.Outstanding.Should().Be(0);
-    }
-
-    [Fact]
-    public void TryTakeOwner_Multipart_Rejects()
-    {
-        using var pool = new CountingMemoryPool();
-        var message = MessageFactory.PooledMultipart(pool, "a"u8.ToArray(), "b"u8.ToArray());
-
-        message.TryTakeOwner(out _).Should().BeFalse();
-        message.Dispose();
-        pool.Outstanding.Should().Be(0);
-    }
-
-    [Fact]
-    public void TryTakeOwner_Owned_Rejects()
-    {
-        using var message = ZMessage.FromOwned([1, 2, 3]);
-        message.TryTakeOwner(out _).Should().BeFalse();
+        using var message = MessageFactory.SegmentedFrame([1, 2, 3], [4, 5]);
+        byte[] expected = [1, 2, 3, 4, 5];
+        message.FrameCount.Should().Be(1);
+        message.TryGetContiguousFrame(0, out _).Should().BeFalse();
+        message.GetFrame(0).ToArray().Should().Equal(expected);
+        message.Payload.ToArray().Should().Equal(expected);
     }
 
     [Fact]
@@ -82,32 +54,24 @@ public sealed class ZMessageTests
 
         var act = () => message.GetFrame(0);
         act.Should().Throw<ObjectDisposedException>();
-        var actFrameCount = () => message.FrameCount;
-        actFrameCount.Should().Throw<ObjectDisposedException>();
-        var actWhole = () => message.Whole;
-        actWhole.Should().Throw<ObjectDisposedException>();
-        var actTryContiguous = () => message.TryGetContiguousFrame(0, out _);
-        actTryContiguous.Should().Throw<ObjectDisposedException>();
-        var actTryOwner = () => message.TryTakeOwner(out _);
-        actTryOwner.Should().Throw<ObjectDisposedException>();
-    }
-
-    [Fact]
-    public void FrameSpanningSegments_IsSequence_NotContiguous()
-    {
-        using var message = MessageFactory.SegmentedFrame([1, 2, 3], [4, 5]);
-        byte[] expected = [1, 2, 3, 4, 5];
-
-        message.TryGetContiguousFrame(0, out _).Should().BeFalse();
-        message.GetFrame(0).ToArray().Should().Equal(expected);
-        message.Whole.ToArray().Should().Equal(expected);
+        var actPayload = () => message.Payload;
+        actPayload.Should().Throw<ObjectDisposedException>();
     }
 
     [Fact]
     public void GetFrame_OutOfRange_Throws()
     {
-        using var message = ZMessage.FromOwned([1, 2, 3]);
-        var act = () => message.GetFrame(1);
+        using var message = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        var act = () => message.GetFrame(2);
         act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void PooledMultipart_ReturnsBuffersOnDispose()
+    {
+        using var pool = new CountingMemoryPool();
+        var message = MessageFactory.PooledMultipart(pool, "a"u8.ToArray(), "b"u8.ToArray());
+        message.Dispose();
+        pool.Outstanding.Should().Be(0);
     }
 }

@@ -50,15 +50,15 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
     Task CloseAsync(CancellationToken token = default);
 
-    // Receive, two layers: callback (borrowed) + optional channel (owned).
-    event ZBorrowedMessageHandler? OnMessage;
-    ChannelReader<ZMessage>? Messages { get; }
+    // Receive, two layers: streaming frame callback (borrowed) + optional channel (assembled).
+    event ZFrameHandler? OnFrame;
+    ChannelReader<IZMessage>? Messages { get; }
 
     // Send, two layers: direct (ownership transfer) + optional send channel.
     ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
-    ValueTask SendAsync(ZMessage message, CancellationToken token = default);
-    bool TrySend(ZMessage message);
-    ChannelWriter<ZMessage>? Outbound { get; }
+    ValueTask SendAsync(IZMessage message, CancellationToken token = default);
+    bool TrySend(IZMessage message);
+    ChannelWriter<IZMessage>? Outbound { get; }
 }
 ```
 
@@ -80,8 +80,8 @@ public static class ZSocketExtensions
 - `Messages` / `Outbound` are non-null only when the socket was configured
   with channel capacities in `ZSocketOptions`; otherwise the socket is
   callback/direct only (D11).
-- `OnMessage` delivers a borrowed `ZMessageView` (valid only during the event,
-  0001 D4); the channel delivers owned `ZMessage` instances.
+- `OnFrame` delivers each frame as it arrives (borrowed, valid only during the
+  call); the channel delivers assembled `ZMessage` / `ZMultiMessage` instances.
 
 ## 3. ZSocketBase
 

@@ -6,32 +6,24 @@ using ZmqSharp.Messages;
 namespace ZmqSharp.Zmtp;
 
 /// <summary>
-/// Pipe-free ZMTP 3.0 parser (NULL mechanism): frame-header length lookahead,
-/// policy-driven materialization, and dual-mode delivery. Call ParseAsync once
-/// per connection; borrowed mode reuses a scratch buffer with zero steady-state
-/// allocation. EOF is treated as connection close (partial data is discarded and
-/// never delivered); protocol violations throw ZeroMqProtocolException.
+/// Pipe-free ZMTP 3.0 parser (NULL mechanism): frame-header length lookahead and
+/// streaming frame delivery. Call ParseAsync once per connection; a reusable
+/// scratch buffer keeps the steady state allocation-free. EOF is treated as
+/// connection close (partial data is discarded and never delivered); protocol
+/// violations throw ZeroMqProtocolException.
 /// </summary>
 public sealed class ZmtpParser : IDisposable
 {
-    private const int SegmentBlockSize = 8192;
     private const int InitialScratchSize = 4096;
     private const int ScratchShrinkThreshold = 1 << 20;
 
     private readonly Stream stream;
-    private readonly ZReceiveOptions options;
     private readonly MemoryPool<byte> pool;
     private readonly byte[] headerBuffer = new byte[9];
 
-    private readonly ZMessageData borrowedData = new();
-    private readonly ZSegment borrowedSegment = new()
-    {
-        Origin = ZBufferOrigin.Pooled,
-    };
     private IMemoryOwner<byte>? scratchOwner;
     private Memory<byte> scratch;
     private int scratchUsed;
-    private ZMessageData? ownedData;
 
     private readonly Lock gateLock = new();
     private TaskCompletionSource gate = CreateGate();
@@ -39,16 +31,14 @@ public sealed class ZmtpParser : IDisposable
     private static TaskCompletionSource CreateGate()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public ZmtpParser(Stream stream, ZReceiveOptions options, MemoryPool<byte>? pool = null)
+    public ZmtpParser(Stream stream, MemoryPool<byte>? pool = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        ArgumentNullException.ThrowIfNull(options);
         this.stream = stream;
-        this.options = options;
         this.pool = pool ?? MemoryPool<byte>.Shared;
     }
 
-    /// <summary>Call after a borrowed callback returns false to resume the receive loop.</summary>
+    /// <summary>Call after a streaming callback returns false to resume the receive loop.</summary>
     public void Resume()
     {
         lock (gateLock)
@@ -61,23 +51,23 @@ public sealed class ZmtpParser : IDisposable
     public async ValueTask ParseAsync(IZMessageSink sink, CancellationToken token = default)
     {
         ArgumentNullException.ThrowIfNull(sink);
-        if (!await ReadGreetingAsync(token))
-        {
-            return;
-        }
-
-        if (!await ReadHandshakeAsync(token))
-        {
-            return;
-        }
-
         try
         {
+            if (!await ReadGreetingAsync(token))
+            {
+                return;
+            }
+
+            if (!await ReadHandshakeAsync(token))
+            {
+                return;
+            }
+
             await ReadTrafficAsync(sink, token);
         }
         finally
         {
-            DisposeInFlight();
+            sink.OnConnectionEnded();
         }
     }
 
@@ -87,7 +77,6 @@ public sealed class ZmtpParser : IDisposable
         scratchOwner = null;
         scratch = Memory<byte>.Empty;
         scratchUsed = 0;
-        DisposeInFlight();
     }
 
     // ---- Greeting ----
@@ -210,213 +199,30 @@ public sealed class ZmtpParser : IDisposable
                 continue;
             }
 
-            if (!await ReadMessageAsync(header.Value, sink, token))
+            if (header.Value.Size > int.MaxValue)
             {
-                return;
-            }
-        }
-    }
-
-    private async ValueTask<bool> ReadMessageAsync(FrameHeader first, IZMessageSink sink, CancellationToken token)
-    {
-        var firstContext = new ZReceiveContext(ReadOnlySequence<byte>.Empty, 0, first.Size, 0);
-        var firstAction = ResolveAction(sink, firstContext);
-        var mode = firstAction.Mode;
-
-        if (mode == ZReceiveMode.Borrowed)
-        {
-            borrowedData.SetSingleSegment(borrowedSegment);
-            scratchUsed = 0;
-        }
-        else
-        {
-            ownedData = new ZMessageData();
-        }
-
-        var header = first;
-        long bytesSeen = 0;
-        var framesSeen = 0;
-        while (true)
-        {
-            var action = firstAction;
-            if (framesSeen > 0)
-            {
-                var firstFrame = mode == ZReceiveMode.Borrowed
-                    ? borrowedData.GetFrame(0)
-                    : (ownedData ?? throw new InvalidOperationException("message data is not initialized")).GetFrame(0);
-                var context = new ZReceiveContext(firstFrame, bytesSeen, header.Size, framesSeen);
-                var decided = ResolveAction(sink, context);
-                action = new ZReceiveAction { Mode = mode, Contiguous = decided.Contiguous };
+                throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
             }
 
-            if (!await MaterializeFrameAsync(header, action, token))
-            {
-                DisposeInFlight();
-                return false;
-            }
-
-            bytesSeen += header.Size;
-            framesSeen++;
-
-            if (!header.Flags.HasFlag(ZmtpFrameFlags.More))
-            {
-                break;
-            }
-
-            var next = await TryReadFrameHeaderAsync(token);
-            if (next is null)
-            {
-                DisposeInFlight();
-                return false;
-            }
-
-            if (next.Value.Flags.HasFlag(ZmtpFrameFlags.Command))
-            {
-                throw new ZeroMqProtocolException("command frame interleaved inside a message");
-            }
-
-            header = next.Value;
-        }
-
-        await DeliverMessageAsync(sink, mode, token);
-        return true;
-    }
-
-    private ZReceiveAction ResolveAction(IZMessageSink sink, in ZReceiveContext context)
-    {
-        var decided = sink.Decide(context) ?? options.Decide?.Invoke(context);
-        if (decided is { } action)
-        {
-            return action;
-        }
-
-        var contiguous = options.ContiguousFrameLimit > 0 &&
-                         context.NextFrameSize <= options.ContiguousFrameLimit;
-        return new ZReceiveAction { Mode = options.Policy, Contiguous = contiguous };
-    }
-
-    private async ValueTask<bool> MaterializeFrameAsync(
-        FrameHeader header,
-        ZReceiveAction action,
-        CancellationToken token)
-    {
-        if (header.Size > int.MaxValue)
-        {
-            throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
-        }
-
-        var length = (int)header.Size;
-
-        if (action.Mode == ZReceiveMode.Borrowed)
-        {
+            var length = (int)header.Value.Size;
             EnsureScratchCapacity(checked(scratchUsed + length));
             var target = scratch.Slice(scratchUsed, length);
             if (!await TryReadExactlyAsync(target, token))
             {
-                return false;
+                return;
             }
 
-            borrowedData.AddFrame(0, scratchUsed, length);
-            scratchUsed += length;
-            borrowedSegment.Memory = scratch[..scratchUsed];
-            return true;
-        }
-
-        var data = ownedData ?? throw new InvalidOperationException("message data is not initialized");
-        var contiguous = action.Contiguous && length <= options.ContiguousFrameLimit;
-        if (contiguous)
-        {
-            var segment = await ReadContiguousAsync(length, action.Mode, token);
-            if (segment is null)
-            {
-                return false;
-            }
-
-            data.AddSegment(segment);
-            data.AddFrame(data.SegmentCount - 1, 0, length);
-            return true;
-        }
-
-        var firstSegment = data.SegmentCount;
-        long remaining = length;
-        while (remaining > 0)
-        {
-            var blockLength = (int)Math.Min(remaining, SegmentBlockSize);
-            var segment = await ReadContiguousAsync(blockLength, action.Mode, token);
-            if (segment is null)
-            {
-                return false;
-            }
-
-            data.AddSegment(segment);
-            remaining -= blockLength;
-        }
-
-        data.AddFrame(firstSegment, 0, length);
-        return true;
-    }
-
-    private async ValueTask<ZSegment?> ReadContiguousAsync(int length, ZReceiveMode mode, CancellationToken token)
-    {
-        if (mode == ZReceiveMode.Owned)
-        {
-            var array = GC.AllocateUninitializedArray<byte>(length);
-            if (!await TryReadExactlyAsync(array, token))
-            {
-                return null;
-            }
-
-            return new ZSegment { Origin = ZBufferOrigin.Owned, Memory = array };
-        }
-
-        var owner = pool.Rent(length);
-        if (!await TryReadExactlyAsync(owner.Memory[..length], token))
-        {
-            owner.Dispose();
-            return null;
-        }
-
-        return new ZSegment
-        {
-            Origin = ZBufferOrigin.Pooled,
-            Owner = owner,
-            Memory = owner.Memory[..length],
-        };
-    }
-
-    private async ValueTask DeliverMessageAsync(IZMessageSink sink, ZReceiveMode mode, CancellationToken token)
-    {
-        if (mode == ZReceiveMode.Borrowed)
-        {
-            borrowedSegment.Memory = scratch[..scratchUsed];
-            var view = new ZMessageView(borrowedData);
-            var keepGoing = sink.OnBorrowed(view, token);
-            borrowedData.Reset();
+            var frame = new ZFrame(
+                scratch[scratchUsed..(scratchUsed + length)],
+                header.Value.Flags.HasFlag(ZmtpFrameFlags.More));
+            var keepGoing = sink.OnFrame(frame, token);
             scratchUsed = 0;
             MaybeShrinkScratch();
             if (!keepGoing)
             {
                 await WaitForResumeAsync(token);
             }
-
-            return;
         }
-
-        var data = ownedData ?? throw new InvalidOperationException("message data is not initialized");
-        ownedData = null;
-        var message = new ZMessage(data);
-        if (!sink.OnOwned(message, token))
-        {
-            message.Dispose();
-        }
-    }
-
-    private void DisposeInFlight()
-    {
-        ownedData?.Dispose();
-        ownedData = null;
-        borrowedData.Reset();
-        scratchUsed = 0;
     }
 
     // ---- Read helpers ----

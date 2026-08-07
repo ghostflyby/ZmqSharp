@@ -43,7 +43,7 @@ public sealed class ZmtpFrameEncoder(Stream stream)
         await stream.WriteAsync(body, token);
     }
 
-    public async ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
+    public async ValueTask WriteMessageAsync(IZMessage message, CancellationToken token = default)
     {
         for (int i = 0; i < message.FrameCount; i++)
         {

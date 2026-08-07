@@ -51,21 +51,24 @@ The message surface spans two layers:
 ## 4. Low-Level Callback Contract
 
 ```csharp
-public readonly struct ZMessageView
+public readonly struct ZFrame
 {
-    public int FrameCount { get; }
-    public ReadOnlySequence<byte> Frame(int i);
-    public bool TryGetContiguousFrame(int i, out ReadOnlyMemory<byte> mem);
+    public ReadOnlyMemory<byte> Memory { get; }
+    public bool More { get; }
 }
 
-public delegate bool ZBorrowedMessageHandler(ZMessageView message, CancellationToken token);
+public delegate bool ZFrameHandler(ZFrame frame, CancellationToken token);
 // true  = keep receiving
 // false = pause the receive pump (backpressure), resumed via Resume()
 ```
 
 Rules:
 
-- Borrowed: data is valid only during the callback; references must not be kept.
+- Streaming: the callback is invoked once per frame as it is read; a multipart
+  message arrives as consecutive frames until `More` is false. No upfront
+  assembly is required, so consumers can process frames incrementally.
+- Borrowed: a frame's memory is valid only during the call; references must not
+  be kept (the parser reuses its scratch buffer).
 - Synchronous and serialized; never concurrent.
 - `false` only means "pause"; dropping messages is a high-layer Channel policy, never mixed into the low-level bool.
 
@@ -75,12 +78,14 @@ Rules:
 public sealed class ZSocketChannel : IAsyncDisposable
 {
     // BoundedChannelOptions.Capacity = HWM
-    public ChannelReader<ZMessage> Inbound { get; }
+    public ChannelReader<IZMessage> Inbound { get; }
     public void CompleteInbound(Exception? error = null);
 }
 ```
 
-- Subscribes to the low-level callback at construction; materializes messages per the receive policy and calls `writer.TryWrite`.
+- Subscribes to the low-level frame callback at construction; materializes each
+  frame (rent + copy into a pooled buffer), assembles `ZMessage` / `ZMultiMessage`
+  at the last frame, and calls `writer.TryWrite`.
 - Full: `TryWrite` fails -> callback returns false (pause); a background resumer waits on `writer.WaitToWriteAsync()` and resumes with a low-watermark hysteresis at `Count <= capacity / 2` to avoid thrashing at the boundary.
 - Drop mode (for PUB-like lossy semantics) is an explicit option, off by default.
 - Protocol errors -> `writer.TryComplete(exception)`, visible to consumers.
@@ -90,35 +95,38 @@ public sealed class ZSocketChannel : IAsyncDisposable
 ## 6. Message Model
 
 ```csharp
-public enum ZBufferOrigin { Pooled, Owned }
-
-public sealed class ZMessage : IDisposable
+public interface IZMessage : IDisposable
 {
-    public static ZMessage FromOwned(byte[] data);           // send side: permanent ownership, zero copy
+    int FrameCount { get; }
+    ReadOnlySequence<byte> GetFrame(int index);
+    bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory);
+    ReadOnlySequence<byte> Payload { get; }
+}
+
+public sealed class ZMessage : IZMessage          // single frame
+{
+    public static ZMessage FromOwned(byte[] data); // zero copy, Dispose never touches a pool
+    public void Dispose();                         // idempotent
+}
+
+public sealed class ZMultiMessage : IZMessage      // multipart, one buffer per frame
+{
     public int FrameCount { get; }
-    public ZBufferOrigin Origin { get; }                     // per segment
-    public ReadOnlySequence<byte> Frame(int i);
-    public bool TryGetContiguousFrame(int i, out ReadOnlyMemory<byte> mem);
-    public byte[] ToOwnedArray();                            // retain: copy into GC storage
-    public bool TryTakeOwner(out IMemoryOwner<byte> owner);  // single frame: transfer return responsibility
-    public void Dispose();                                   // idempotent
+    public void Dispose();                         // idempotent
 }
 ```
 
 Invariants:
 
-- A contiguous message is one where every frame lies in a single segment; otherwise frames may span segments.
-- Frame structure (protocol semantics) is orthogonal to memory layout (performance).
-- Views are borrowed and never Disposed; the class is the sole Dispose responsibility point.
-- `Dispose` is idempotent (guarded by `Interlocked`) and returns all Pooled segments; Owned segments only drop references.
-- Ownership is recorded per segment; multipart messages may mix Pooled and Owned segments.
-
-Ownership paths:
-
-- Pooled: rented from a `MemoryPool<byte>`, returned on `Dispose`.
-- Owned: `FromOwned` (send) or `ToOwnedArray` (retain after receive); GC-managed, never touches a pool.
-- `TryTakeOwner`: single-frame deferred return (transfers return responsibility), not permanent ownership.
-- No `Detach()`: the standard pool abstractions do not support it; permanent ownership must be decided before allocation.
+- Storage is a struct array of segments; each segment holds an `object Owner`
+  that is either the `byte[]` itself (owned) or an `IMemoryOwner<byte>`
+  (pooled). The two boundary classes are the only custom reference types.
+- Contiguous means a frame does not span segments. Frames are contiguous by
+  default; a single frame may span segments (non-contiguous).
+- Multi-segment `ReadOnlySequence` values are built on demand over the BCL
+  `ReadOnlySequenceSegment` facility; nodes are transient and never stored.
+- `Dispose` is idempotent (guarded by `Interlocked`) and returns Pooled
+  segments; Owned segments (the `byte[]`) are only dropped.
 
 ## 7. Receive Pipeline (No Pipe)
 
@@ -146,36 +154,14 @@ Socket.ReceiveAsync -> pooled buffer -> parser -> policy decision -> delivery (v
 
 ## 10. Receive Policy and Extension Points
 
-```csharp
-public enum ZReceiveMode { Borrowed, Pooled, Owned }
-
-public sealed class ZReceiveOptions
-{
-    public ZReceiveMode Policy { get; init; } = ZReceiveMode.Pooled;
-    public int ContiguousFrameLimit { get; init; } = 85_000;   // 0 = fully segmented
-
-    // v2: application-level policy hook, reserved for now
-    public ZMessageDecider? Decide { get; init; }
-}
-
-public readonly struct ZReceiveContext
-{
-    public ReadOnlySequence<byte> FirstFrame { get; }
-    public long BytesSeen { get; }
-    public long NextFrameSize { get; }
-    public int FramesSeen { get; }
-}
-
-public readonly struct ZReceiveAction
-{
-    public ZReceiveMode Mode { get; init; }
-    public bool Contiguous { get; init; }
-}
-```
-
-- Single decision point: after the frame header, before materialization. The v1 fixed logic is the branch at this point; adding the hook changes only this spot.
-- Constraint: `Borrowed` and forced contiguity are mutually exclusive (contiguity implies materialization).
-- Application advantage: the first frame/prefix plus the known frame size can predict "cache -> Owned" or "huge -> segmented streaming"; the ZMTP layer alone cannot predict total message size.
+The parser has no materialization policy: it streams every frame as it is read
+into a reusable scratch region (borrowed, valid during the callback) via
+`ZFrameHandler`. Multipart messages arrive as consecutive frames until
+`More` is false. Assembly into owned `ZMessage` / `ZMultiMessage` happens at
+the high-level bridge, which materializes each frame (rent + copy into a pooled
+buffer) and writes the assembled message to the channel. Backpressure:
+returning false pauses the receive pump; the bridge pauses when the channel is
+full and resumes with hysteresis.
 
 ## 11. Engineering Constraints
 

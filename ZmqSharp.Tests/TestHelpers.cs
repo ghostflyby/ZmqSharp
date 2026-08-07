@@ -99,65 +99,57 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
 /// <summary>Test factory for building ZMessage instances directly.</summary>
 internal static class MessageFactory
 {
-    public static ZMessage Multipart(params byte[][] frames)
-    {
-        var data = new ZMessageData();
-        foreach (var frame in frames)
-        {
-            data.AddSegment(new ZSegment { Origin = ZBufferOrigin.Owned, Memory = frame });
-            data.AddFrame(data.SegmentCount - 1, 0, frame.Length);
-        }
-
-        return new ZMessage(data);
-    }
+    public static ZMessage SingleFrame(byte[] payload)
+        => new(new ZBufferRef(payload, payload));
 
     public static ZMessage PooledSingleFrame(MemoryPool<byte> pool, byte[] payload)
     {
         var owner = pool.Rent(payload.Length);
         payload.CopyTo(owner.Memory);
-        var data = new ZMessageData();
-        data.AddSegment(new ZSegment
-        {
-            Origin = ZBufferOrigin.Pooled,
-            Owner = owner,
-            Memory = owner.Memory[..payload.Length],
-        });
-        data.AddFrame(0, 0, payload.Length);
-        return new ZMessage(data);
+        return new ZMessage(new ZBufferRef(owner, owner.Memory[..payload.Length]));
     }
 
-    public static ZMessage PooledMultipart(MemoryPool<byte> pool, params byte[][] frames)
+    public static ZMessage SegmentedFrame(params byte[][] segments)
     {
-        var data = new ZMessageData();
+        var more = segments.Length > 1
+            ? (ZBufferRef[]?)[.. segments.Skip(1).Select(segment => new ZBufferRef(segment, segment))]
+            : null;
+        return new ZMessage(new ZBufferRef(segments[0], segments[0]), more);
+    }
+
+    public static ZMultiMessage Multipart(params byte[][] frames)
+        => new([.. frames.Select(frame => new ZBufferRef(frame, frame))]);
+
+    public static ZMultiMessage PooledMultipart(MemoryPool<byte> pool, params byte[][] frames)
+    {
+        var refs = new List<ZBufferRef>(frames.Length);
         foreach (var frame in frames)
         {
             var owner = pool.Rent(frame.Length);
             frame.CopyTo(owner.Memory);
-            data.AddSegment(new ZSegment
-            {
-                Origin = ZBufferOrigin.Pooled,
-                Owner = owner,
-                Memory = owner.Memory[..frame.Length],
-            });
-            data.AddFrame(data.SegmentCount - 1, 0, frame.Length);
+            refs.Add(new ZBufferRef(owner, owner.Memory[..frame.Length]));
         }
 
-        return new ZMessage(data);
+        return new ZMultiMessage([.. refs]);
+    }
+}
+
+/// <summary>Captures streamed frames (copied, since frames are borrowed).</summary>
+internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFrame = null) : IZMessageSink
+{
+    public List<byte[]> Frames { get; } = [];
+
+    public List<bool> MoreFlags { get; } = [];
+
+    public bool OnFrame(ZFrame frame, CancellationToken token)
+    {
+        Frames.Add(frame.Memory.ToArray());
+        MoreFlags.Add(frame.More);
+        return onFrame?.Invoke(frame, token) ?? true;
     }
 
-    /// <summary>Single frame spanning multiple segments (segmented frame).</summary>
-    public static ZMessage SegmentedFrame(params byte[][] segments)
+    public void OnConnectionEnded()
     {
-        var data = new ZMessageData();
-        var total = 0;
-        foreach (var segment in segments)
-        {
-            data.AddSegment(new ZSegment { Origin = ZBufferOrigin.Owned, Memory = segment });
-            total += segment.Length;
-        }
-
-        data.AddFrame(0, 0, total);
-        return new ZMessage(data);
     }
 }
 
