@@ -71,18 +71,9 @@ public sealed class ZMessage : IZMessage
             state = 0;
         }
 
-        public ReadOnlySequence<byte> Current
-        {
-            get
-            {
-                if (state != 1)
-                {
-                    throw new InvalidOperationException("enumeration has not started or has already finished");
-                }
-
-                return message[0];
-            }
-        }
+        public ReadOnlySequence<byte> Current => state != 1
+            ? throw new InvalidOperationException("enumeration has not started or has already finished")
+            : message[0];
 
         object IEnumerator.Current => Current;
 
@@ -156,14 +147,18 @@ public sealed class ZMessage : IZMessage
 
     private ReadOnlySequence<byte> BuildSequence()
     {
-        var segments = new List<ReadOnlyMemory<byte>>(1 + (more?.Length ?? 0)) { first.Memory };
-        if (more is null) return ZSequence.Build([.. segments]);
+        return more is null
+            ? new ReadOnlySequence<byte>(first.Memory)
+            : ZSequence.Build(IterateSegments(more));
+    }
+
+    private IEnumerable<ReadOnlyMemory<byte>> IterateSegments(ZBufferRef[] more)
+    {
+        yield return first.Memory;
         foreach (var segment in more)
         {
-            segments.Add(segment.Memory);
+            yield return segment.Memory;
         }
-
-        return ZSequence.Build([.. segments]);
     }
 
     private void ThrowIfDisposed()
@@ -173,4 +168,52 @@ public sealed class ZMessage : IZMessage
             throw new ObjectDisposedException(nameof(ZMessage));
         }
     }
+}
+
+/// <summary>
+/// Transient ReadOnlySequence building over the BCL ReadOnlySequenceSegment
+/// facility. Nodes are created per call and never stored by messages.
+/// </summary>
+internal static class ZSequence
+{
+    public static ReadOnlySequence<byte> Build(IEnumerable<ReadOnlyMemory<byte>> segments)
+    {
+        using var enumerator = segments.GetEnumerator();
+        if (!enumerator.MoveNext())
+        {
+            return ReadOnlySequence<byte>.Empty;
+        }
+
+        var first = enumerator.Current;
+        if (!enumerator.MoveNext())
+        {
+            return new ReadOnlySequence<byte>(first);
+        }
+
+        ZSequenceSegment head = new(first, 0);
+        var tail = head;
+        var running = first.Length;
+        do
+        {
+            var memory = enumerator.Current;
+            var node = new ZSequenceSegment(memory, running);
+            tail.SetNext(node);
+            tail = node;
+            running += memory.Length;
+        }
+        while (enumerator.MoveNext());
+
+        return new ReadOnlySequence<byte>(head, 0, tail, tail.Memory.Length);
+    }
+}
+
+internal sealed class ZSequenceSegment : ReadOnlySequenceSegment<byte>
+{
+    public ZSequenceSegment(ReadOnlyMemory<byte> memory, long runningIndex)
+    {
+        Memory = memory;
+        RunningIndex = runningIndex;
+    }
+
+    public void SetNext(ZSequenceSegment next) => Next = next;
 }

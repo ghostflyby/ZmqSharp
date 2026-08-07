@@ -69,6 +69,15 @@ public sealed class ZMessageTests
     }
 
     [Fact]
+    public void SegmentedFrame_ManySegments_ReadsInOrder()
+    {
+        using var message = MessageFactory.SegmentedFrame([1], [2], [3], [4], [5]);
+
+        message[0].ToArray().Should().Equal([1, 2, 3, 4, 5]);
+        message[0].Length.Should().Be(5);
+    }
+
+    [Fact]
     public void Dispose_IsIdempotent_AndAccessThrows()
     {
         var message = ZMessage.FromOwned([1, 2, 3]);
