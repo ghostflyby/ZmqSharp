@@ -24,15 +24,15 @@ Non-goals:
 ```text
 Application
   |
-  +-- ZSocketChannel   high layer: queue API (Channel), takes over the low-level callback at construction
-  +-- ZSocket          pattern layer (REQ/REP, DEALER/ROUTER, PUB/SUB)
+  +-- ZQueueSocket     high layer: queue API (Channel), per-peer queues, takes over the low-level callback at construction (0002)
+  +-- IZSocket         low-layer primitive: borrowed frame callback + direct send (0002)
   +-- ZMTP Session     per-peer connection: greeting / handshake / traffic
   +-- Transport        TCP / IPC / inproc (pluggable)
 ```
 
 The message surface spans two layers:
 
-- Low layer: borrowed `ZMessageView`, zero allocation, valid only during the callback.
+- Low layer: borrowed `ZFrame` streamed to the callback, zero allocation, valid only during the call.
 - High layer: owned `ZMessage` (sealed class), may escape; the consumer is responsible for Dispose.
 
 ## 3. Key Decisions
@@ -72,20 +72,21 @@ Rules:
 - Synchronous and serialized; never concurrent.
 - `false` only means "pause"; dropping messages is a high-layer Channel policy, never mixed into the low-level bool.
 
-## 5. High-Level Channel Bridge
+## 5. High-Level Queue Socket
 
 ```csharp
-public sealed class ZSocketChannel : IAsyncDisposable
+public sealed class ZQueueSocket : IAsyncDisposable   // defined in 0002
 {
-    // BoundedChannelOptions.Capacity = HWM
-    public ChannelReader<IZMessage> Inbound { get; }
-    public void CompleteInbound(Exception? error = null);
+    // BoundedChannelOptions.Capacity = per-peer HWM
+    public ChannelReader<IZMessage> Messages { get; }
+    public void Complete(Exception? error = null);
 }
 ```
 
-- Subscribes to the low-level frame callback at construction; materializes each
-  frame (rent + copy into a pooled buffer), assembles `ZMessage` / `ZMultiMessage`
-  at the last frame, and calls `writer.TryWrite`.
+- Subscribes to the low-level frame callback at construction; per peer, the
+  parser materializes each frame directly into its final pooled/owned buffer
+  (0004 constraint 1), assembles `ZMessage` / `ZMultiMessage` at the last
+  frame, and writes the per-peer queue (0004).
 - Full: `TryWrite` fails -> callback returns false (pause); a background resumer waits on `writer.WaitToWriteAsync()` and resumes with a low-watermark hysteresis at `Count <= capacity / 2` to avoid thrashing at the boundary.
 - Drop mode (for PUB-like lossy semantics) is an explicit option, off by default.
 - Protocol errors -> `writer.TryComplete(exception)`, visible to consumers.
@@ -95,12 +96,11 @@ public sealed class ZSocketChannel : IAsyncDisposable
 ## 6. Message Model
 
 ```csharp
-public interface IZMessage : IDisposable
+public interface IZMessage : IReadOnlyList<ReadOnlySequence<byte>>, IDisposable
 {
-    int FrameCount { get; }
-    ReadOnlySequence<byte> GetFrame(int index);
+    // Count, this[int], GetEnumerator(): frames of the message.
     bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory);
-    ReadOnlySequence<byte> Payload { get; }
+    bool TryGetOwnedArray(int index, out byte[] array); // owned, single-segment (0003)
 }
 
 public sealed class ZMessage : IZMessage          // single frame
@@ -111,7 +111,7 @@ public sealed class ZMessage : IZMessage          // single frame
 
 public sealed class ZMultiMessage : IZMessage      // multipart, one buffer per frame
 {
-    public int FrameCount { get; }
+    public int Count { get; }
     public void Dispose();                         // idempotent
 }
 ```
@@ -131,13 +131,14 @@ Invariants:
 ## 7. Receive Pipeline (No Pipe)
 
 ```text
-Socket.ReceiveAsync -> pooled buffer -> parser -> policy decision -> delivery (view or owned class)
+Socket.ReceiveAsync -> parser -> materialization policy -> per-peer queue -> socket-type aggregation
 ```
 
-- Contiguous frames: the header carries the size, so rent a pooled buffer of exactly that size, fill it (ReadExactly semantics), and deliver a single segment. One copy; the delivered buffer is the final buffer.
+- Contiguous frames: the header carries the size, so rent a pooled buffer of exactly that size, fill it (ReadExactly semantics), and deliver a single segment. The delivered buffer is the final buffer; there is no second copy (0004 constraint 1).
 - Segmented frames: rent fixed blocks (8KB suggested), chained into a `ReadOnlySequence<byte>`.
 - `ContiguousFrameLimit` defaults to 85,000 (LOH threshold): frames up to the limit are contiguous; larger frames are segmented (stay off the LOH); frames over 1MB (the `ArrayPool<byte>.Shared` 2^20 cap) are forced segmented.
 - No Pipe: its model targets streaming parsers that retain unconsumed bytes; a message protocol knows lengths up front, so renting on demand is simpler. Under pure-streaming semantics, segmentation vs contiguity is only a performance parameter.
+- The pooled/owned choice per message is the receive policy (0003).
 
 ## 8. Send Path
 
@@ -154,14 +155,13 @@ Socket.ReceiveAsync -> pooled buffer -> parser -> policy decision -> delivery (v
 
 ## 10. Receive Policy and Extension Points
 
-The parser has no materialization policy: it streams every frame as it is read
-into a reusable scratch region (borrowed, valid during the callback) via
-`ZFrameHandler`. Multipart messages arrive as consecutive frames until
-`More` is false. Assembly into owned `ZMessage` / `ZMultiMessage` happens at
-the high-level bridge, which materializes each frame (rent + copy into a pooled
-buffer) and writes the assembled message to the channel. Backpressure:
-returning false pauses the receive pump; the bridge pauses when the channel is
-full and resumes with hysteresis.
+The low-level callback streams every frame as it is read into a reusable
+scratch region (borrowed, valid during the callback) via `ZFrameHandler`.
+Multipart messages arrive as consecutive frames until `More` is false. Queue
+materialization is a separate concern (0003): the parser reads each frame
+directly into its final pooled/owned buffer (0004 constraint 1) and writes the
+assembled message into the per-peer queue. Backpressure: the callback's false
+pauses the receive pump; a full per-peer queue pauses only that peer.
 
 ## 11. Engineering Constraints
 
@@ -178,4 +178,6 @@ The authoritative list lives in AGENTS.md. Highlights: xUnit tests with FluentAs
 ## 13. Follow-ups
 
 - The pattern layer (routing, REQ/REP state machine) gets its own document.
+- 0002 defines the socket architecture; 0003 the receive policy; 0004 the
+  per-peer queue model and performance constraints.
 - Open questions: connection-level heartbeat (PING/PONG, ZMTP 3.1) and streaming consumption APIs for very large frames (>1MB).
