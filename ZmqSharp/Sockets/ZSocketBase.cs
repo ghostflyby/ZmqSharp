@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Net.Sockets;
 using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
@@ -236,6 +237,17 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         {
             failure = ex;
             TrackBackground(StopAsync());
+        }
+        catch (Exception ex) when (ex is IOException or SocketException)
+        {
+            // An IO failure ends this peer. Cancelling the socket aborts
+            // pending reads/writes, which on Windows can surface as a reset
+            // instead of OperationCanceledException; that teardown race is
+            // not a real failure and is not reported.
+            if (!Cts.IsCancellationRequested)
+            {
+                failure = ex;
+            }
         }
         finally
         {

@@ -167,6 +167,31 @@ public sealed class ZSocketTests
         await FluentActions.Awaiting(() => messages.Completion).Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
+    [Fact]
+    public async Task PeerConnectionReset_EndsPeerWithoutFaultingDispose()
+    {
+        var port = GetFreePort();
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions());
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        await server.BindAsync($"tcp://127.0.0.1:{port}");
+
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, port);
+        var stream = raw.GetStream();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()));
+        await stream.FlushAsync();
+
+        // Abortive close: force a reset so the server's pending read fails with an IO error.
+        raw.Client.LingerState = new LingerOption(true, 0);
+        raw.Dispose();
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        failure.Should().BeAssignableTo<IOException>();
+
+        await server.DisposeAsync();
+    }
+
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<IZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
