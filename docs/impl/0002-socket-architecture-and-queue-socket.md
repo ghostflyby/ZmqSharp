@@ -201,4 +201,4 @@ socket type subtype and, for the queue surface, wraps it in
 
 - 0003: receive policy (pooled/owned, Decide, continuity, owned `byte[]`).
 - 0004: per-peer queue model and performance constraints.
-- 0005: reconnect with backoff, heartbeat, ERROR handling, PLAIN/CURVE.
+- 0006: reconnect with backoff, heartbeat, ERROR handling, PLAIN/CURVE.
