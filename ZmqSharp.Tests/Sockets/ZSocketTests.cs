@@ -144,7 +144,8 @@ public sealed class ZSocketTests
     [Fact]
     public async Task Close_CompletesReceiveChannel()
     {
-        await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        await socket.DisposeAsync();
         socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
 
