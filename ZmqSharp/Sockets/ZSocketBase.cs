@@ -204,18 +204,28 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ZFrameHandler sink;
         lock (StateLock)
         {
+            if (Volatile.Read(ref Closed) == 1)
+            {
+                // The socket closed while this connection was being accepted;
+                // drop it without faulting the accept loop.
+                connection.Dispose();
+                return;
+            }
+
             sink = frameSinkFactory?.Invoke(connection) ?? ((frame, ct) => RaiseOnFrame(frame));
         }
 
         connection.SetFrameHandler((frame, ct) => DeliverFrameCore(parser, frame, sink));
 
+        // Start the connection pump before the peer becomes routable so the
+        // ZMTP handshake is written first; outbound frames must never precede it.
+        var pump = RunConnectionAsync(connection, parser);
         lock (StateLock)
         {
-            ThrowIfClosed();
             peers.Add(new Peer(connection, endpoint, parser));
         }
 
-        TrackBackground(RunConnectionAsync(connection, parser));
+        TrackBackground(pump);
     }
 
     private async Task RunConnectionAsync(IZConnection connection, ZmtpParser parser)
@@ -223,8 +233,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         Exception? failure = null;
         try
         {
-            await connection.WriteAsync(ZmtpFrameEncoder.NullGreeting, Cts.Token);
-            await connection.SendCommandAsync(ReadyCommand, Cts.Token);
+            await connection.WriteAsync(ZmtpFrameEncoder.BuildHandshake(ReadyCommand), Cts.Token);
             if (await parser.EstablishAsync(Cts.Token))
             {
                 await parser.ParseAsync(Cts.Token);
