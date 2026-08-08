@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Xunit;
+using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -89,7 +90,8 @@ public sealed class ZmtpParserTests
         var frames = new List<byte[]>();
         var recorder = new FrameRecorder(onFrame: (frame, _) =>
         {
-            frames.Add(frame.Memory.ToArray());
+            frame.TryGetValue(out ZSegment segment);
+            frames.Add(segment.Memory.ToArray());
             if (frames.Count == 1)
             {
                 firstDelivered.TrySetResult();

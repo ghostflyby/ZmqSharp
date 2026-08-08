@@ -59,7 +59,7 @@ internal sealed class ZConnection(Stream stream) : IZConnection
         }
     }
 
-    public async ValueTask SendAsync(IZMessage message, CancellationToken token = default)
+    public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
     {
         await writeGate.WaitAsync(token);
         try

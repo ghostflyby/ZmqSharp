@@ -22,7 +22,7 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
     /// <summary>Direct send: transfers ownership; the socket disposes the message after routing.</summary>
-    ValueTask SendAsync(IZMessage message, CancellationToken token = default);
+    ValueTask SendAsync(ZMessage message, CancellationToken token = default);
 
     /// <summary>Direct send: copies the payload into an owned message before routing.</summary>
     ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);

@@ -9,7 +9,7 @@ public sealed class ZDealerSocket(ZSocketOptions options) : ZSocketBase(options)
     private int next;
 
     protected override IReadOnlyList<IZConnection> RouteOutbound(
-        IZMessage message,
+        ZMessage message,
         IReadOnlyList<IZConnection> peers)
     {
         if (peers.Count == 0)

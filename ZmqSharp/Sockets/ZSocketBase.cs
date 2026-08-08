@@ -36,7 +36,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     /// <summary>Selects the outbound connection(s) for a message; empty = drop.</summary>
     protected abstract IReadOnlyList<IZConnection> RouteOutbound(
-        IZMessage message,
+        ZMessage message,
         IReadOnlyList<IZConnection> peers);
 
     public event ZFrameHandler? OnFrame
@@ -188,10 +188,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         await AwaitBackgroundAsync();
     }
 
-    public async ValueTask SendAsync(IZMessage message, CancellationToken token = default)
+    public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
     {
         ThrowIfClosed();
-        ArgumentNullException.ThrowIfNull(message);
         try
         {
             var targets = RouteOutbound(message, SnapshotPeers());
@@ -212,7 +211,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ThrowIfClosed();
         var owner = Pool.Rent(bytes.Length);
         bytes.CopyTo(owner.Memory);
-        var message = new ZMessage(new ZBufferRef(owner, owner.Memory[..bytes.Length]));
+        var message = new ZMessage(new ZSingleMessage(
+            new ZFrame(new ZSegment(owner, owner.Memory[..bytes.Length]))));
         await SendAsync(message, token);
     }
 

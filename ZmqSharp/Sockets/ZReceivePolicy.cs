@@ -24,7 +24,7 @@ public readonly struct ZReceiveAllocation
     /// </summary>
     public bool Segmented { get; init; }
 
-    public bool Continious => !Segmented;
+    public bool Contiguous => !Segmented;
 }
 
 /// <summary>Frame context plus message accumulation passed to the decide hook.</summary>

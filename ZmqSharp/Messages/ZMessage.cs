@@ -1,232 +1,111 @@
-using System.Buffers;
 using System.Collections;
 
 namespace ZmqSharp.Messages;
 
 /// <summary>
-/// Owned single-frame message. The frame is one buffer (contiguous) or spans
-/// several segments (non-contiguous). Dispose is idempotent and returns Pooled
-/// segments; after Dispose every accessor throws ObjectDisposedException.
+/// A message with two cases: Single (one frame) or Multi (several frames).
+/// The cases are types (ZSingleMessage / ZMultiMessage); this type is constructed from one
+/// of them and exposes each case through a TryGetValue overload.
 /// </summary>
-public sealed class ZMessage : IZMessage
+public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 {
-    private readonly ZBufferRef first;
-    private readonly ZBufferRef[]? more;
-    private int disposed;
+    private readonly ZSingleMessage? single; // Single case
+    private readonly ZMultiMessage? multi;   // Multi case
 
-    internal ZMessage(ZBufferRef first, ZBufferRef[]? more = null)
-    {
-        this.first = first;
-        this.more = more;
-    }
+    public ZMessage(ZSingleMessage single) => this.single = single;
 
-    /// <summary>Builds a message from a caller array (zero copy, Dispose never touches a pool).</summary>
+    public ZMessage(ZMultiMessage multi) => this.multi = multi;
+
+    /// <summary>Builds a single-frame owned message (zero copy; Dispose never touches a pool).</summary>
     public static ZMessage FromOwned(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        return new ZMessage(new ZBufferRef(data, data));
+        return new ZMessage(new ZSingleMessage(new ZFrame(new ZSegment(data, data))));
     }
 
-    public int Count
+    public bool TryGetValue(out ZSingleMessage singleMessage)
     {
-        get
-        {
-            ThrowIfDisposed();
-            return 1;
-        }
+        singleMessage = single.GetValueOrDefault();
+        return single is not null;
     }
 
-    public ReadOnlySequence<byte> this[int index]
+    public bool TryGetValue(out ZMultiMessage multiMessage)
     {
-        get
-        {
-            ThrowIfDisposed();
-            ArgumentOutOfRangeException.ThrowIfNotEqual(index, 0);
-
-            return more is null
-                ? new ReadOnlySequence<byte>(first.Memory)
-                : BuildSequence();
-        }
+        multiMessage = multi.GetValueOrDefault();
+        return multi is not null;
     }
+
+    public int Count => multi?.Count ?? 1;
+
+    public ZFrame this[int index]
+        => multi is null ? single.GetValueOrDefault()[index] : multi.Value[index];
 
     public Enumerator GetEnumerator()
-    {
-        ThrowIfDisposed();
-        return new Enumerator(this);
-    }
+        => multi is null ? new Enumerator(single.GetValueOrDefault()) : new Enumerator(multi.Value);
 
-    IEnumerator<ReadOnlySequence<byte>> IEnumerable<ReadOnlySequence<byte>>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    /// <summary>Struct enumerator: zero allocation for foreach.</summary>
-    public struct Enumerator : IEnumerator<ReadOnlySequence<byte>>
+    public void Dispose()
     {
-        private readonly ZMessage message;
-        private int state;
+        single?.Dispose();
+        multi?.Dispose();
+    }
 
-        internal Enumerator(ZMessage message)
+    public struct Enumerator : IEnumerator<ZFrame>
+    {
+        private readonly ZSingleMessage? singleMessage;
+        private readonly ZMultiMessage? multiMessage;
+        private int index;
+
+        internal Enumerator(ZSingleMessage singleMessage)
         {
-            this.message = message;
-            state = 0;
+            this.singleMessage = singleMessage;
+            multiMessage = null;
+            index = -1;
         }
 
-        public ReadOnlySequence<byte> Current => state != 1
-            ? throw new InvalidOperationException("enumeration has not started or has already finished")
-            : message[0];
+        internal Enumerator(ZMultiMessage multiMessage)
+        {
+            this.multiMessage = multiMessage;
+            singleMessage = null;
+            index = -1;
+        }
+
+        public ZFrame Current
+        {
+            get
+            {
+                var count = singleMessage is not null ? 1 : multiMessage.GetValueOrDefault().Count;
+                if (index < 0 || index >= count)
+                {
+                    throw new InvalidOperationException("enumeration has not started or has already finished");
+                }
+
+                return singleMessage is not null ? singleMessage.GetValueOrDefault()[index] : multiMessage.GetValueOrDefault()[index];
+            }
+        }
 
         object IEnumerator.Current => Current;
 
         public bool MoveNext()
         {
-            if (state == 0)
+            var count = singleMessage is not null ? 1 : multiMessage.GetValueOrDefault().Count;
+            if (index + 1 < count)
             {
-                state = 1;
+                index++;
                 return true;
             }
 
-            state = 2;
+            index = count;
             return false;
         }
 
-        public void Reset() => state = 0;
+        public void Reset() => index = -1;
 
         public void Dispose()
         {
         }
     }
-
-    public bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory)
-    {
-        ThrowIfDisposed();
-        if (index != 0 || more is not null)
-        {
-            memory = default;
-            return false;
-        }
-
-        memory = first.Memory;
-        return true;
-    }
-
-    public bool TryGetOwnedArray(int index, out byte[] array)
-    {
-        ThrowIfDisposed();
-        if (index != 0 || more is not null || first.Owner is not byte[] owned)
-        {
-            array = [];
-            return false;
-        }
-
-        array = owned;
-        return true;
-    }
-
-    internal int SegmentCount
-    {
-        get
-        {
-            ThrowIfDisposed();
-            return 1 + (more?.Length ?? 0);
-        }
-    }
-
-    internal ZBufferRef GetSegment(int index)
-    {
-        ThrowIfDisposed();
-        if (index == 0)
-        {
-            return first;
-        }
-
-        if (more is not null && index <= more.Length)
-        {
-            return more[index - 1];
-        }
-
-        throw new ArgumentOutOfRangeException(nameof(index));
-    }
-
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-        first.Release();
-        if (more is null) return;
-        foreach (var segment in more)
-        {
-            segment.Release();
-        }
-    }
-
-    private ReadOnlySequence<byte> BuildSequence()
-    {
-        return more is null
-            ? new ReadOnlySequence<byte>(first.Memory)
-            : ZSequence.Build(IterateSegments(more));
-    }
-
-    private IEnumerable<ReadOnlyMemory<byte>> IterateSegments(ZBufferRef[] more)
-    {
-        yield return first.Memory;
-        foreach (var segment in more)
-        {
-            yield return segment.Memory;
-        }
-    }
-
-    private void ThrowIfDisposed()
-    {
-        if (Volatile.Read(ref disposed) == 1)
-        {
-            throw new ObjectDisposedException(nameof(ZMessage));
-        }
-    }
-}
-
-/// <summary>
-/// Transient ReadOnlySequence building over the BCL ReadOnlySequenceSegment
-/// facility. Nodes are created per call and never stored by messages.
-/// </summary>
-internal static class ZSequence
-{
-    public static ReadOnlySequence<byte> Build(IEnumerable<ReadOnlyMemory<byte>> segments)
-    {
-        using var enumerator = segments.GetEnumerator();
-        if (!enumerator.MoveNext())
-        {
-            return ReadOnlySequence<byte>.Empty;
-        }
-
-        var first = enumerator.Current;
-        if (!enumerator.MoveNext())
-        {
-            return new ReadOnlySequence<byte>(first);
-        }
-
-        ZSequenceSegment head = new(first, 0);
-        var tail = head;
-        var running = first.Length;
-        do
-        {
-            var memory = enumerator.Current;
-            var node = new ZSequenceSegment(memory, running);
-            tail.SetNext(node);
-            tail = node;
-            running += memory.Length;
-        }
-        while (enumerator.MoveNext());
-
-        return new ReadOnlySequence<byte>(head, 0, tail, tail.Memory.Length);
-    }
-}
-
-internal sealed class ZSequenceSegment : ReadOnlySequenceSegment<byte>
-{
-    public ZSequenceSegment(ReadOnlyMemory<byte> memory, long runningIndex)
-    {
-        Memory = memory;
-        RunningIndex = runningIndex;
-    }
-
-    public void SetNext(ZSequenceSegment next) => Next = next;
 }

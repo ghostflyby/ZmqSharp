@@ -7,7 +7,7 @@ namespace ZmqSharp.Sockets;
 public sealed class ZPairSocket(ZSocketOptions options) : ZSocketBase(options)
 {
     protected override IReadOnlyList<IZConnection> RouteOutbound(
-        IZMessage message,
+        ZMessage message,
         IReadOnlyList<IZConnection> peers)
         => peers.Count == 0 ? [] : [peers[0]];
 }

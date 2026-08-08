@@ -29,7 +29,7 @@ public sealed class ZSocketTests
         var echoTask = EchoAsync(server, serverMessages, cts.Token);
         byte[][] frames = ["ping"u8.ToArray(), "pong"u8.ToArray()];
 
-        IZMessage? echo = null;
+        ZMessage? echo = null;
         for (var attempt = 0; attempt < 50 && echo is null; attempt++)
         {
             await client.SendAsync(MessageFactory.Multipart([..frames]), cts.Token);
@@ -38,8 +38,8 @@ public sealed class ZSocketTests
 
         var received = echo ?? throw new InvalidOperationException("no echo received within timeout");
         received.Count.Should().Be(2);
-        received[0].ToArray().Should().Equal(frames[0]);
-        received[1].ToArray().Should().Equal(frames[1]);
+        received[0].ToSequence().ToArray().Should().Equal(frames[0]);
+        received[1].ToSequence().ToArray().Should().Equal(frames[1]);
         received.Dispose();
 
         await cts.CancelAsync();
@@ -122,16 +122,17 @@ public sealed class ZSocketTests
                     break;
                 }
 
-                if (message[0].ToArray().AsSpan().SequenceEqual("a"u8))
+                var payload = message.Value[0].ToSequence().ToArray();
+                if (payload.AsSpan().SequenceEqual("a"u8))
                 {
                     hasA = true;
                 }
-                else if (message[0].ToArray().AsSpan().SequenceEqual("b"u8))
+                else if (payload.AsSpan().SequenceEqual("b"u8))
                 {
                     hasB = true;
                 }
 
-                message.Dispose();
+                message.Value.Dispose();
             }
         }
 
@@ -169,7 +170,7 @@ public sealed class ZSocketTests
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        IZMessage? received = null;
+        ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
             await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
@@ -177,10 +178,11 @@ public sealed class ZSocketTests
         }
 
         received.Should().NotBeNull();
-        received!.TryGetOwnedArray(0, out var array).Should().BeTrue();
+        received.Value[0].TryGetValue(out ZSegment segment).Should().BeTrue();
+        segment.GetOwnedArray(out var array).Should().BeTrue();
         array.Should().Equal("hello"u8.ToArray());
         var outstandingBeforeDispose = pool.Outstanding;
-        received.Dispose();
+        received.Value.Dispose();
         pool.Outstanding.Should().Be(outstandingBeforeDispose);
     }
 
@@ -204,7 +206,7 @@ public sealed class ZSocketTests
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        IZMessage? received = null;
+        ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
             await client.SendAsync(MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray()), cts.Token);
@@ -212,10 +214,12 @@ public sealed class ZSocketTests
         }
 
         received.Should().NotBeNull();
-        received.Count.Should().Be(2);
-        received.TryGetOwnedArray(0, out _).Should().BeFalse();
-        received.TryGetOwnedArray(1, out _).Should().BeTrue();
-        received.Dispose();
+        received.Value.Count.Should().Be(2);
+        received.Value[0].TryGetValue(out ZSegment first);
+        first.GetOwnedArray(out _).Should().BeFalse();
+        received.Value[1].TryGetValue(out ZSegment second);
+        second.GetOwnedArray(out _).Should().BeTrue();
+        received.Value.Dispose();
     }
 
     [Fact]
@@ -239,7 +243,7 @@ public sealed class ZSocketTests
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        IZMessage? received = null;
+        ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
             await client.SendAsync(ZMessage.FromOwned(payload), cts.Token);
@@ -247,9 +251,9 @@ public sealed class ZSocketTests
         }
 
         received.Should().NotBeNull();
-        received.TryGetContiguousFrame(0, out _).Should().BeFalse();
-        received[0].ToArray().Should().Equal(payload);
-        received.Dispose();
+        received.Value[0].TryGetValue(out ZSegments _).Should().BeTrue();
+        received.Value[0].ToSequence().ToArray().Should().Equal(payload);
+        received.Value.Dispose();
     }
 
     [Fact]
@@ -275,7 +279,7 @@ public sealed class ZSocketTests
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        IZMessage? received = null;
+        ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
             await client.SendAsync(MessageFactory.Multipart(first, second), cts.Token);
@@ -283,12 +287,12 @@ public sealed class ZSocketTests
         }
 
         received.Should().NotBeNull();
-        received.Count.Should().Be(2);
-        received.TryGetContiguousFrame(0, out _).Should().BeFalse();
-        received.TryGetContiguousFrame(1, out _).Should().BeFalse();
-        received[0].ToArray().Should().Equal(first);
-        received[1].ToArray().Should().Equal(second);
-        received.Dispose();
+        received.Value.Count.Should().Be(2);
+        received.Value[0].TryGetValue(out ZSegments _).Should().BeTrue();
+        received.Value[1].TryGetValue(out ZSegments _).Should().BeTrue();
+        received.Value[0].ToSequence().ToArray().Should().Equal(first);
+        received.Value[1].ToSequence().ToArray().Should().Equal(second);
+        received.Value.Dispose();
     }
 
     [Fact]
@@ -327,7 +331,7 @@ public sealed class ZSocketTests
 
         var small = new byte[10];
         var large = new byte[200];
-        var received = new List<IZMessage>();
+        var received = new List<ZMessage>();
         for (var attempt = 0; attempt < 50 && received.Count < 2; attempt++)
         {
             await client.SendAsync(ZMessage.FromOwned(small), cts.Token);
@@ -341,14 +345,16 @@ public sealed class ZSocketTests
                     break;
                 }
 
-                received.Add(message);
+                received.Add(message.Value);
             }
         }
 
-        var smallMessage = received.First(message => message[0].Length == small.Length);
-        var largeMessage = received.First(message => message[0].Length == large.Length);
-        smallMessage.TryGetOwnedArray(0, out _).Should().BeFalse();
-        largeMessage.TryGetOwnedArray(0, out _).Should().BeTrue();
+        var smallMessage = received.First(message => message[0].ToSequence().Length == small.Length);
+        var largeMessage = received.First(message => message[0].ToSequence().Length == large.Length);
+        smallMessage[0].TryGetValue(out ZSegment smallSegment);
+        smallSegment.GetOwnedArray(out _).Should().BeFalse();
+        largeMessage[0].TryGetValue(out ZSegment largeSegment);
+        largeSegment.GetOwnedArray(out _).Should().BeTrue();
         smallMessage.Dispose();
         largeMessage.Dispose();
     }
@@ -373,7 +379,7 @@ public sealed class ZSocketTests
         await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        IZMessage? received = null;
+        ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
             await client.SendAsync(ZMessage.FromOwned("x"u8.ToArray()), cts.Token);
@@ -381,9 +387,10 @@ public sealed class ZSocketTests
         }
 
         received.Should().NotBeNull();
-        received.TryGetOwnedArray(0, out _).Should().BeTrue();
+        received.Value[0].TryGetValue(out ZSegment segment);
+        segment.GetOwnedArray(out _).Should().BeTrue();
         var outstandingBeforeDispose = pool.Outstanding;
-        received.Dispose();
+        received.Value.Dispose();
         pool.Outstanding.Should().Be(outstandingBeforeDispose);
     }
 
@@ -431,7 +438,8 @@ public sealed class ZSocketTests
         var current = new List<byte[]>();
         server.OnFrame += (frame, ct) =>
         {
-            current.Add(frame.Memory.ToArray());
+            frame.TryGetValue(out ZSegment segment);
+            current.Add(segment.Memory.ToArray());
             if (!frame.More)
             {
                 received.Enqueue([.. current]);
@@ -505,7 +513,7 @@ public sealed class ZSocketTests
                 if (message is not null)
                 {
                     received = true;
-                    message.Dispose();
+                    message.Value.Dispose();
                 }
             }
 
@@ -514,7 +522,7 @@ public sealed class ZSocketTests
         }
     }
 
-    private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<IZMessage> messages, CancellationToken token)
+    private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
         {
@@ -532,8 +540,8 @@ public sealed class ZSocketTests
         }
     }
 
-    private static async Task<IZMessage?> TryReadAsync(
-        ChannelReader<IZMessage> reader,
+    private static async Task<ZMessage?> TryReadAsync(
+        ChannelReader<ZMessage> reader,
         TimeSpan timeout,
         CancellationToken token)
     {

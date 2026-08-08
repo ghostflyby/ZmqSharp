@@ -18,7 +18,7 @@ public interface IZConnection : IZMessageSink, IDisposable
 
     ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default);
 
-    ValueTask SendAsync(IZMessage message, CancellationToken token = default);
+    ValueTask SendAsync(ZMessage message, CancellationToken token = default);
 
     void SetFrameHandler(Func<ZFrame, CancellationToken, bool> onFrame);
 

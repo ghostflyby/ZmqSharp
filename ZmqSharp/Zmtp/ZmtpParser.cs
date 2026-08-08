@@ -7,7 +7,7 @@ using ZmqSharp.Transports;
 namespace ZmqSharp.Zmtp;
 
 /// <summary>Allocates the final segments for a frame in materialization mode.</summary>
-internal delegate ZFrameSegments ZFrameAllocator(int frameLength, bool more);
+internal delegate ZFrame ZFrameAllocator(int frameLength, bool more);
 
 /// <summary>
 /// Pipe-free ZMTP 3.0 parser (NULL mechanism): frame-header length lookahead and
@@ -224,20 +224,15 @@ public sealed class ZmtpParser : IDisposable
             var more = header.Flags.HasFlag(ZmtpFrameFlags.More);
             if (allocator is not null)
             {
-                var segments = allocator(length, more);
-                if (segments.Single is { } single)
+                var materialized = allocator(length, more);
+                if (materialized.TryGetValue(out ZSegment single))
                 {
                     if (!await TryReadExactlyAsync(single.Writable, token))
                     {
-                        if (single.Owner is IMemoryOwner<byte> memoryOwner)
-                        {
-                            memoryOwner.Dispose();
-                        }
-
+                        single.Dispose();
                         return;
                     }
 
-                    var materialized = new ZFrame(more, segments);
                     var materializedKeepGoing = connection.OnFrame(materialized, token);
                     if (!materializedKeepGoing)
                     {
@@ -247,28 +242,21 @@ public sealed class ZmtpParser : IDisposable
                     continue;
                 }
 
-                if (segments.Many is { } many)
+                if (materialized.TryGetValue(out ZSegments many))
                 {
-                    foreach (var segment in many)
+                    for (var i = 0; i < many.Count; i++)
                     {
+                        var segment = many[i];
                         if (await TryReadExactlyAsync(segment.Writable, token))
                         {
                             continue;
                         }
 
-                        foreach (var owned in many)
-                        {
-                            if (owned.Owner is IMemoryOwner<byte> memoryOwner)
-                            {
-                                memoryOwner.Dispose();
-                            }
-                        }
-
+                        many.Dispose();
                         return;
                     }
 
-                    var materializedMulti = new ZFrame(more, segments);
-                    var multiKeepGoing = connection.OnFrame(materializedMulti, token);
+                    var multiKeepGoing = connection.OnFrame(materialized, token);
                     if (!multiKeepGoing)
                     {
                         await WaitForResumeAsync(token);
@@ -286,13 +274,10 @@ public sealed class ZmtpParser : IDisposable
             }
 
             var frame = new ZFrame(
-                more,
-                new ZFrameSegments
-                {
-                    Single = new ZBufferRef(
-                        ZBufferRef.NoopOwner,
-                        scratch[scratchUsed..(scratchUsed + length)]),
-                });
+                new ZSegment(
+                    ZSegment.NoopOwner,
+                    scratch[scratchUsed..(scratchUsed + length)]),
+                more);
             var keepGoing = connection.OnFrame(frame, token);
             scratchUsed = 0;
             MaybeShrinkScratch();

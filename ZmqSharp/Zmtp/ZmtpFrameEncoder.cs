@@ -56,18 +56,37 @@ public sealed class ZmtpFrameEncoder(Stream stream)
         await stream.WriteAsync(body, token);
     }
 
-    public async ValueTask WriteMessageAsync(IZMessage message, CancellationToken token = default)
+    public async ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
     {
-        if (message is ZMessage single)
-        {
-            await WriteSingleMessageAsync(single, token);
-            return;
-        }
-
         for (int i = 0; i < message.Count; i++)
         {
             bool more = i < message.Count - 1;
             await WriteFrameAsync(message[i], more, token);
+        }
+    }
+
+    private async ValueTask WriteFrameAsync(ZFrame frame, bool more, CancellationToken token)
+    {
+        if (frame.TryGetValue(out ZSegment segment))
+        {
+            await WriteFrameHeaderAsync(segment.Memory.Length, more, token);
+            await stream.WriteAsync(segment.Memory, token);
+            return;
+        }
+
+        if (frame.TryGetValue(out ZSegments segments))
+        {
+            var length = 0L;
+            foreach (var seg in segments)
+            {
+                length += seg.Memory.Length;
+            }
+
+            await WriteFrameHeaderAsync(length, more, token);
+            foreach (var seg in segments)
+            {
+                await stream.WriteAsync(seg.Memory, token);
+            }
         }
     }
 
@@ -77,21 +96,6 @@ public sealed class ZmtpFrameEncoder(Stream stream)
         foreach (var memory in frame)
         {
             await stream.WriteAsync(memory, token);
-        }
-    }
-
-    private async ValueTask WriteSingleMessageAsync(ZMessage message, CancellationToken token)
-    {
-        var length = 0L;
-        for (var i = 0; i < message.SegmentCount; i++)
-        {
-            length += message.GetSegment(i).Memory.Length;
-        }
-
-        await WriteFrameHeaderAsync(length, more: false, token);
-        for (var i = 0; i < message.SegmentCount; i++)
-        {
-            await stream.WriteAsync(message.GetSegment(i).Memory, token);
         }
     }
 
