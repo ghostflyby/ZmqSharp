@@ -16,11 +16,13 @@ namespace ZmqSharp.Sockets;
 public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     where TSocket : ZSocketBase
 {
+    private const int SegmentBlockSize = 8192;
+
     private sealed class PeerState
     {
         public required Channel<IZMessage> Queue { get; init; }
 
-        public List<ZBufferRef> Accumulator { get; } = [];
+        public List<ZFrameSegments> Accumulator { get; } = [];
 
         public int FrameIndex { get; set; }
 
@@ -182,15 +184,19 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
     private bool OnPeerFrame(PeerState state, ZFrame frame)
     {
-        if (frame.Owner is { } owner)
-        {
-            state.Accumulator.Add(new ZBufferRef(owner, frame.Memory));
-        }
-        else
+        var frameSegments = frame.Segments;
+        if (frameSegments.Single is { Owner: var owner } && ReferenceEquals(owner, ZBufferRef.NoopOwner))
         {
             var poolOwner = Pool.Rent(frame.Memory.Length);
             frame.Memory.CopyTo(poolOwner.Memory);
-            state.Accumulator.Add(new ZBufferRef(poolOwner, poolOwner.Memory[..frame.Memory.Length]));
+            state.Accumulator.Add(new ZFrameSegments
+            {
+                Single = new ZBufferRef(poolOwner, poolOwner.Memory[..frame.Memory.Length]),
+            });
+        }
+        else
+        {
+            state.Accumulator.Add(frameSegments);
         }
 
         if (frame.More)
@@ -198,9 +204,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             return true;
         }
 
-        IZMessage message = state.Accumulator.Count == 1
-            ? new ZMessage(state.Accumulator[0])
-            : new ZMultiMessage([.. state.Accumulator]);
+        IZMessage message = BuildMessage(state.Accumulator);
         state.Accumulator.Clear();
         state.FrameIndex = 0;
         state.AccumulatedLength = 0;
@@ -213,6 +217,27 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         message.Dispose();
         TrackBackground(ResumePeerAsync(state));
         return false;
+    }
+
+    private static IZMessage BuildMessage(List<ZFrameSegments> frames)
+    {
+        if (frames.Count != 1)
+        {
+            return new ZMultiMessage([.. frames]);
+        }
+
+        var frame = frames[0];
+        if (frame.Single is { } single)
+        {
+            return new ZMessage(single);
+        }
+
+        if (frame.Many is { } many)
+        {
+            return new ZMessage(many[0], many[1..]);
+        }
+
+        return new ZMultiMessage([]);
     }
 
     private ZFrameAllocator CreateAllocator(IZConnection connection)
@@ -236,7 +261,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             state.AccumulatedLength = accumulated;
 
             var allocation = DecideAllocation(frameIndex, accumulated, length, more);
-            return Allocate(allocation.Mode, length);
+            return AllocateSegments(allocation, length);
         };
     }
 
@@ -261,16 +286,41 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         return receivePolicy.Decide(context);
     }
 
-    private (object Owner, Memory<byte> Memory) Allocate(ZReceiveMode mode, int length)
+    private ZBufferRef Allocate(ZReceiveMode mode, int length)
     {
         if (mode == ZReceiveMode.Owned)
         {
             var buffer = GC.AllocateUninitializedArray<byte>(length);
-            return (buffer, buffer);
+            return new ZBufferRef(buffer, buffer);
         }
 
         var owner = Pool.Rent(length);
-        return (owner, owner.Memory[..length]);
+        return new ZBufferRef(owner, owner.Memory[..length]);
+    }
+
+    private ZFrameSegments AllocateSegments(
+        ZReceiveAllocation allocation,
+        int length)
+    {
+        if (allocation.Segmented && length > SegmentBlockSize)
+        {
+            var count = (length + SegmentBlockSize - 1) / SegmentBlockSize;
+            var segments = new ZBufferRef[count];
+            var offset = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var blockLength = Math.Min(SegmentBlockSize, length - offset);
+                segments[i] = Allocate(allocation.Mode, blockLength);
+                offset += blockLength;
+            }
+
+            return new ZFrameSegments { Many = segments };
+        }
+
+        return new ZFrameSegments
+        {
+            Single = Allocate(allocation.Mode, length),
+        };
     }
 
     private async Task ResumePeerAsync(PeerState state)
@@ -300,7 +350,17 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
         foreach (var frame in state.Accumulator)
         {
-            frame.Release();
+            if (frame.Single is { } single)
+            {
+                single.Release();
+            }
+            else if (frame.Many is { } many)
+            {
+                foreach (var segment in many)
+                {
+                    segment.Release();
+                }
+            }
         }
 
         state.Accumulator.Clear();

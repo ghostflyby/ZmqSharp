@@ -219,6 +219,79 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task SegmentedMaterialization_SplitsLargeFrameIntoSegments()
+    {
+        var payload = new byte[9000];
+        for (var i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i % 251);
+        }
+
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            ReceivePolicy = new ZReceiveOptions { ContiguousFrameLimit = 100 },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        IZMessage? received = null;
+        for (var attempt = 0; attempt < 50 && received is null; attempt++)
+        {
+            await client.SendAsync(ZMessage.FromOwned(payload), cts.Token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        }
+
+        received.Should().NotBeNull();
+        received.TryGetContiguousFrame(0, out _).Should().BeFalse();
+        received[0].ToArray().Should().Equal(payload);
+        received.Dispose();
+    }
+
+    [Fact]
+    public async Task SegmentedMaterialization_MultipartFramesStayIndependent()
+    {
+        var first = new byte[9000];
+        var second = new byte[9000];
+        for (var i = 0; i < first.Length; i++)
+        {
+            first[i] = (byte)(i % 251);
+            second[i] = (byte)((i + 7) % 251);
+        }
+
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            ReceivePolicy = new ZReceiveOptions { ContiguousFrameLimit = 100 },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        IZMessage? received = null;
+        for (var attempt = 0; attempt < 50 && received is null; attempt++)
+        {
+            await client.SendAsync(MessageFactory.Multipart(first, second), cts.Token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        }
+
+        received.Should().NotBeNull();
+        received.Count.Should().Be(2);
+        received.TryGetContiguousFrame(0, out _).Should().BeFalse();
+        received.TryGetContiguousFrame(1, out _).Should().BeFalse();
+        received[0].ToArray().Should().Equal(first);
+        received[1].ToArray().Should().Equal(second);
+        received.Dispose();
+    }
+
+    [Fact]
     public void ReceiveOptions_Decide_UsesContiguousFrameLimit()
     {
         var policy = new ZReceiveOptions { ContiguousFrameLimit = 100 };

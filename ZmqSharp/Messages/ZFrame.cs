@@ -6,18 +6,35 @@ namespace ZmqSharp.Messages;
 /// </summary>
 public readonly struct ZFrame
 {
-    internal ZFrame(ReadOnlyMemory<byte> memory, bool more, object? owner = null)
+    private readonly ZFrameSegments segments;
+
+    internal ZFrame(bool more, ZFrameSegments segments)
     {
-        Memory = memory;
         More = more;
-        Owner = owner;
+        this.segments = segments;
     }
 
-    public ReadOnlyMemory<byte> Memory { get; }
+    public ReadOnlyMemory<byte> Memory
+    {
+        get
+        {
+            if (segments.Single is { } single)
+            {
+                return single.Memory;
+            }
+
+            if (segments.Many is { Length: > 0 } many)
+            {
+                return many[0].Memory;
+            }
+
+            return default;
+        }
+    }
 
     /// <summary>True when more frames of the same message follow.</summary>
     public bool More { get; }
 
-    /// <summary>Non-null when the frame was materialized (owner of the buffer); null for borrowed frames.</summary>
-    internal object? Owner { get; }
+    /// <summary>Segment structure of this frame.</summary>
+    internal ZFrameSegments Segments => segments;
 }

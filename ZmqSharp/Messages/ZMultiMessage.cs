@@ -4,16 +4,16 @@ using System.Collections;
 namespace ZmqSharp.Messages;
 
 /// <summary>
-/// Owned multipart message: each frame is one buffer (contiguous per frame);
-/// frames are the array elements. Dispose is idempotent and returns Pooled
-/// segments.
+/// Owned multipart message: each frame is one segment (contiguous) or spans
+/// several segments (non-contiguous); frames are the array elements. Dispose
+/// is idempotent and returns Pooled segments.
 /// </summary>
 public sealed class ZMultiMessage : IZMessage
 {
-    private readonly ZBufferRef[] frames;
+    private readonly ZFrameSegments[] frames;
     private int disposed;
 
-    internal ZMultiMessage(ZBufferRef[] frames) => this.frames = frames;
+    internal ZMultiMessage(ZFrameSegments[] frames) => this.frames = frames;
 
     public int Count
     {
@@ -34,7 +34,7 @@ public sealed class ZMultiMessage : IZMessage
                 throw new ArgumentOutOfRangeException(nameof(index));
             }
 
-            return new ReadOnlySequence<byte>(frames[index].Memory);
+            return FrameSequence(frames[index]);
         }
     }
 
@@ -51,10 +51,10 @@ public sealed class ZMultiMessage : IZMessage
     /// <summary>Struct enumerator: zero allocation for foreach.</summary>
     public struct Enumerator : IEnumerator<ReadOnlySequence<byte>>
     {
-        private readonly ZBufferRef[] frames;
+        private readonly ZFrameSegments[] frames;
         private int index;
 
-        internal Enumerator(ZBufferRef[] frames)
+        internal Enumerator(ZFrameSegments[] frames)
         {
             this.frames = frames;
             index = -1;
@@ -69,7 +69,7 @@ public sealed class ZMultiMessage : IZMessage
                     throw new InvalidOperationException("enumeration has not started or has already finished");
                 }
 
-                return new ReadOnlySequence<byte>(frames[index].Memory);
+                return FrameSequence(frames[index]);
             }
         }
 
@@ -97,20 +97,21 @@ public sealed class ZMultiMessage : IZMessage
     public bool TryGetContiguousFrame(int index, out ReadOnlyMemory<byte> memory)
     {
         ThrowIfDisposed();
-        if (index < 0 || index >= frames.Length)
+        if (index < 0 || index >= frames.Length || frames[index].Single is not { } single)
         {
             memory = default;
             return false;
         }
 
-        memory = frames[index].Memory;
+        memory = single.Memory;
         return true;
     }
 
     public bool TryGetOwnedArray(int index, out byte[] array)
     {
         ThrowIfDisposed();
-        if (index < 0 || index >= frames.Length || frames[index].Owner is not byte[] owned)
+        if (index < 0 || index >= frames.Length ||
+            frames[index].Single is not { Owner: byte[] owned })
         {
             array = [];
             return false;
@@ -122,16 +123,57 @@ public sealed class ZMultiMessage : IZMessage
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
         foreach (var frame in frames)
         {
-            frame.Release();
+            if (frame.Single is { } single)
+            {
+                single.Release();
+            }
+            else if (frame.Many is { } many)
+            {
+                foreach (var segment in many)
+                {
+                    segment.Release();
+                }
+            }
+        }
+    }
+
+    private static ReadOnlySequence<byte> FrameSequence(ZFrameSegments frame)
+    {
+        if (frame.Single is { } single)
+        {
+            return new ReadOnlySequence<byte>(single.Memory);
+        }
+
+        if (frame.Many is { } many)
+        {
+            return ZSequence.Build(IterateSegments(many));
+        }
+
+        return ReadOnlySequence<byte>.Empty;
+    }
+
+    private static IEnumerable<ReadOnlyMemory<byte>> IterateSegments(ZBufferRef[] segments)
+    {
+        foreach (var segment in segments)
+        {
+            yield return segment.Memory;
         }
     }
 
     private void ThrowIfDisposed()
     {
-        if (Volatile.Read(ref disposed) != 1) return;
+        if (Volatile.Read(ref disposed) != 1)
+        {
+            return;
+        }
+
         throw new ObjectDisposedException(nameof(ZMultiMessage));
     }
 }

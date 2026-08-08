@@ -119,16 +119,22 @@ internal static class MessageFactory
     }
 
     public static ZMultiMessage Multipart(params byte[][] frames)
-        => new([.. frames.Select(frame => new ZBufferRef(frame, frame))]);
+        => new([.. frames.Select(frame => new ZFrameSegments
+        {
+            Single = new ZBufferRef(frame, frame),
+        })]);
 
     public static ZMultiMessage PooledMultipart(MemoryPool<byte> pool, params byte[][] frames)
     {
-        var refs = new List<ZBufferRef>(frames.Length);
+        var refs = new List<ZFrameSegments>(frames.Length);
         foreach (var frame in frames)
         {
             var owner = pool.Rent(frame.Length);
             frame.CopyTo(owner.Memory);
-            refs.Add(new ZBufferRef(owner, owner.Memory[..frame.Length]));
+            refs.Add(new ZFrameSegments
+            {
+                Single = new ZBufferRef(owner, owner.Memory[..frame.Length]),
+            });
         }
 
         return new ZMultiMessage([.. refs]);

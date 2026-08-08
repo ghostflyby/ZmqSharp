@@ -6,8 +6,8 @@ using ZmqSharp.Transports;
 
 namespace ZmqSharp.Zmtp;
 
-/// <summary>Allocates the final buffer for a frame in materialization mode.</summary>
-internal delegate (object Owner, Memory<byte> Memory) ZFrameAllocator(int frameLength, bool more);
+/// <summary>Allocates the final segments for a frame in materialization mode.</summary>
+internal delegate ZFrameSegments ZFrameAllocator(int frameLength, bool more);
 
 /// <summary>
 /// Pipe-free ZMTP 3.0 parser (NULL mechanism): frame-header length lookahead and
@@ -224,25 +224,58 @@ public sealed class ZmtpParser : IDisposable
             var more = header.Flags.HasFlag(ZmtpFrameFlags.More);
             if (allocator is not null)
             {
-                var (owner, memory) = allocator(length, more);
-                if (!await TryReadExactlyAsync(memory, token))
+                var segments = allocator(length, more);
+                if (segments.Single is { } single)
                 {
-                    if (owner is IMemoryOwner<byte> memoryOwner)
+                    if (!await TryReadExactlyAsync(single.Writable, token))
                     {
-                        memoryOwner.Dispose();
+                        if (single.Owner is IMemoryOwner<byte> memoryOwner)
+                        {
+                            memoryOwner.Dispose();
+                        }
+
+                        return;
                     }
 
-                    return;
+                    var materialized = new ZFrame(more, segments);
+                    var materializedKeepGoing = connection.OnFrame(materialized, token);
+                    if (!materializedKeepGoing)
+                    {
+                        await WaitForResumeAsync(token);
+                    }
+
+                    continue;
                 }
 
-                var materialized = new ZFrame(memory, more, owner);
-                var materializedKeepGoing = connection.OnFrame(materialized, token);
-                if (!materializedKeepGoing)
+                if (segments.Many is { } many)
                 {
-                    await WaitForResumeAsync(token);
-                }
+                    foreach (var segment in many)
+                    {
+                        if (await TryReadExactlyAsync(segment.Writable, token))
+                        {
+                            continue;
+                        }
 
-                continue;
+                        foreach (var owned in many)
+                        {
+                            if (owned.Owner is IMemoryOwner<byte> memoryOwner)
+                            {
+                                memoryOwner.Dispose();
+                            }
+                        }
+
+                        return;
+                    }
+
+                    var materializedMulti = new ZFrame(more, segments);
+                    var multiKeepGoing = connection.OnFrame(materializedMulti, token);
+                    if (!multiKeepGoing)
+                    {
+                        await WaitForResumeAsync(token);
+                    }
+
+                    continue;
+                }
             }
 
             EnsureScratchCapacity(checked(scratchUsed + length));
@@ -252,7 +285,14 @@ public sealed class ZmtpParser : IDisposable
                 return;
             }
 
-            var frame = new ZFrame(scratch[scratchUsed..(scratchUsed + length)], more);
+            var frame = new ZFrame(
+                more,
+                new ZFrameSegments
+                {
+                    Single = new ZBufferRef(
+                        ZBufferRef.NoopOwner,
+                        scratch[scratchUsed..(scratchUsed + length)]),
+                });
             var keepGoing = connection.OnFrame(frame, token);
             scratchUsed = 0;
             MaybeShrinkScratch();
