@@ -159,7 +159,8 @@ public sealed class ZSocketTests
         {
             ReceiveCapacity = 4,
             Pool = pool,
-            ReceivePolicy = new ZReceiveOptions { Decide = _ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned } },
+            ReceivePolicy = new ZDelegateReceivePolicy(
+                _ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned }),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -184,6 +185,54 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task ReceivePolicy_DecidePerFrame_SplitsModesWithinMessage()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            Pool = pool,
+            ReceivePolicy = new ZDelegateReceivePolicy(
+                ctx => ctx.FrameIndex == 0
+                    ? new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }
+                    : new ZReceiveAllocation { Mode = ZReceiveMode.Owned }),
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        IZMessage? received = null;
+        for (var attempt = 0; attempt < 50 && received is null; attempt++)
+        {
+            await client.SendAsync(MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray()), cts.Token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        }
+
+        received.Should().NotBeNull();
+        received.Count.Should().Be(2);
+        received.TryGetOwnedArray(0, out _).Should().BeFalse();
+        received.TryGetOwnedArray(1, out _).Should().BeTrue();
+        received.Dispose();
+    }
+
+    [Fact]
+    public void ReceiveOptions_Decide_UsesContiguousFrameLimit()
+    {
+        var policy = new ZReceiveOptions { ContiguousFrameLimit = 100 };
+
+        var small = policy.Decide(new ZReceiveContext { FrameLength = 10 });
+        small.Mode.Should().Be(ZReceiveMode.Pooled);
+        small.Segmented.Should().BeFalse();
+
+        var large = policy.Decide(new ZReceiveContext { FrameLength = 200 });
+        large.Mode.Should().Be(ZReceiveMode.Pooled);
+        large.Segmented.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ReceivePolicy_DecideByFrameLength_MixesModes()
     {
         using var pool = new CountingMemoryPool();
@@ -191,12 +240,10 @@ public sealed class ZSocketTests
         {
             ReceiveCapacity = 8,
             Pool = pool,
-            ReceivePolicy = new ZReceiveOptions
-            {
-                Decide = ctx => ctx.FrameLength > 100
+            ReceivePolicy = new ZDelegateReceivePolicy(
+                ctx => ctx.FrameLength > 100
                     ? new ZReceiveAllocation { Mode = ZReceiveMode.Owned }
-                    : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled },
-            },
+                    : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 8 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -243,7 +290,7 @@ public sealed class ZSocketTests
             Pool = pool,
             ReceivePolicy = new ZReceiveOptions
             {
-                DefaultAllocation = new ZReceiveAllocation { Mode = ZReceiveMode.Owned },
+                Mode = ZReceiveMode.Owned
             },
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
@@ -261,7 +308,7 @@ public sealed class ZSocketTests
         }
 
         received.Should().NotBeNull();
-        received!.TryGetOwnedArray(0, out _).Should().BeTrue();
+        received.TryGetOwnedArray(0, out _).Should().BeTrue();
         var outstandingBeforeDispose = pool.Outstanding;
         received.Dispose();
         pool.Outstanding.Should().Be(outstandingBeforeDispose);

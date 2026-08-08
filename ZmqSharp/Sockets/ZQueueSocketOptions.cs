@@ -11,8 +11,8 @@ public sealed class ZQueueSocketOptions
     /// <summary>When set, enables the optional outbound channel with this capacity.</summary>
     public int? SendCapacity { get; init; }
 
-    /// <summary>Receive materialization policy; null = pooled.</summary>
-    public ZReceiveOptions? ReceivePolicy { get; init; }
+    /// <summary>Receive materialization policy; null = pooled, contiguous.</summary>
+    public IZReceivePolicy? ReceivePolicy { get; init; }
 
     public MemoryPool<byte>? Pool { get; init; }
 }

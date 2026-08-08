@@ -17,7 +17,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 {
     private static readonly byte[] ReadyCommand = [.. "READY\0"u8];
 
-    private readonly record struct Peer(IZConnection Connection, object? Endpoint, ZmtpParser Parser);
+    private readonly record struct Peer(IZConnection Connection, object? Endpoint);
 
     private readonly List<Peer> peers = [];
     private readonly List<(IZTransport Listener, object? Endpoint)> listeners = [];
@@ -25,6 +25,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
     private ZFrameHandler? onFrame;
     private Func<IZConnection, ZFrameHandler>? frameSinkFactory;
+    private Func<IZConnection, ZFrameAllocator>? allocatorFactory;
     private Action<IZConnection, Exception?>? peerEnded;
 
     protected ZSocketBase(ZSocketOptions options)
@@ -99,6 +100,26 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             }
 
             frameSinkFactory = factory;
+        }
+    }
+
+    /// <summary>
+    /// Registers a per-peer frame allocator factory; must be called before any
+    /// connection is established.
+    /// When set, the parser materializes each frame
+    /// directly into the allocated buffer instead of the borrowed scratch.
+    /// </summary>
+    internal void SetFrameAllocator(Func<IZConnection, ZFrameAllocator> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        lock (StateLock)
+        {
+            if (peers.Count > 0)
+            {
+                throw new InvalidOperationException("frame allocator must be set before connections are established");
+            }
+
+            allocatorFactory = factory;
         }
     }
 
@@ -203,9 +224,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint)
     {
-        var parser = new ZmtpParser(connection, Pool);
-        var established = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ZFrameAllocator? allocator;
         ZFrameHandler sink;
+        var established = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (StateLock)
         {
             if (Volatile.Read(ref Closed) == 1)
@@ -218,9 +239,11 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             }
 
             sink = frameSinkFactory?.Invoke(connection) ?? ((frame, _) => RaiseOnFrame(frame));
+            allocator = allocatorFactory?.Invoke(connection);
             establishedGates[connection] = established;
         }
 
+        var parser = new ZmtpParser(connection, allocator, Pool);
         connection.SetFrameHandler((frame, _) => DeliverFrameCore(parser, frame, sink));
 
         // Start the connection pump before the peer becomes routable so the
@@ -228,7 +251,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         var pump = RunConnectionAsync(connection, parser, established);
         lock (StateLock)
         {
-            peers.Add(new Peer(connection, endpoint, parser));
+            peers.Add(new Peer(connection, endpoint));
         }
 
         TrackBackground(pump);

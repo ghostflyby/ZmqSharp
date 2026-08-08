@@ -54,40 +54,72 @@ public enum ZReceiveMode
     Owned,  // GC.AllocateUninitializedArray; never touches a pool
 }
 
+public readonly struct ZReceiveAllocation
+{
+    public ZReceiveMode Mode { get; init; }
+    public bool Segmented { get; init; }   // false = contiguous (default)
+}
+
 public readonly struct ZReceiveContext
 {
     public int FrameLength { get; init; }
     public bool IsFirstFrame { get; init; }
     public bool HasMore { get; init; }
+    public int FrameIndex { get; init; }
+    public long AccumulatedLength { get; init; }
 }
 
-public delegate ZReceiveMode ZDecide(ZReceiveContext context);
-
-public sealed class ZReceiveOptions
+public interface IZReceivePolicy
 {
-    public ZReceiveMode DefaultMode { get; init; } = ZReceiveMode.Pooled;
-    public int ContiguousFrameLimit { get; init; } = 85_000;
-    public ZDecide? Decide { get; init; }
+    ZReceiveAllocation Decide(ZReceiveContext context);
 }
+
+public sealed class ZReceiveOptions : IZReceivePolicy
+{
+    public ZReceiveAllocation DefaultAllocation { get; init; } =
+        new() { Mode = ZReceiveMode.Pooled };
+
+    /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
+    public int ContiguousFrameLimit { get; init; } = 85_000;
+
+    public ZReceiveAllocation Decide(ZReceiveContext context)
+        => new()
+        {
+            Mode = DefaultAllocation.Mode,
+            Segmented = context.FrameLength > ContiguousFrameLimit,
+        };
+}
+
+public delegate ZReceiveAllocation ZDecide(ZReceiveContext context);
+public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy;
 ```
 
-- Carried by `ZQueueSocketOptions.ReceivePolicy` (0002); the low-tier
+- Carried by `ZQueueSocketOptions.ReceivePolicy` as an `IZReceivePolicy`
+  (0002); the low-tier
   `IZCallbackSocket.OnFrame` is not involved and stays borrowed.
-- `Decide` is invoked once per message, with the context of its first frame
-  (`IsFirstFrame == true`, `HasMore` set from that frame). A message's mode is
-  fixed for all of its frames; a mode split inside one multipart message is
-  not supported.
+- `Decide` is invoked **once per frame**, with the current frame's context
+  plus message accumulation: `FrameIndex` is the zero-based index within the
+  message and `AccumulatedLength` is the total bytes up to and including the
+  current frame. Later frames see the accumulated decisions implicitly through
+  these fields, so a message's frames may use different allocations (e.g. the
+  first frame pooled, a later large frame owned).
+- `ZReceiveOptions` is the configuration-only policy (fixed allocation);
+  custom policies implement `IZReceivePolicy` or wrap a `ZDecide` delegate
+  via `ZDelegateReceivePolicy`.
 - `Borrowed` is not a mode here: borrowed delivery is the identity of the
   `IZCallbackSocket` tier, not an option of queue materialization.
 
 ### 4.2 Continuity policy
 
 - Frames with length <= `ContiguousFrameLimit` materialize as a single
-  segment: one rent (or one allocation for owned) of exactly the frame
-  length; the parser reads into it directly (0004 constraint 1).
+  segment (one rent, or one allocation for owned, of exactly the frame
+  length; the parser reads into it directly, 0004 constraint 1).
 - Frames above the limit materialize as chained segments of
   `SegmentBlockSize` (8,192, matching 0001) so large frames stay off the LOH.
   `ContiguousFrameLimit = 0` forces all frames segmented.
+- Segmented materialization itself is not implemented yet (v1 materializes
+  contiguously), but the decision surface is live: `Decide` and
+  `ZReceiveOptions.ContiguousFrameLimit` already produce the `Segmented` flag.
 - Segmenting a large frame requires reading it in blocks. Two options, to be
   resolved in review:
   - (a) The parser gains an optional block-read mode that hands out a frame as
@@ -99,9 +131,9 @@ public sealed class ZReceiveOptions
 ### 4.3 Where materialization lives
 
 Each peer's receive pump (the peer's parser + materializer) applies the
-policy: on the message's first frame it evaluates `Decide` (or the default
-mode), then materializes every frame of that message into the peer's bounded
-receive queue. The socket type later aggregates the peer queues; it does not
+policy: for every frame it evaluates `Decide` with the frame's context and
+message accumulation, materializes that frame into the peer's bounded receive
+queue. The socket type later aggregates the peer queues; it does not
 re-materialize.
 
 ### 4.4 Owned byte[] access
@@ -130,9 +162,6 @@ public interface IZMessage
   asserts zero outstanding rentals.
 - `Decide` returning `Pooled` and `Decide == null`: plain pooled
   materialization, released on `Dispose`.
-- `ContiguousFrameLimit`: frames at/below the limit are single-segment;
-  `ContiguousFrameLimit = 0` produces segmented messages with correct
-  `TryGetContiguousFrame == false` and correct sequence content.
 - `TryGetOwnedArray`: true for owned single frames (same instance as the
   source array); false for pooled and segmented; throws after `Dispose`.
 - Zero extra copy: materialization rents the exact frame length and reads into

@@ -6,6 +6,9 @@ using ZmqSharp.Transports;
 
 namespace ZmqSharp.Zmtp;
 
+/// <summary>Allocates the final buffer for a frame in materialization mode.</summary>
+internal delegate (object Owner, Memory<byte> Memory) ZFrameAllocator(int frameLength, bool more);
+
 /// <summary>
 /// Pipe-free ZMTP 3.0 parser (NULL mechanism): frame-header length lookahead and
 /// streaming frame delivery. Call ParseAsync once per connection; a reusable
@@ -20,6 +23,7 @@ public sealed class ZmtpParser : IDisposable
 
     private readonly IZConnection connection;
     private readonly MemoryPool<byte> pool;
+    private readonly ZFrameAllocator? allocator;
     private readonly byte[] headerBuffer = new byte[9];
 
     private IMemoryOwner<byte>? scratchOwner;
@@ -33,10 +37,16 @@ public sealed class ZmtpParser : IDisposable
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public ZmtpParser(IZConnection connection, MemoryPool<byte>? pool = null)
+        : this(connection, null, pool ?? MemoryPool<byte>.Shared)
+    {
+    }
+
+    internal ZmtpParser(IZConnection connection, ZFrameAllocator? allocator, MemoryPool<byte> pool)
     {
         ArgumentNullException.ThrowIfNull(connection);
         this.connection = connection;
-        this.pool = pool ?? MemoryPool<byte>.Shared;
+        this.allocator = allocator;
+        this.pool = pool;
     }
 
     /// <summary>Call after a streaming callback returns false to resume the receive loop.</summary>
@@ -193,24 +203,48 @@ public sealed class ZmtpParser : IDisposable
     {
         while (true)
         {
-            var header = await TryReadFrameHeaderAsync(token);
-            if (header is null)
+            var nullableHeader = await TryReadFrameHeaderAsync(token);
+            if (nullableHeader is not {} header)
             {
                 return;
             }
 
-            if (header.Value.Flags.HasFlag(ZmtpFrameFlags.Command))
+            if (header.Flags.HasFlag(ZmtpFrameFlags.Command))
             {
-                await ReadBodyIntoScratchAsync(header.Value, token);
+                await ReadBodyIntoScratchAsync(header, token);
                 continue;
             }
 
-            if (header.Value.Size > int.MaxValue)
+            if (header.Size > int.MaxValue)
             {
                 throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
             }
 
-            var length = (int)header.Value.Size;
+            var length = (int)header.Size;
+            var more = header.Flags.HasFlag(ZmtpFrameFlags.More);
+            if (allocator is not null)
+            {
+                var (owner, memory) = allocator(length, more);
+                if (!await TryReadExactlyAsync(memory, token))
+                {
+                    if (owner is IMemoryOwner<byte> memoryOwner)
+                    {
+                        memoryOwner.Dispose();
+                    }
+
+                    return;
+                }
+
+                var materialized = new ZFrame(memory, more, owner);
+                var materializedKeepGoing = connection.OnFrame(materialized, token);
+                if (!materializedKeepGoing)
+                {
+                    await WaitForResumeAsync(token);
+                }
+
+                continue;
+            }
+
             EnsureScratchCapacity(checked(scratchUsed + length));
             var target = scratch.Slice(scratchUsed, length);
             if (!await TryReadExactlyAsync(target, token))
@@ -218,9 +252,7 @@ public sealed class ZmtpParser : IDisposable
                 return;
             }
 
-            var frame = new ZFrame(
-                scratch[scratchUsed..(scratchUsed + length)],
-                header.Value.Flags.HasFlag(ZmtpFrameFlags.More));
+            var frame = new ZFrame(scratch[scratchUsed..(scratchUsed + length)], more);
             var keepGoing = connection.OnFrame(frame, token);
             scratchUsed = 0;
             MaybeShrinkScratch();

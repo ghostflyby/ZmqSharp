@@ -17,35 +17,65 @@ public readonly struct ZReceiveAllocation
     public ZReceiveMode Mode { get; init; }
 
     /// <summary>
-    /// True = one contiguous segment per frame; false = chained segments.
-    /// Segmented materialization is not implemented yet (0003 open question);
-    /// v1 always materializes contiguously.
+    /// TODO:
+    /// True = chained segments; false (default) = one contiguous segment.
+    /// Segmented materialization is a 0003 open question; v1 always
+    /// materializes contiguously.
     /// </summary>
-    public bool Contiguous { get; init; }
+    public bool Segmented { get; init; }
+
+    public bool Continious => !Segmented;
 }
 
-/// <summary>Message-level context passed to the decide hook for its first frame.</summary>
+/// <summary>Frame context plus message accumulation passed to the decide hook.</summary>
 public readonly struct ZReceiveContext
 {
+    /// <summary>Length of the current frame.</summary>
     public int FrameLength { get; init; }
 
-    public bool IsFirstFrame { get; init; }
-
+    /// <summary>True when more frames of the same message follow.</summary>
     public bool HasMore { get; init; }
+
+    /// <summary>Zero-based index of the current frame within its message.</summary>
+    public int FrameIndex { get; init; }
+
+    /// <summary>Total bytes accumulated in the message up to and including this frame.</summary>
+    public long AccumulatedLength { get; init; }
+
+    /// <summary>True when this frame starts a message.</summary>
+    public bool IsFirstFrame => FrameIndex == 0;
 }
 
-/// <summary>Decides, per message, how its frames are allocated.</summary>
+/// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
+public interface IZReceivePolicy
+{
+    ZReceiveAllocation Decide(ZReceiveContext context);
+}
+
+/// <summary>Wraps a decide delegate as a policy.</summary>
+public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy
+{
+    public ZReceiveAllocation Decide(ZReceiveContext context) => decide(context);
+}
+
+/// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
 public delegate ZReceiveAllocation ZDecide(ZReceiveContext context);
 
-/// <summary>Receive materialization policy for the queue surface (0003).</summary>
-public sealed class ZReceiveOptions
+/// <summary>
+/// Numeric-configuration receive policy: fixed ownership plus a frame-length
+/// threshold that decides continuity.
+/// </summary>
+public sealed class ZReceiveOptions : IZReceivePolicy
 {
-    public ZReceiveAllocation DefaultAllocation { get; init; } =
-        new() { Mode = ZReceiveMode.Pooled, Contiguous = true };
+    public ZReceiveMode Mode { get; init; }
 
-    /// <summary>Frames up to this length stay contiguous; larger frames may be segmented (not yet implemented).</summary>
+    /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
 
-    /// <summary>When set, evaluated once per message on its first frame; overrides <see cref="DefaultAllocation"/>.</summary>
-    public ZDecide? Decide { get; init; }
+    public ZReceiveAllocation Decide(ZReceiveContext context)
+        => new()
+        {
+            Mode = Mode,
+            Segmented = context.FrameLength > ContiguousFrameLimit,
+        };
 }

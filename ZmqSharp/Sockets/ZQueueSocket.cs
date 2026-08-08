@@ -22,7 +22,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
         public List<ZBufferRef> Accumulator { get; } = [];
 
-        public ZReceiveAllocation Allocation { get; set; }
+        public int FrameIndex { get; set; }
+
+        public long AccumulatedLength { get; set; }
     }
 
     /// <summary>Reads from every peer queue; the peer queues are the only physical queues.</summary>
@@ -62,12 +64,10 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
-    private readonly ZReceiveOptions? receivePolicy;
+    private readonly IZReceivePolicy? receivePolicy;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
-    private static readonly ZReceiveAllocation DefaultAllocation =
-        new() { Mode = ZReceiveMode.Pooled, Contiguous = true };
 
     internal ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
         : base(options?.Pool ?? MemoryPool<byte>.Shared)
@@ -86,6 +86,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
 
         socket.SetFrameSink(OnPeerConnected);
+        socket.SetFrameAllocator(CreateAllocator);
         socket.PeerEnded += OnPeerEnded;
     }
 
@@ -181,22 +182,15 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
     private bool OnPeerFrame(PeerState state, ZFrame frame)
     {
-        if (state.Accumulator.Count == 0)
+        if (frame.Owner is { } owner)
         {
-            state.Allocation = DecideAllocation(frame);
-        }
-
-        if (state.Allocation.Mode == ZReceiveMode.Owned)
-        {
-            var buffer = GC.AllocateUninitializedArray<byte>(frame.Memory.Length);
-            frame.Memory.CopyTo(buffer);
-            state.Accumulator.Add(new ZBufferRef(buffer, buffer));
+            state.Accumulator.Add(new ZBufferRef(owner, frame.Memory));
         }
         else
         {
-            var owner = Pool.Rent(frame.Memory.Length);
-            frame.Memory.CopyTo(owner.Memory);
-            state.Accumulator.Add(new ZBufferRef(owner, owner.Memory[..frame.Memory.Length]));
+            var poolOwner = Pool.Rent(frame.Memory.Length);
+            frame.Memory.CopyTo(poolOwner.Memory);
+            state.Accumulator.Add(new ZBufferRef(poolOwner, poolOwner.Memory[..frame.Memory.Length]));
         }
 
         if (frame.More)
@@ -208,6 +202,8 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             ? new ZMessage(state.Accumulator[0])
             : new ZMultiMessage([.. state.Accumulator]);
         state.Accumulator.Clear();
+        state.FrameIndex = 0;
+        state.AccumulatedLength = 0;
 
         if (state.Queue.Writer.TryWrite(message))
         {
@@ -219,17 +215,62 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         return false;
     }
 
-    private ZReceiveAllocation DecideAllocation(ZFrame frame)
+    private ZFrameAllocator CreateAllocator(IZConnection connection)
     {
-        if (receivePolicy?.Decide is not { } decide)
-            return receivePolicy?.DefaultAllocation ?? DefaultAllocation;
+        return (length, more) =>
+        {
+            PeerState state;
+            lock (StateLock)
+            {
+                if (!peers.TryGetValue(connection, out var s))
+                {
+                    throw new InvalidOperationException("frame allocator invoked for an unknown peer");
+                }
+
+                state = s;
+            }
+
+            var frameIndex = state.FrameIndex;
+            var accumulated = state.AccumulatedLength + length;
+            state.FrameIndex = frameIndex + 1;
+            state.AccumulatedLength = accumulated;
+
+            var allocation = DecideAllocation(frameIndex, accumulated, length, more);
+            return Allocate(allocation.Mode, length);
+        };
+    }
+
+    private ZReceiveAllocation DecideAllocation(
+        int frameIndex,
+        long accumulatedLength,
+        int frameLength,
+        bool more)
+    {
+        if (receivePolicy is null)
+        {
+            return new ZReceiveAllocation { Mode = ZReceiveMode.Pooled };
+        }
+
         var context = new ZReceiveContext
         {
-            FrameLength = frame.Memory.Length,
-            IsFirstFrame = true,
-            HasMore = frame.More,
+            FrameLength = frameLength,
+            HasMore = more,
+            FrameIndex = frameIndex,
+            AccumulatedLength = accumulatedLength,
         };
-        return decide(context);
+        return receivePolicy.Decide(context);
+    }
+
+    private (object Owner, Memory<byte> Memory) Allocate(ZReceiveMode mode, int length)
+    {
+        if (mode == ZReceiveMode.Owned)
+        {
+            var buffer = GC.AllocateUninitializedArray<byte>(length);
+            return (buffer, buffer);
+        }
+
+        var owner = Pool.Rent(length);
+        return (owner, owner.Memory[..length]);
     }
 
     private async Task ResumePeerAsync(PeerState state)
