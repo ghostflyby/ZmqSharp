@@ -106,8 +106,9 @@ public sealed class ZSocketTests
         await dealer.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
 
         var messages = dealer.Messages;
-        var received = new List<byte[]>();
-        for (var attempt = 0; attempt < 50 && received.Count < 2; attempt++)
+        var hasA = false;
+        var hasB = false;
+        for (var attempt = 0; attempt < 50 && (!hasA || !hasB); attempt++)
         {
             await serverA.SendAsync(ZMessage.FromOwned("a"u8.ToArray()), cts.Token);
             await serverB.SendAsync(ZMessage.FromOwned("b"u8.ToArray()), cts.Token);
@@ -120,13 +121,21 @@ public sealed class ZSocketTests
                     break;
                 }
 
-                received.Add(message[0].ToArray());
+                if (message[0].ToArray().AsSpan().SequenceEqual("a"u8))
+                {
+                    hasA = true;
+                }
+                else if (message[0].ToArray().AsSpan().SequenceEqual("b"u8))
+                {
+                    hasB = true;
+                }
+
                 message.Dispose();
             }
         }
 
-        received.Any(frame => frame.AsSpan().SequenceEqual("a"u8)).Should().BeTrue();
-        received.Any(frame => frame.AsSpan().SequenceEqual("b"u8)).Should().BeTrue();
+        hasA.Should().BeTrue();
+        hasB.Should().BeTrue();
     }
 
     [Fact]
@@ -144,7 +153,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task Close_CompletesReceiveChannel()
     {
-        await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         await socket.DisposeAsync();
         socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
@@ -165,6 +174,66 @@ public sealed class ZSocketTests
 
         var messages = server.Messages;
         await FluentActions.Awaiting(() => messages.Completion).Should().ThrowAsync<ZeroMqProtocolException>();
+    }
+
+    [Fact]
+    public async Task PeerConnectionReset_DoesNotFaultDispose()
+    {
+        var port = GetFreePort();
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions());
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        await server.BindAsync($"tcp://127.0.0.1:{port}");
+
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, port);
+        var stream = raw.GetStream();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()));
+        await stream.FlushAsync();
+
+        // Abortive close: force a reset to end the peer abruptly.
+        raw.Client.LingerState = new LingerOption(true, 0);
+
+        // The reset may surface as an IO error (Windows/macOS), a clean EOF
+        // (Linux), or be dropped before the connection is set up (macOS);
+        // in every case the socket must dispose without faulting.
+        var ended = await Task.WhenAny(peerEnded.Task, Task.Delay(TimeSpan.FromSeconds(1)));
+        if (ended == peerEnded.Task)
+        {
+            (await peerEnded.Task is null or IOException).Should().BeTrue();
+        }
+
+    }
+
+    [Fact]
+    public async Task SendRacingHandshake_DoesNotCorruptPeerHandshake()
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            var port = GetFreePort();
+            await using var server = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+            await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+            await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+            // A send before the peer is routable is dropped; resend until the
+            // message flows, which also proves the handshake was not corrupted.
+            var received = false;
+            for (var retry = 0; retry < 20 && !received; retry++)
+            {
+                await server.SendAsync(ZMessage.FromOwned("x"u8.ToArray()), cts.Token);
+                var message = await TryReadAsync(client.Messages, TimeSpan.FromMilliseconds(20), cts.Token);
+                if (message is not null)
+                {
+                    received = true;
+                    message.Dispose();
+                }
+            }
+
+            received.Should().BeTrue();
+            await cts.CancelAsync();
+        }
     }
 
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<IZMessage> messages, CancellationToken token)

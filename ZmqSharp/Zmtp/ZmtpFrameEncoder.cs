@@ -21,6 +21,21 @@ public sealed class ZmtpFrameEncoder(Stream stream)
         await stream.WriteAsync(NullGreeting, token);
     }
 
+    /// <summary>
+    /// Builds the greeting plus one command frame as a single buffer, so the
+    /// handshake can be written atomically and a concurrent data frame cannot
+    /// interleave and corrupt the peer's handshake.
+    /// </summary>
+    internal static byte[] BuildHandshake(ReadOnlyMemory<byte> commandBody)
+    {
+        var handshake = new byte[NullGreeting.Length + 2 + commandBody.Length];
+        NullGreeting.CopyTo(handshake);
+        handshake[NullGreeting.Length] = (byte)ZmtpFrameFlags.Command;
+        handshake[NullGreeting.Length + 1] = (byte)commandBody.Length;
+        commandBody.Span.CopyTo(handshake.AsSpan(NullGreeting.Length + 2));
+        return handshake;
+    }
+
     /// <summary>Writes a command frame (body = name + NUL + data, e.g. READY).</summary>
     public async ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
     {

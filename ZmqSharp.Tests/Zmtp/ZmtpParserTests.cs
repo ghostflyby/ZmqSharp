@@ -87,7 +87,7 @@ public sealed class ZmtpParserTests
         using var connection = new ZConnection(source);
         var firstDelivered = new TaskCompletionSource();
         var frames = new List<byte[]>();
-        var recorder = new FrameRecorder(onFrame: (frame, ct) =>
+        var recorder = new FrameRecorder(onFrame: (frame, _) =>
         {
             frames.Add(frame.Memory.ToArray());
             if (frames.Count == 1)
