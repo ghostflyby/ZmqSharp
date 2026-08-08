@@ -42,7 +42,8 @@ public sealed class ZMessageTests
     {
         using var message = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
 
-        message.GetEnumerator().GetType().IsValueType.Should().BeTrue();
+        using var enumerator = message.GetEnumerator();
+        enumerator.GetType().IsValueType.Should().BeTrue();
 
         var frames = new List<byte[]>();
         foreach (var frame in message)
@@ -64,7 +65,8 @@ public sealed class ZMessageTests
         message.TryGetContiguousFrame(0, out _).Should().BeFalse();
         message[0].ToArray().Should().Equal(expected);
 
-        message.GetEnumerator().GetType().IsValueType.Should().BeTrue();
+        using var enumerator = message.GetEnumerator();
+        enumerator.GetType().IsValueType.Should().BeTrue();
         message.Should().ContainSingle().Which.ToArray().Should().Equal(expected);
     }
 

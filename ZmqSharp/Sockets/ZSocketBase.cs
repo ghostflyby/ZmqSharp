@@ -21,6 +21,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     private readonly List<Peer> peers = [];
     private readonly List<(IZTransport Listener, object? Endpoint)> listeners = [];
+    private readonly Dictionary<IZConnection, TaskCompletionSource> establishedGates = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
     private ZFrameHandler? onFrame;
     private Func<IZConnection, ZFrameHandler>? frameSinkFactory;
@@ -106,7 +107,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
         ThrowIfClosed();
         var connection = await TTransport.ConnectAsync(endpoint, new ZTransportOptions(), token);
-        AddConnection(connection, endpoint);
+        var established = AddConnection(connection, endpoint);
+        await established.Task.WaitAsync(token);
     }
 
     public async Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
@@ -174,6 +176,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             var targets = RouteOutbound(message, SnapshotPeers());
             foreach (var target in targets)
             {
+                await WaitUntilEstablishedAsync(target, token);
                 await target.SendAsync(message, token);
             }
         }
@@ -198,9 +201,10 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         return ValueTask.CompletedTask;
     }
 
-    private void AddConnection(IZConnection connection, object? endpoint)
+    private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint)
     {
         var parser = new ZmtpParser(connection, Pool);
+        var established = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         ZFrameHandler sink;
         lock (StateLock)
         {
@@ -209,26 +213,29 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 // The socket closed while this connection was being accepted;
                 // drop it without faulting the accept loop.
                 connection.Dispose();
-                return;
+                established.TrySetResult();
+                return established;
             }
 
-            sink = frameSinkFactory?.Invoke(connection) ?? ((frame, ct) => RaiseOnFrame(frame));
+            sink = frameSinkFactory?.Invoke(connection) ?? ((frame, _) => RaiseOnFrame(frame));
+            establishedGates[connection] = established;
         }
 
-        connection.SetFrameHandler((frame, ct) => DeliverFrameCore(parser, frame, sink));
+        connection.SetFrameHandler((frame, _) => DeliverFrameCore(parser, frame, sink));
 
         // Start the connection pump before the peer becomes routable so the
         // ZMTP handshake is written first; outbound frames must never precede it.
-        var pump = RunConnectionAsync(connection, parser);
+        var pump = RunConnectionAsync(connection, parser, established);
         lock (StateLock)
         {
             peers.Add(new Peer(connection, endpoint, parser));
         }
 
         TrackBackground(pump);
+        return established;
     }
 
-    private async Task RunConnectionAsync(IZConnection connection, ZmtpParser parser)
+    private async Task RunConnectionAsync(IZConnection connection, ZmtpParser parser, TaskCompletionSource established)
     {
         Exception? failure = null;
         try
@@ -236,15 +243,22 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             await connection.WriteAsync(ZmtpFrameEncoder.BuildHandshake(ReadyCommand), Cts.Token);
             if (await parser.EstablishAsync(Cts.Token))
             {
+                established.TrySetResult();
                 await parser.ParseAsync(Cts.Token);
+            }
+            else
+            {
+                established.TrySetResult();
             }
         }
         catch (OperationCanceledException)
         {
+            established.TrySetResult();
         }
         catch (ZeroMqProtocolException ex)
         {
             failure = ex;
+            established.TrySetResult();
             TrackBackground(StopAsync());
         }
         catch (Exception ex) when (ex is IOException or SocketException)
@@ -257,6 +271,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             {
                 failure = ex;
             }
+
+            established.TrySetResult();
         }
         finally
         {
@@ -265,11 +281,26 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             lock (StateLock)
             {
                 peers.RemoveAll(peer => peer.Connection == connection);
+                establishedGates.Remove(connection);
             }
         }
 
         parser.Dispose();
         connection.Dispose();
+    }
+
+    private async ValueTask WaitUntilEstablishedAsync(IZConnection connection, CancellationToken token)
+    {
+        TaskCompletionSource? gate;
+        lock (StateLock)
+        {
+            establishedGates.TryGetValue(connection, out gate);
+        }
+
+        if (gate is not null)
+        {
+            await gate.Task.WaitAsync(token);
+        }
     }
 
     private bool DeliverFrameCore(ZmtpParser parser, ZFrame frame, ZFrameHandler sink)

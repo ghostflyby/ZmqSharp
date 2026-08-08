@@ -106,8 +106,9 @@ public sealed class ZSocketTests
         await dealer.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
 
         var messages = dealer.Messages;
-        var received = new List<byte[]>();
-        for (var attempt = 0; attempt < 50 && received.Count < 2; attempt++)
+        var hasA = false;
+        var hasB = false;
+        for (var attempt = 0; attempt < 50 && (!hasA || !hasB); attempt++)
         {
             await serverA.SendAsync(ZMessage.FromOwned("a"u8.ToArray()), cts.Token);
             await serverB.SendAsync(ZMessage.FromOwned("b"u8.ToArray()), cts.Token);
@@ -120,13 +121,21 @@ public sealed class ZSocketTests
                     break;
                 }
 
-                received.Add(message[0].ToArray());
+                if (message[0].ToArray().AsSpan().SequenceEqual("a"u8))
+                {
+                    hasA = true;
+                }
+                else if (message[0].ToArray().AsSpan().SequenceEqual("b"u8))
+                {
+                    hasB = true;
+                }
+
                 message.Dispose();
             }
         }
 
-        received.Any(frame => frame.AsSpan().SequenceEqual("a"u8)).Should().BeTrue();
-        received.Any(frame => frame.AsSpan().SequenceEqual("b"u8)).Should().BeTrue();
+        hasA.Should().BeTrue();
+        hasB.Should().BeTrue();
     }
 
     [Fact]
