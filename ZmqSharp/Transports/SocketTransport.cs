@@ -72,15 +72,24 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
                 return;
             }
 
-            accepted.NoDelay = true;
-            var connection = new ZConnection(new NetworkStream(accepted, ownsSocket: true));
-            if (onAccept is not null)
+            try
             {
-                await onAccept(connection, token);
+                accepted.NoDelay = true;
+                var connection = new ZConnection(new NetworkStream(accepted, ownsSocket: true));
+                if (onAccept is not null)
+                {
+                    await onAccept(connection, token);
+                }
+                else
+                {
+                    connection.Dispose();
+                }
             }
-            else
+            catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
             {
-                connection.Dispose();
+                // The peer reset before the connection could be set up; drop it
+                // without faulting the accept loop.
+                accepted.Dispose();
             }
         }
     }
