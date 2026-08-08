@@ -152,6 +152,122 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task ReceivePolicy_DecideOwned_NeverTouchesPool()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            Pool = pool,
+            ReceivePolicy = new ZReceiveOptions { Decide = _ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned } },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        IZMessage? received = null;
+        for (var attempt = 0; attempt < 50 && received is null; attempt++)
+        {
+            await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        }
+
+        received.Should().NotBeNull();
+        received!.TryGetOwnedArray(0, out var array).Should().BeTrue();
+        array.Should().Equal("hello"u8.ToArray());
+        var outstandingBeforeDispose = pool.Outstanding;
+        received.Dispose();
+        pool.Outstanding.Should().Be(outstandingBeforeDispose);
+    }
+
+    [Fact]
+    public async Task ReceivePolicy_DecideByFrameLength_MixesModes()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 8,
+            Pool = pool,
+            ReceivePolicy = new ZReceiveOptions
+            {
+                Decide = ctx => ctx.FrameLength > 100
+                    ? new ZReceiveAllocation { Mode = ZReceiveMode.Owned }
+                    : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled },
+            },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 8 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        var small = new byte[10];
+        var large = new byte[200];
+        var received = new List<IZMessage>();
+        for (var attempt = 0; attempt < 50 && received.Count < 2; attempt++)
+        {
+            await client.SendAsync(ZMessage.FromOwned(small), cts.Token);
+            await client.SendAsync(ZMessage.FromOwned(large), cts.Token);
+
+            for (var i = 0; i < 2; i++)
+            {
+                var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+                if (message is null)
+                {
+                    break;
+                }
+
+                received.Add(message);
+            }
+        }
+
+        var smallMessage = received.First(message => message[0].Length == small.Length);
+        var largeMessage = received.First(message => message[0].Length == large.Length);
+        smallMessage.TryGetOwnedArray(0, out _).Should().BeFalse();
+        largeMessage.TryGetOwnedArray(0, out _).Should().BeTrue();
+        smallMessage.Dispose();
+        largeMessage.Dispose();
+    }
+
+    [Fact]
+    public async Task ReceivePolicy_DefaultModeOwned_NeverTouchesPool()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            Pool = pool,
+            ReceivePolicy = new ZReceiveOptions
+            {
+                DefaultAllocation = new ZReceiveAllocation { Mode = ZReceiveMode.Owned },
+            },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        IZMessage? received = null;
+        for (var attempt = 0; attempt < 50 && received is null; attempt++)
+        {
+            await client.SendAsync(ZMessage.FromOwned("x"u8.ToArray()), cts.Token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        }
+
+        received.Should().NotBeNull();
+        received!.TryGetOwnedArray(0, out _).Should().BeTrue();
+        var outstandingBeforeDispose = pool.Outstanding;
+        received.Dispose();
+        pool.Outstanding.Should().Be(outstandingBeforeDispose);
+    }
+
+    [Fact]
     public async Task Close_CompletesReceiveChannel()
     {
         var socket = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });

@@ -21,6 +21,8 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         public required Channel<IZMessage> Queue { get; init; }
 
         public List<ZBufferRef> Accumulator { get; } = [];
+
+        public ZReceiveAllocation Allocation { get; set; }
     }
 
     /// <summary>Reads from every peer queue; the peer queues are the only physical queues.</summary>
@@ -60,9 +62,12 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
+    private readonly ZReceiveOptions? receivePolicy;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
+    private static readonly ZReceiveAllocation DefaultAllocation =
+        new() { Mode = ZReceiveMode.Pooled, Contiguous = true };
 
     internal ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
         : base(options?.Pool ?? MemoryPool<byte>.Shared)
@@ -71,6 +76,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         this.socket = socket;
         options ??= new ZQueueSocketOptions();
         receiveCapacity = options.ReceiveCapacity;
+        receivePolicy = options.ReceivePolicy;
         Messages = new AggregateReader(this);
 
         if (options.SendCapacity is { } sendCapacity)
@@ -136,7 +142,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
 
         socket.PeerEnded -= OnPeerEnded;
-        Cts.Cancel();
+        await Cts.CancelAsync();
         sendChannel?.Writer.TryComplete();
 
         await socket.DisposeAsync();
@@ -170,14 +176,28 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
 
         TrackBackground(WakeOnReadableAsync(state));
-        return (frame, ct) => OnPeerFrame(connection, state, frame, ct);
+        return (frame, ct) => OnPeerFrame(state, frame);
     }
 
-    private bool OnPeerFrame(IZConnection connection, PeerState state, ZFrame frame, CancellationToken token)
+    private bool OnPeerFrame(PeerState state, ZFrame frame)
     {
-        var owner = Pool.Rent(frame.Memory.Length);
-        frame.Memory.CopyTo(owner.Memory);
-        state.Accumulator.Add(new ZBufferRef(owner, owner.Memory[..frame.Memory.Length]));
+        if (state.Accumulator.Count == 0)
+        {
+            state.Allocation = DecideAllocation(frame);
+        }
+
+        if (state.Allocation.Mode == ZReceiveMode.Owned)
+        {
+            var buffer = GC.AllocateUninitializedArray<byte>(frame.Memory.Length);
+            frame.Memory.CopyTo(buffer);
+            state.Accumulator.Add(new ZBufferRef(buffer, buffer));
+        }
+        else
+        {
+            var owner = Pool.Rent(frame.Memory.Length);
+            frame.Memory.CopyTo(owner.Memory);
+            state.Accumulator.Add(new ZBufferRef(owner, owner.Memory[..frame.Memory.Length]));
+        }
 
         if (frame.More)
         {
@@ -197,6 +217,19 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         message.Dispose();
         TrackBackground(ResumePeerAsync(state));
         return false;
+    }
+
+    private ZReceiveAllocation DecideAllocation(ZFrame frame)
+    {
+        if (receivePolicy?.Decide is not { } decide)
+            return receivePolicy?.DefaultAllocation ?? DefaultAllocation;
+        var context = new ZReceiveContext
+        {
+            FrameLength = frame.Memory.Length,
+            IsFirstFrame = true,
+            HasMore = frame.More,
+        };
+        return decide(context);
     }
 
     private async Task ResumePeerAsync(PeerState state)
