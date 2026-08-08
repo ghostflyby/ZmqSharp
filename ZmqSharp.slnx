@@ -1,5 +1,4 @@
 <Solution>
   <Project Path="ZmqSharp/ZmqSharp.csproj" />
   <Project Path="ZmqSharp.Tests/ZmqSharp.Tests.csproj" />
-  <Project Path="ZmqSharp.AotSmoke/ZmqSharp.AotSmoke.csproj" />
 </Solution>

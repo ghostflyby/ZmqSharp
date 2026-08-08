@@ -23,7 +23,7 @@ Engineering constraints for ZmqSharp.
 ## AOT
 
 - Full Native AOT support: no runtime reflection or dynamic code generation; use source generators for serialization/metadata needs.
-- The library enables AOT compatibility checks (`IsAotCompatible`) and is validated by a `PublishAot` build of `ZmqSharp.AotSmoke`.
+- The library enables AOT compatibility checks via `IsAotCompatible`, which turns on the AOT, trim, and single-file analyzers; warnings are errors.
 
 ## Namespaces
 

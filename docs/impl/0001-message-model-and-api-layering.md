@@ -169,7 +169,7 @@ The authoritative list lives in AGENTS.md. Highlights: xUnit tests with FluentAs
 
 ## 12. Project Structure and Namespaces
 
-- Project split: v1 keeps a single library (`ZmqSharp`) plus a test project (`ZmqSharp.Tests`) and an AOT smoke project (`ZmqSharp.AotSmoke`); no multi-library split.
+- Project split: v1 keeps a single library (`ZmqSharp`) plus a test project (`ZmqSharp.Tests`); no multi-library split.
   Rationale: the library has zero external dependencies, and a single assembly keeps AOT/trimming simplest; layering is enforced by namespaces and dependency direction.
   Split triggers: a second transport implementation (e.g. TLS/QUIC), or a second consumer of the protocol layer.
   When split: `ZmqSharp` (core: message model, session, parser, patterns) + `ZmqSharp.Transports` (implements `IZTransport`), with dependency direction Transports -> Core.
