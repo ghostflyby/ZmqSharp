@@ -259,7 +259,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         {
             failure = ex;
             established.TrySetResult();
-            TrackBackground(StopAsync());
         }
         catch (Exception ex) when (ex is IOException or SocketException)
         {

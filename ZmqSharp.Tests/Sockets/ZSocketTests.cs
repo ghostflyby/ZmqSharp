@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
@@ -159,10 +160,12 @@ public sealed class ZSocketTests
     }
 
     [Fact]
-    public async Task ProtocolError_CompletesChannelWithException()
+    public async Task ProtocolError_EndsPeerWithoutCompletingChannel()
     {
         var port = GetFreePort();
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 16 });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
         using var raw = new TcpClient();
@@ -173,7 +176,46 @@ public sealed class ZSocketTests
         await stream.FlushAsync();
 
         var messages = server.Messages;
-        await FluentActions.Awaiting(() => messages.Completion).Should().ThrowAsync<ZeroMqProtocolException>();
+        (await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeOfType<ZeroMqProtocolException>();
+        messages.Completion.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ConcurrentSends_DoNotInterleaveMultipartFrames()
+    {
+        var port = GetFreePort();
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions());
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 64 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        var received = new ConcurrentQueue<byte[][]>();
+        var current = new List<byte[]>();
+        server.OnFrame += (frame, ct) =>
+        {
+            current.Add(frame.Memory.ToArray());
+            if (!frame.More)
+            {
+                received.Enqueue([.. current]);
+                current.Clear();
+            }
+
+            return true;
+        };
+
+        var senderA = SendLoopAsync(client, 0x61, cts.Token);
+        var senderB = SendLoopAsync(client, 0x62, cts.Token);
+        await Task.WhenAll(senderA, senderB);
+
+        received.Should().NotBeEmpty();
+        foreach (var message in received)
+        {
+            message.Should().HaveCount(3);
+            message[0][0].Should().Be(message[1][0]);
+            message[0][0].Should().Be(message[2][0]);
+        }
     }
 
     [Fact]
@@ -268,6 +310,17 @@ public sealed class ZSocketTests
         catch (OperationCanceledException)
         {
             return null;
+        }
+    }
+
+    private static async Task SendLoopAsync(ZQueueSocket<ZPairSocket> client, byte tag, CancellationToken token)
+    {
+        var frame = new byte[64];
+        frame[0] = tag;
+        for (var i = 0; i < 50; i++)
+        {
+            using var message = MessageFactory.Multipart(frame, frame, frame);
+            await client.SendAsync(message, token);
         }
     }
 

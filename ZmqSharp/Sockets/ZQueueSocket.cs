@@ -61,6 +61,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
 
     internal ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
@@ -85,6 +86,25 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     public ChannelReader<IZMessage> Messages { get; }
 
     public ChannelWriter<IZMessage>? Outbound => sendChannel?.Writer;
+
+    /// <summary>Raised when a peer connection ends; null = clean EOF, otherwise the failure.</summary>
+    public event Action<IZConnection, Exception?>? PeerEnded
+    {
+        add
+        {
+            lock (StateLock)
+            {
+                peerEnded += value;
+            }
+        }
+        remove
+        {
+            lock (StateLock)
+            {
+                peerEnded -= value;
+            }
+        }
+    }
 
     public ValueTask SendAsync(IZMessage message, CancellationToken token = default)
         => socket.SendAsync(message, token);
@@ -212,10 +232,13 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         state.Accumulator.Clear();
         state.Queue.Writer.TryComplete();
 
-        if (failure is not null)
+        Action<IZConnection, Exception?>? handler;
+        lock (StateLock)
         {
-            completion.TrySetException(failure);
+            handler = peerEnded;
         }
+
+        handler?.Invoke(connection, failure);
     }
 
     private Task GetWakeTask()
