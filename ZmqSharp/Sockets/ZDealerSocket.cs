@@ -20,4 +20,6 @@ public sealed class ZDealerSocket(ZSocketOptions options) : ZSocketBase(options)
         int index = (Interlocked.Increment(ref next) - 1) % peers.Count;
         return [peers[index]];
     }
+
+    protected override string SocketTypeName => "DEALER";
 }

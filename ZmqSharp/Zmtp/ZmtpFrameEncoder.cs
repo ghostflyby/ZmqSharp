@@ -28,15 +28,27 @@ public sealed class ZmtpFrameEncoder(Stream stream)
     /// </summary>
     internal static byte[] BuildHandshake(ReadOnlyMemory<byte> commandBody)
     {
-        var handshake = new byte[NullGreeting.Length + 2 + commandBody.Length];
+        var isLong = commandBody.Length > 255;
+        var headerLength = isLong ? 9 : 2;
+        var handshake = new byte[NullGreeting.Length + headerLength + commandBody.Length];
         NullGreeting.CopyTo(handshake);
-        handshake[NullGreeting.Length] = (byte)ZmtpFrameFlags.Command;
-        handshake[NullGreeting.Length + 1] = (byte)commandBody.Length;
-        commandBody.Span.CopyTo(handshake.AsSpan(NullGreeting.Length + 2));
+        var header = handshake.AsSpan(NullGreeting.Length);
+        if (isLong)
+        {
+            header[0] = (byte)(ZmtpFrameFlags.Command | ZmtpFrameFlags.LongSize);
+            BinaryPrimitives.WriteInt64BigEndian(header[1..], commandBody.Length);
+        }
+        else
+        {
+            header[0] = (byte)ZmtpFrameFlags.Command;
+            header[1] = (byte)commandBody.Length;
+        }
+
+        commandBody.Span.CopyTo(handshake.AsSpan(NullGreeting.Length + headerLength));
         return handshake;
     }
 
-    /// <summary>Writes a command frame (body = name + NUL + data, e.g. READY).</summary>
+    /// <summary>Writes a command frame (RFC 23 short-string command body, e.g. READY).</summary>
     public async ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
     {
         long length = body.Length;

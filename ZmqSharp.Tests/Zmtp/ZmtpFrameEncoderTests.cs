@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Transports;
@@ -66,5 +67,16 @@ public sealed class ZmtpFrameEncoderTests
 
         recorder.Frames.Should().HaveCount(1);
         recorder.Frames[0].Should().Equal("hello!"u8.ToArray());
+    }
+
+    [Fact]
+    public void BuildHandshake_LongCommand_UsesLongSizeHeader()
+    {
+        var body = new byte[300];
+        var handshake = ZmtpFrameEncoder.BuildHandshake(body);
+
+        handshake.Should().HaveCount(64 + 9 + body.Length);
+        handshake[64].Should().Be((byte)(ZmtpFrameFlags.Command | ZmtpFrameFlags.LongSize));
+        BinaryPrimitives.ReadInt64BigEndian(handshake.AsSpan(65, 8)).Should().Be(300);
     }
 }

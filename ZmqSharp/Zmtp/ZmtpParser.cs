@@ -20,6 +20,7 @@ public sealed class ZmtpParser : IDisposable
 {
     private const int InitialScratchSize = 4096;
     private const int ScratchShrinkThreshold = 1 << 20;
+    private const int MaxCommandSize = 1 << 20;
 
     private readonly IZConnection connection;
     private readonly MemoryPool<byte> pool;
@@ -29,12 +30,16 @@ public sealed class ZmtpParser : IDisposable
     private IMemoryOwner<byte>? scratchOwner;
     private Memory<byte> scratch;
     private int scratchUsed;
+    private string? peerSocketType;
 
     private readonly Lock gateLock = new();
     private TaskCompletionSource gate = CreateGate();
 
     private static TaskCompletionSource CreateGate()
         => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Socket-Type advertised by the peer in READY; null before the handshake completes.</summary>
+    internal string? PeerSocketType => peerSocketType;
 
     public ZmtpParser(IZConnection connection, MemoryPool<byte>? pool = null)
         : this(connection, null, pool ?? MemoryPool<byte>.Shared)
@@ -167,35 +172,154 @@ public sealed class ZmtpParser : IDisposable
                 return false;
             }
 
-            if (IsCommandName(body.Value, "READY"u8))
+            var bodySpan = body.Value.Span;
+            if (!TryReadCommandName(bodySpan, out var commandName))
             {
+                throw new ZeroMqProtocolException("malformed command name");
+            }
+
+            if (commandName.SequenceEqual("READY"u8))
+            {
+                var properties = ParseMetadata(bodySpan[(1 + commandName.Length)..]);
+                if (!properties.TryGetValue("Socket-Type", out var peerType) || !IsValidSocketType(peerType))
+                {
+                    throw new ZeroMqProtocolException("READY is missing a valid Socket-Type property");
+                }
+
+                peerSocketType = peerType;
+                scratchUsed = 0;
+                MaybeShrinkScratch();
                 return true;
             }
 
-            if (IsCommandName(body.Value, "ERROR"u8))
+            if (commandName.SequenceEqual("ERROR"u8))
             {
-                throw new ZeroMqProtocolException($"peer sent ERROR: {ErrorReason(body.Value)}");
+                throw new ZeroMqProtocolException(
+                    $"peer sent ERROR: {ParseErrorReason(bodySpan[(1 + commandName.Length)..])}");
             }
+
+            scratchUsed = 0;
+            throw new ZeroMqProtocolException($"unknown command '{Encoding.ASCII.GetString(commandName)}' during handshake");
         }
     }
 
-    private static bool IsCommandName(ReadOnlyMemory<byte> body, ReadOnlySpan<byte> name)
+    private static bool TryReadCommandName(ReadOnlySpan<byte> body, out ReadOnlySpan<byte> name)
     {
-        var span = body.Span;
-        if (span.Length < name.Length + 1 || span[name.Length] != 0)
+        if (body.IsEmpty || body[0] == 0)
         {
+            name = default;
             return false;
         }
 
-        return span[..name.Length].SequenceEqual(name);
+        var nameLength = body[0];
+        if (body.Length < nameLength + 1)
+        {
+            name = default;
+            return false;
+        }
+
+        var candidate = body.Slice(1, nameLength);
+        foreach (var c in candidate)
+        {
+            var isAlpha = (c >= (byte)'A' && c <= (byte)'Z') || (c >= (byte)'a' && c <= (byte)'z');
+            if (!isAlpha)
+            {
+                name = default;
+                return false;
+            }
+        }
+
+        name = candidate;
+        return true;
     }
 
-    private static string ErrorReason(ReadOnlyMemory<byte> body)
+    private static string ParseErrorReason(ReadOnlySpan<byte> body)
     {
-        var span = body.Span;
-        var separator = span.IndexOf((byte)0);
-        return separator < 0 ? string.Empty : Encoding.UTF8.GetString(span[(separator + 1)..]);
+        if (body.IsEmpty)
+        {
+            throw new ZeroMqProtocolException("malformed ERROR command");
+        }
+
+        var reasonLength = body[0];
+        if (body.Length != 1 + reasonLength)
+        {
+            throw new ZeroMqProtocolException("ERROR reason length does not match the command body");
+        }
+
+        foreach (var c in body[1..])
+        {
+            if (c is < (byte)0x21 or > (byte)0x7E)
+            {
+                throw new ZeroMqProtocolException("ERROR reason contains a non-visible character");
+            }
+        }
+
+        return Encoding.UTF8.GetString(body[1..]);
     }
+
+    private static Dictionary<string, string> ParseMetadata(ReadOnlySpan<byte> metadata)
+    {
+        var properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var offset = 0;
+        while (offset < metadata.Length)
+        {
+            var nameLength = metadata[offset];
+            offset++;
+            if (nameLength == 0)
+            {
+                throw new ZeroMqProtocolException("metadata property name is empty");
+            }
+
+            if (metadata.Length - offset < nameLength)
+            {
+                throw new ZeroMqProtocolException("metadata property name exceeds command body");
+            }
+
+            var name = metadata.Slice(offset, nameLength);
+            foreach (var c in name)
+            {
+                if (!IsMetadataNameChar(c))
+                {
+                    throw new ZeroMqProtocolException("metadata property name contains an invalid character");
+                }
+            }
+
+            offset += nameLength;
+            if (metadata.Length - offset < sizeof(int))
+            {
+                throw new ZeroMqProtocolException("metadata property value length is truncated");
+            }
+
+            var valueLength = BinaryPrimitives.ReadInt32BigEndian(metadata[offset..]);
+            offset += sizeof(int);
+            if (valueLength < 0 || valueLength > metadata.Length - offset)
+            {
+                throw new ZeroMqProtocolException("metadata property value exceeds command body");
+            }
+
+            var nameString = Encoding.ASCII.GetString(name);
+            var value = Encoding.UTF8.GetString(metadata.Slice(offset, valueLength));
+            offset += valueLength;
+            if (!properties.TryAdd(nameString, value))
+            {
+                throw new ZeroMqProtocolException($"duplicate metadata property '{nameString}'");
+            }
+        }
+
+        return properties;
+    }
+
+    private static bool IsMetadataNameChar(byte c)
+        => (c >= (byte)'A' && c <= (byte)'Z')
+            || (c >= (byte)'a' && c <= (byte)'z')
+            || (c >= (byte)'0' && c <= (byte)'9')
+            || c == (byte)'-'
+            || c == (byte)'_'
+            || c == (byte)'.'
+            || c == (byte)'+';
+
+    private static bool IsValidSocketType(string socketType) => socketType is
+        "REQ" or "REP" or "DEALER" or "ROUTER" or "PUB" or "XPUB" or "SUB" or "XSUB" or "PUSH" or "PULL" or "PAIR";
 
     // ---- Traffic ----
 
@@ -204,14 +328,32 @@ public sealed class ZmtpParser : IDisposable
         while (true)
         {
             var nullableHeader = await TryReadFrameHeaderAsync(token);
-            if (nullableHeader is not {} header)
+            if (nullableHeader is not { } header)
             {
                 return;
             }
 
             if (header.Flags.HasFlag(ZmtpFrameFlags.Command))
             {
-                await ReadBodyIntoScratchAsync(header, token);
+                var commandBody = await ReadBodyIntoScratchAsync(header, token);
+                if (commandBody is null)
+                {
+                    return;
+                }
+
+                if (!TryReadCommandName(commandBody.Value.Span, out var commandName))
+                {
+                    throw new ZeroMqProtocolException("malformed command name");
+                }
+
+                if (commandName.SequenceEqual("ERROR"u8))
+                {
+                    throw new ZeroMqProtocolException(
+                        $"peer sent ERROR: {ParseErrorReason(commandBody.Value.Span[(1 + commandName.Length)..])}");
+                }
+
+                scratchUsed = 0;
+                MaybeShrinkScratch();
                 continue;
             }
 
@@ -349,6 +491,11 @@ public sealed class ZmtpParser : IDisposable
         FrameHeader header,
         CancellationToken token)
     {
+        if (header.Size > MaxCommandSize)
+        {
+            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
+        }
+
         if (header.Size > int.MaxValue)
         {
             throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");

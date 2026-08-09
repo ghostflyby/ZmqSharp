@@ -200,10 +200,60 @@ internal static class ZmtpTestData
         return result;
     }
 
-    public static byte[] Ready() => Frame("READY\0"u8.ToArray(), command: true);
+    public static byte[] Ready(string socketType = "PAIR") => Frame(ReadyBody(socketType), command: true);
+
+    public static byte[] ReadyBody(string socketType = "PAIR")
+        => ReadyBodyWithProperties(("Socket-Type", socketType));
+
+    public static byte[] ReadyWithProperties(params (string Name, string Value)[] properties)
+        => Frame(ReadyBodyWithProperties(properties), command: true);
+
+    public static byte[] ReadyBodyWithProperties(params (string Name, string Value)[] properties)
+    {
+        var body = new List<byte> { 5 };
+        body.AddRange("READY"u8);
+        foreach (var (name, value) in properties)
+        {
+            var nameBytes = Encoding.ASCII.GetBytes(name);
+            var valueBytes = Encoding.UTF8.GetBytes(value);
+            body.Add((byte)nameBytes.Length);
+            body.AddRange(nameBytes);
+            var lengthBytes = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(lengthBytes, valueBytes.Length);
+            body.AddRange(lengthBytes);
+            body.AddRange(valueBytes);
+        }
+
+        return [.. body];
+    }
+
+    public static byte[] ReadyWithRawProperty(ReadOnlySpan<byte> name, int valueLength)
+        => Frame(ReadyBodyWithRawProperty(name, valueLength), command: true);
+
+    private static byte[] ReadyBodyWithRawProperty(ReadOnlySpan<byte> name, int valueLength)
+    {
+        var body = new byte[6 + 1 + name.Length + 4];
+        body[0] = 5;
+        "READY"u8.CopyTo(body.AsSpan(1));
+        var offset = 6;
+        body[offset] = (byte)name.Length;
+        offset++;
+        name.CopyTo(body.AsSpan(offset));
+        offset += name.Length;
+        BinaryPrimitives.WriteInt32BigEndian(body.AsSpan(offset), valueLength);
+        return body;
+    }
 
     public static byte[] Error(string reason)
-        => Frame(Encoding.ASCII.GetBytes($"ERROR\0{reason}"), command: true);
+    {
+        var bytes = Encoding.ASCII.GetBytes(reason);
+        var body = new byte[1 + 5 + 1 + bytes.Length];
+        body[0] = 5;
+        "ERROR"u8.CopyTo(body.AsSpan(1));
+        body[6] = (byte)bytes.Length;
+        bytes.CopyTo(body.AsSpan(7));
+        return Frame(body, command: true);
+    }
 
     public static byte[] Frame(byte[] body, bool more = false, bool command = false, byte flagsOverride = 0)
     {

@@ -15,13 +15,12 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 {
-    private static readonly byte[] ReadyCommand = [.. "READY\0"u8];
-
     private readonly record struct Peer(IZConnection Connection, object? Endpoint);
 
     private readonly List<Peer> peers = [];
     private readonly List<(IZTransport Listener, object? Endpoint)> listeners = [];
     private readonly Dictionary<IZConnection, TaskCompletionSource> establishedGates = [];
+    private readonly Dictionary<IZConnection, CancellationTokenSource> attemptTokens = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
     private ZFrameHandler? onFrame;
     private Func<IZConnection, ZFrameHandler>? frameSinkFactory;
@@ -38,6 +37,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     protected abstract IReadOnlyList<IZConnection> RouteOutbound(
         ZMessage message,
         IReadOnlyList<IZConnection> peers);
+
+    /// <summary>ZMTP Socket-Type metadata advertised in the READY handshake.</summary>
+    protected abstract string SocketTypeName { get; }
 
     public event ZFrameHandler? OnFrame
     {
@@ -128,7 +130,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
         ThrowIfClosed();
         var connection = await TTransport.ConnectAsync(endpoint, new ZTransportOptions(), token);
-        var established = AddConnection(connection, endpoint);
+        var established = AddConnection(connection, endpoint, token);
         await established.Task.WaitAsync(token);
     }
 
@@ -172,6 +174,16 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         lock (StateLock)
         {
             matches = [.. peers.Where(peer => Equals(peer.Endpoint, endpoint)).Select(peer => peer.Connection)];
+            foreach (var match in matches)
+            {
+                // Cancel the in-flight attempt first: disposing the transport
+                // stream does not reliably interrupt a pending read, which
+                // would leave the connection pump stuck and the peer routable.
+                if (attemptTokens.TryGetValue(match, out var attemptCts))
+                {
+                    attemptCts.Cancel();
+                }
+            }
         }
 
         foreach (var match in matches)
@@ -222,7 +234,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         return ValueTask.CompletedTask;
     }
 
-    private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint)
+    private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint, CancellationToken token = default)
     {
         ZFrameAllocator? allocator;
         ZFrameHandler sink;
@@ -231,57 +243,80 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         {
             if (Volatile.Read(ref Closed) == 1)
             {
-                // The socket closed while this connection was being accepted;
-                // drop it without faulting the accept loop.
+                // The socket closed while this connection was being set up;
+                // report cancellation instead of success so ConnectAsync never
+                // completes as established. Accepted peers are dropped silently.
                 connection.Dispose();
-                established.TrySetResult();
+                established.TrySetCanceled();
                 return established;
             }
 
             sink = frameSinkFactory?.Invoke(connection) ?? ((frame, _) => RaiseOnFrame(frame));
             allocator = allocatorFactory?.Invoke(connection);
             establishedGates[connection] = established;
+            // Register before the pump starts. Sends block on the establishment
+            // gate until the handshake completes, and DisconnectAsync must
+            // always be able to find the peer to cancel the in-flight attempt.
+            peers.Add(new Peer(connection, endpoint));
         }
 
         var parser = new ZmtpParser(connection, allocator, Pool);
         connection.SetFrameHandler((frame, _) => DeliverFrameCore(parser, frame, sink));
 
-        // Start the connection pump before the peer becomes routable so the
-        // ZMTP handshake is written first; outbound frames must never precede it.
-        var pump = RunConnectionAsync(connection, parser, established);
+        var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(Cts.Token, token);
         lock (StateLock)
         {
-            peers.Add(new Peer(connection, endpoint));
+            attemptTokens[connection] = attemptCts;
         }
 
+        var pump = RunConnectionAsync(connection, parser, established, attemptCts);
         TrackBackground(pump);
         return established;
     }
 
-    private async Task RunConnectionAsync(IZConnection connection, ZmtpParser parser, TaskCompletionSource established)
+    private async Task RunConnectionAsync(
+        IZConnection connection,
+        ZmtpParser parser,
+        TaskCompletionSource established,
+        CancellationTokenSource attemptCts)
     {
         Exception? failure = null;
+        var attemptToken = attemptCts.Token;
         try
         {
-            await connection.WriteAsync(ZmtpFrameEncoder.BuildHandshake(ReadyCommand), Cts.Token);
-            if (await parser.EstablishAsync(Cts.Token))
+            await connection.WriteAsync(
+                ZmtpFrameEncoder.BuildHandshake(ZmtpCommands.BuildReady(SocketTypeName)),
+                attemptToken);
+            if (await parser.EstablishAsync(attemptToken))
             {
+                var peerType = parser.PeerSocketType;
+                if (peerType is null || !IsCompatibleSocketType(SocketTypeName, peerType))
+                {
+                    // RFC 23: on socket-type validation failure, return an
+                    // ERROR command before disconnecting the peer.
+                    await connection.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), attemptToken);
+                    throw new ZeroMqProtocolException(
+                        $"peer socket type '{peerType}' is not compatible with local socket type '{SocketTypeName}'");
+                }
+
                 established.TrySetResult();
-                await parser.ParseAsync(Cts.Token);
+                await parser.ParseAsync(attemptToken);
             }
             else
             {
-                established.TrySetResult();
+                var eof = new IOException("peer closed during ZMTP handshake");
+                failure = eof;
+                established.TrySetException(eof);
             }
         }
         catch (OperationCanceledException)
         {
-            established.TrySetResult();
+            established.TrySetCanceled(attemptToken);
         }
         catch (ZeroMqProtocolException ex)
         {
             failure = ex;
-            established.TrySetResult();
+            established.TrySetException(ex);
         }
         catch (Exception ex) when (ex is IOException or SocketException)
         {
@@ -289,27 +324,51 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             // pending reads/writes, which on Windows can surface as a reset
             // instead of OperationCanceledException; that teardown race is
             // not a real failure and is not reported.
-            if (!Cts.IsCancellationRequested)
+            if (!attemptToken.IsCancellationRequested)
             {
                 failure = ex;
+                established.TrySetException(ex);
             }
-
-            established.TrySetResult();
+            else
+            {
+                established.TrySetCanceled(attemptToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+            established.TrySetException(ex);
         }
         finally
         {
-            connection.OnConnectionEnded();
-            RaisePeerEnded(connection, failure);
+            // Internal state first: a failing callback must not leave the peer routable.
             lock (StateLock)
             {
                 peers.RemoveAll(peer => peer.Connection == connection);
                 establishedGates.Remove(connection);
+                attemptTokens.Remove(connection);
+            }
+
+            try
+            {
+                connection.OnConnectionEnded();
+                RaisePeerEnded(connection, failure);
+            }
+            finally
+            {
+                parser.Dispose();
+                connection.Dispose();
+                attemptCts.Dispose();
             }
         }
-
-        parser.Dispose();
-        connection.Dispose();
     }
+
+    private static bool IsCompatibleSocketType(string localType, string peerType) => localType switch
+    {
+        "PAIR" => peerType == "PAIR",
+        "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
+        _ => true,
+    };
 
     private async ValueTask WaitUntilEstablishedAsync(IZConnection connection, CancellationToken token)
     {

@@ -10,4 +10,6 @@ public sealed class ZPairSocket(ZSocketOptions options) : ZSocketBase(options)
         ZMessage message,
         IReadOnlyList<IZConnection> peers)
         => peers.Count == 0 ? [] : [peers[0]];
+
+    protected override string SocketTypeName => "PAIR";
 }
