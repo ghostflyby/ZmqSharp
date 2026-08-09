@@ -175,12 +175,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         Cts.Dispose();
     }
 
-    private ZFrameHandler OnPeerConnected(IZConnection connection)
+    private ZFrameHandlerAsync OnPeerConnected(IZConnection connection)
     {
         var state = new PeerState
         {
             Queue = Channel.CreateBounded<ZMessage>(
-                new BoundedChannelOptions(receiveCapacity) { SingleReader = true }),
+                new BoundedChannelOptions(receiveCapacity)
+                {
+                    SingleReader = true,
+                    SingleWriter = true,
+                }),
         };
         lock (StateLock)
         {
@@ -188,10 +192,10 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
 
         TrackBackground(WakeOnReadableAsync(state));
-        return (frame, ct) => OnPeerFrame(state, frame);
+        return (frame, ct) => OnPeerFrameAsync(state, frame, ct);
     }
 
-    private bool OnPeerFrame(PeerState state, ZFrame frame)
+    private async ValueTask<bool> OnPeerFrameAsync(PeerState state, ZFrame frame, CancellationToken token)
     {
         if (frame.TryGetValue(out ZSegments segments))
         {
@@ -221,14 +225,22 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         state.FrameIndex = 0;
         state.AccumulatedLength = 0;
 
-        if (state.Queue.Writer.TryWrite(message))
+        // Wait-mode backpressure: a full per-peer queue pauses only this
+        // peer's pump on the WriteAsync; the parser awaits the sink, so no
+        // global resume coordination is needed (0006 section 3.5).
+        try
         {
-            return true;
+            await state.Queue.Writer.WriteAsync(message, token);
+        }
+        catch
+        {
+            // Cancellation or a closed queue loses this message's consumer;
+            // the buffer must not leak.
+            message.Dispose();
+            throw;
         }
 
-        message.Dispose();
-        TrackBackground(ResumePeerAsync(state));
-        return false;
+        return true;
     }
 
     private static ZMessage BuildMessage(List<ZFrame> frames)
@@ -342,12 +354,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
         var (singleOwner, singleMemory) = Allocate(allocation.Mode, length);
         return new ZFrame(new ZSegment(singleOwner, singleMemory), more);
-    }
-
-    private async Task ResumePeerAsync(PeerState state)
-    {
-        await state.Queue.Writer.WaitToWriteAsync(Cts.Token);
-        socket.ResumePaused();
     }
 
     private async Task WakeOnReadableAsync(PeerState state)

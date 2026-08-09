@@ -22,7 +22,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly Dictionary<IZConnection, CancellationTokenSource> attemptTokens = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
     private ZFrameHandler? onFrame;
-    private Func<IZConnection, ZFrameHandler>? frameSinkFactory;
+    private Func<IZConnection, ZFrameHandlerAsync>? frameSinkFactory;
     private Func<IZConnection, ZFrameAllocator>? allocatorFactory;
     private Action<IZConnection, Exception?>? peerEnded;
 
@@ -86,11 +86,11 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     }
 
     /// <summary>
-    /// Replaces the shared OnFrame delivery with a per-peer sink factory.
+    /// Replaces the shared OnFrame delivery with a per-peer async sink factory.
     /// Must be called before any connection is established; each peer then
     /// gets its own frame handler.
     /// </summary>
-    public void SetFrameSink(Func<IZConnection, ZFrameHandler> factory)
+    public void SetFrameSink(Func<IZConnection, ZFrameHandlerAsync> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
         lock (StateLock)
@@ -236,7 +236,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint, CancellationToken token = default)
     {
         ZFrameAllocator? allocator;
-        ZFrameHandler sink;
         var established = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (StateLock)
         {
@@ -250,7 +249,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 return established;
             }
 
-            sink = frameSinkFactory?.Invoke(connection) ?? ((frame, _) => RaiseOnFrame(frame));
             allocator = allocatorFactory?.Invoke(connection);
             establishedGates[connection] = established;
             // Register before the pump starts. Sends block on the establishment
@@ -260,7 +258,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
 
         var parser = new ZmtpParser(connection, allocator, Pool);
-        connection.SetFrameHandler((frame, _) => DeliverFrameCore(parser, frame, sink));
+        var sink = frameSinkFactory?.Invoke(connection) ?? BorrowedSink(parser);
+        connection.SetFrameHandler((frame, _) => sink(frame, Cts.Token));
 
         var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(Cts.Token, token);
         lock (StateLock)
@@ -383,16 +382,21 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
     }
 
-    private bool DeliverFrameCore(ZmtpParser parser, ZFrame frame, ZFrameHandler sink)
-    {
-        var keepGoing = sink(frame, Cts.Token);
-        if (!keepGoing)
+    /// <summary>
+    /// Default per-peer sink for the borrowed tier: invokes the raw OnFrame
+    /// callback; a false return pauses this peer's pump until ResumePaused.
+    /// </summary>
+    private ZFrameHandlerAsync BorrowedSink(ZmtpParser parser)
+        => (frame, _) =>
         {
-            paused.Enqueue(parser);
-        }
+            var keepGoing = RaiseOnFrame(frame);
+            if (!keepGoing)
+            {
+                paused.Enqueue(parser);
+            }
 
-        return keepGoing;
-    }
+            return ValueTask.FromResult(keepGoing);
+        };
 
     private bool RaiseOnFrame(ZFrame frame)
     {

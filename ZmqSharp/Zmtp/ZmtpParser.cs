@@ -375,7 +375,7 @@ public sealed class ZmtpParser : IDisposable
                         return;
                     }
 
-                    var materializedKeepGoing = connection.OnFrame(materialized, token);
+                    var materializedKeepGoing = await connection.OnFrameAsync(materialized, token);
                     if (!materializedKeepGoing)
                     {
                         await WaitForResumeAsync(token);
@@ -398,7 +398,7 @@ public sealed class ZmtpParser : IDisposable
                         return;
                     }
 
-                    var multiKeepGoing = connection.OnFrame(materialized, token);
+                    var multiKeepGoing = await connection.OnFrameAsync(materialized, token);
                     if (!multiKeepGoing)
                     {
                         await WaitForResumeAsync(token);
@@ -420,13 +420,16 @@ public sealed class ZmtpParser : IDisposable
                     ZSegment.NoopOwner,
                     scratch[scratchUsed..(scratchUsed + length)]),
                 more);
-            var keepGoing = connection.OnFrame(frame, token);
-            scratchUsed = 0;
-            MaybeShrinkScratch();
+            var keepGoing = await connection.OnFrameAsync(frame, token);
             if (!keepGoing)
             {
                 await WaitForResumeAsync(token);
             }
+
+            // The borrowed frame must outlive the await; the scratch is
+            // reused only after delivery (and any pause) completes.
+            scratchUsed = 0;
+            MaybeShrinkScratch();
         }
     }
 

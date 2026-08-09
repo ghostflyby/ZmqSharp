@@ -20,7 +20,7 @@ public interface IZConnection : IZMessageSink, IDisposable
 
     ValueTask SendAsync(ZMessage message, CancellationToken token = default);
 
-    void SetFrameHandler(Func<ZFrame, CancellationToken, bool> onFrame);
+    void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame);
 
     void SetConnectionEndedHandler(Action onConnectionEnded);
 }

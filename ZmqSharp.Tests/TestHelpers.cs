@@ -187,12 +187,12 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
 
     public List<bool> MoreFlags { get; } = [];
 
-    public bool OnFrame(ZFrame frame, CancellationToken token)
+    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
     {
         frame.TryGetValue(out ZSegment segment);
         Frames.Add(segment.Memory.ToArray());
         MoreFlags.Add(frame.More);
-        return onFrame?.Invoke(frame, token) ?? true;
+        return ValueTask.FromResult(onFrame?.Invoke(frame, token) ?? true);
     }
 
     public void OnConnectionEnded()
@@ -204,7 +204,7 @@ internal static class ZmtpTestRunner
 {
     public static ZmtpParser CreateParser(IZConnection connection, IZMessageSink sink)
     {
-        connection.SetFrameHandler((frame, ct) => sink.OnFrame(frame, ct));
+        connection.SetFrameHandler((frame, ct) => sink.OnFrameAsync(frame, ct));
         return new ZmtpParser(connection);
     }
 

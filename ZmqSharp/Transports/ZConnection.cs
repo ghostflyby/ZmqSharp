@@ -9,11 +9,11 @@ internal sealed class ZConnection(Stream stream) : IZConnection
 {
     private readonly ZmtpFrameEncoder encoder = new(stream);
     private readonly SemaphoreSlim writeGate = new(1, 1);
-    private Func<ZFrame, CancellationToken, bool>? onFrame;
+    private Func<ZFrame, CancellationToken, ValueTask<bool>>? onFrame;
     private Action? onConnectionEnded;
     private int disposed;
 
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, bool> handler) => onFrame = handler;
+    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> handler) => onFrame = handler;
 
     public void SetConnectionEndedHandler(Action handler) => onConnectionEnded = handler;
 
@@ -72,8 +72,8 @@ internal sealed class ZConnection(Stream stream) : IZConnection
         }
     }
 
-    public bool OnFrame(ZFrame frame, CancellationToken token)
-        => onFrame?.Invoke(frame, token) ?? true;
+    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
+        => onFrame?.Invoke(frame, token) ?? ValueTask.FromResult(true);
 
     public void OnConnectionEnded() => onConnectionEnded?.Invoke();
 

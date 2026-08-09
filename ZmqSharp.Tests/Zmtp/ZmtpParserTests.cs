@@ -115,6 +115,42 @@ public sealed class ZmtpParserTests
     }
 
     [Fact]
+    public async Task AsyncSink_PendingTask_PausesPumpUntilReleased()
+    {
+        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
+            ZmtpTestData.Greeting(), ZmtpTestData.Ready(),
+            ZmtpTestData.Frame("one"u8.ToArray()),
+            ZmtpTestData.Frame("two"u8.ToArray())));
+        using var connection = new ZConnection(source);
+        var release = new TaskCompletionSource();
+        var firstSeen = new TaskCompletionSource();
+        var frames = new List<byte[]>();
+        var sink = new AsyncSink(onFrameAsync: async (frame, _) =>
+        {
+            frame.TryGetValue(out ZSegment segment);
+            frames.Add(segment.Memory.ToArray());
+            if (frames.Count == 1)
+            {
+                firstSeen.TrySetResult();
+                await release.Task; // pending ValueTask = backpressure
+            }
+
+            return true;
+        });
+        var parser = ZmtpTestRunner.CreateParser(connection, sink);
+
+        var parseTask = ZmtpTestRunner.RunParserAsync(parser);
+        await firstSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        frames.Should().HaveCount(1);
+        parseTask.IsCompleted.Should().BeFalse();
+
+        release.SetResult();
+        await parseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        frames.Should().HaveCount(2);
+        frames[1].Should().Equal("two"u8.ToArray());
+    }
+
+    [Fact]
     public async Task BadGreetingSignature_Throws()
     {
         var greeting = ZmtpTestData.Greeting();
@@ -443,5 +479,16 @@ public sealed class ZmtpParserTests
 
         Func<Task> act = () => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
+    }
+
+    /// <summary>Sink with an async frame handler, for pending-ValueTask backpressure tests.</summary>
+    private sealed class AsyncSink(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrameAsync) : IZMessageSink
+    {
+        public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
+            => onFrameAsync(frame, token);
+
+        public void OnConnectionEnded()
+        {
+        }
     }
 }

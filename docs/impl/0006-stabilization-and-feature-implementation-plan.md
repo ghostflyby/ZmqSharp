@@ -242,9 +242,19 @@ Completion gate:
 Replace synchronous `TryWrite` and global resume coordination in the owning
 queue path with asynchronous per-peer operations.
 
-Required work:
+Implemented:
 
-- Wait mode uses `WriteAsync` on the affected peer queue.
+- The delivery chain is async: `IZMessageSink.OnFrameAsync` /
+  `ZFrameHandlerAsync` return `ValueTask<bool>`, the parser awaits the sink,
+  and wait mode uses `WriteAsync` on the affected peer queue, pausing only
+  that peer's pump (0007 section 6 step 2). The owning queue tier no longer
+  depends on `ResumePaused`; the low-level borrowed callback API retains its
+  own synchronous pause model.
+- Tests: wait mode loses no message under a full queue, and a saturated peer
+  does not pause another peer's delivery.
+
+Remaining required work:
+
 - Drop modes create their bounded channels with a mandatory custom
   dropped-item callback. The callback invokes the library drop operation for
   the item removed or rejected by `DropWrite`, `DropNewest`, or `DropOldest`.
@@ -255,8 +265,6 @@ Required work:
   disposal drain or dispose every message that loses its consumer.
 - A send-pump exception completes its producer surface with failure and does
   not defer discovery until socket disposal.
-- Remove owning queue dependence on `ResumePaused` once per-peer async wait is
-  in place. The low-level borrowed callback API may retain its own pause model.
 
 Completion gate:
 

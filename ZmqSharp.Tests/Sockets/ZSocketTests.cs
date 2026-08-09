@@ -944,6 +944,86 @@ public sealed class ZSocketTests
         server.ReceiveRejections.Should().Be(1);
     }
 
+    [Fact]
+    public async Task WaitMode_DoesNotLoseMessages()
+    {
+        // With a capacity of 2 and no consumer, the per-peer pump blocks on
+        // WriteAsync; the messages are not dropped and all arrive once read.
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        const int count = 20;
+        for (var i = 0; i < count; i++)
+        {
+            await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        }
+
+        var received = new List<byte>();
+        while (received.Count < count)
+        {
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), cts.Token);
+            message.Should().NotBeNull();
+            received.Add(message.Value[0].ToSequence().ToArray()[0]);
+            message.Value.Dispose();
+        }
+
+        received.Should().HaveCount(count);
+        received.Should().Equal(Enumerable.Range(0, count).Select(i => (byte)i));
+    }
+
+    [Fact]
+    public async Task WaitMode_SlowPeer_DoesNotBlockOtherPeer()
+    {
+        var portA = GetFreePort();
+        var portB = GetFreePort();
+        await using var serverA = ZSocket.CreateDealer(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        await using var serverB = ZSocket.CreateDealer(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        await using var dealer = ZSocket.CreateDealer(new ZQueueSocketOptions { ReceiveCapacity = 8 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        await serverA.BindAsync($"tcp://127.0.0.1:{portA}", cts.Token);
+        await serverB.BindAsync($"tcp://127.0.0.1:{portB}", cts.Token);
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{portA}", cts.Token);
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
+
+        var received = new List<byte>();
+        var drainB = DrainAsync(serverB, () => { }, cts.Token);
+
+        // Saturate peer A (capacity 2, nobody reads it), then send to peer B.
+        for (var i = 0; i < 100; i++)
+        {
+            await dealer.SendAsync(ZMessage.FromOwned([1]), cts.Token);
+        }
+
+        var reachedB = false;
+        for (var attempt = 0; attempt < 100 && !reachedB; attempt++)
+        {
+            await dealer.SendAsync(ZMessage.FromOwned([2]), cts.Token);
+            var message = await TryReadAsync(serverB.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            if (message is not null)
+            {
+                received.Add(message.Value[0].ToSequence().ToArray()[0]);
+                message.Value.Dispose();
+                reachedB = received.Any(value => value == 2);
+            }
+        }
+
+        reachedB.Should().BeTrue("a full queue on peer A must not pause peer B's delivery");
+        await cts.CancelAsync();
+        try
+        {
+            await drainB;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
@@ -1052,9 +1132,10 @@ internal sealed class SynchronousEofConnection : IZConnection
     public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
         => WriteAsync(ReadOnlyMemory<byte>.Empty, token);
 
-    public bool OnFrame(ZFrame frame, CancellationToken token) => true;
+    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
+        => ValueTask.FromResult(true);
 
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, bool> onFrame)
+    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
     {
     }
 

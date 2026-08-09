@@ -128,12 +128,16 @@ As implemented:
 ## 6. Receive Pipeline
 
 - Low level: `IZCallbackSocket.OnFrame` streams borrowed frames (0001 section 4).
+- Delivery chain: the parser awaits an async sink (`IZMessageSink.OnFrameAsync`
+  returning `ValueTask<bool>`); a pending task pauses that peer's pump until it
+  completes (0007 section 6 step 2).
 - Queue tier: each peer's parser materializes messages directly into its
   receive queue (zero extra copy, 0004 constraint 1), applying the receive
   policy (0003). The socket type aggregates the peer queues (fair-queue,
   direct, ...) onto `Messages`.
-- Backpressure: a full receive queue pauses only that peer's parser; the
-  socket type handles per-peer isolation (0004).
+- Backpressure: wait mode blocks on `WriteAsync` of the affected peer queue,
+  pausing only that peer's parser; the socket type handles per-peer isolation
+  (0004).
 
 ## 7. Send Path
 

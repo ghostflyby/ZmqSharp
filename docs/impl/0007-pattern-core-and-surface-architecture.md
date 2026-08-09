@@ -297,12 +297,16 @@ invalid after the reply is sent or the peer ends.
    per-peer receive state (frame index, accumulator, materialization policy
    wiring) into the transport core. `OnFrame` survives only as the raw
    low-level surface.
-2. Make the delivery chain async: today `ZConnection.SetFrameHandler` and
-   `IZMessageSink.OnFrame` are synchronous `bool` callbacks and the parser
-   pauses via `Resume`/`WaitForResume`. A `ValueTask` seam requires an async
-   delivery path per peer. This is the implementation prerequisite for the
-   whole architecture and is scheduled with 0006 section 3.5 (async per-peer
-   queues); it must land before any seam-based surface does.
+2. Make the delivery chain async. Implemented: `IZMessageSink.OnFrameAsync`
+   and `ZFrameHandlerAsync` return `ValueTask<bool>`, the parser awaits the
+   sink, `SetFrameHandler` is the async seam, and the queue tier expresses
+   wait-mode backpressure as `WriteAsync` on the affected peer queue. The
+   frame-level seam is now awaitable; the semantic seam (`IPatternSink`,
+   `ValueTask`) is the next surface-layer slice. The low-level borrowed
+   callback tier keeps its synchronous `bool` + `ResumePaused` pause model.
+   This is the implementation prerequisite for the whole architecture and
+   lands with 0006 section 3.5 (async per-peer queues), before any
+   seam-based surface does.
 3. Extract pattern cores as internal composed objects and move
    `RouteOutbound` and `SocketTypeName` out of the base. `ZPairSocket` /
    `ZDealerSocket` become transport-core composition roots; the state machine
