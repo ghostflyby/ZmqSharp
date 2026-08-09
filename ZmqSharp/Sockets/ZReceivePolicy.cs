@@ -45,7 +45,7 @@ public readonly struct ZReceiveContext
     public bool IsFirstFrame => FrameIndex == 0;
 }
 
-/// <summary>Why a received frame was rejected (0008 D1).</summary>
+/// <summary>Why a received frame was rejected by the connection-level guard.</summary>
 public enum ZReceiveRejectionReason
 {
     /// <summary>The frame exceeds the configured single-frame limit.</summary>
@@ -56,12 +56,9 @@ public enum ZReceiveRejectionReason
 
     /// <summary>The message has more frames than the configured per-message limit.</summary>
     TooManyFrames,
-
-    /// <summary>Arbitrary policy decision, not a configured numeric limit.</summary>
-    Policy,
 }
 
-/// <summary>The Reject case of a receive decision (0008 D1).</summary>
+/// <summary>The rejection payload of the connection-level guard (0008 D1).</summary>
 public readonly struct ZReceiveRejection
 {
     /// <summary>Classification of the rejection.</summary>
@@ -75,52 +72,28 @@ public readonly struct ZReceiveRejection
 }
 
 /// <summary>
-/// Receive decision root with exactly one case: Accept (<see cref="ZReceiveAllocation"/>)
-/// or Reject (<see cref="ZReceiveRejection"/>), following the 0005 union-like pattern.
+/// Decides how each frame is allocated. Allocation only: the resource limits
+/// are enforced by a connection-level guard outside this policy, so a policy
+/// never decides whether a frame may be received (0008 D1).
 /// </summary>
-public readonly struct ZReceiveDecision
-{
-    private readonly ZReceiveAllocation? allocation; // Accept case
-    private readonly ZReceiveRejection? rejection;   // Reject case
-
-    /// <summary>Builds the Accept case.</summary>
-    public ZReceiveDecision(ZReceiveAllocation allocation) => this.allocation = allocation;
-
-    /// <summary>Builds the Reject case.</summary>
-    public ZReceiveDecision(ZReceiveRejection rejection) => this.rejection = rejection;
-
-    public bool TryGetValue(out ZReceiveAllocation allocation)
-    {
-        allocation = this.allocation.GetValueOrDefault();
-        return this.allocation is not null;
-    }
-
-    public bool TryGetValue(out ZReceiveRejection rejection)
-    {
-        rejection = this.rejection.GetValueOrDefault();
-        return this.rejection is not null;
-    }
-}
-
-/// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
 public interface IZReceivePolicy
 {
-    ZReceiveDecision Decide(ZReceiveContext context);
+    ZReceiveAllocation Decide(ZReceiveContext context);
 }
 
 /// <summary>Wraps a decide delegate as a policy.</summary>
 public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy
 {
-    public ZReceiveDecision Decide(ZReceiveContext context) => decide(context);
+    public ZReceiveAllocation Decide(ZReceiveContext context) => decide(context);
 }
 
 /// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
-public delegate ZReceiveDecision ZDecide(ZReceiveContext context);
+public delegate ZReceiveAllocation ZDecide(ZReceiveContext context);
 
 /// <summary>
 /// Numeric-configuration receive policy: fixed ownership plus a frame-length
-/// threshold that decides continuity. Rejection limits are not part of the
-/// policy; they are enforced by a connection-level guard on
+/// threshold that decides continuity. Allocation only; rejection limits are
+/// not part of the policy - they are enforced by a connection-level guard on
 /// <see cref="ZQueueSocketOptions"/> (0008 D1/D6), so a custom policy can
 /// never bypass them.
 /// </summary>
@@ -131,18 +104,18 @@ public sealed class ZReceiveOptions : IZReceivePolicy
     /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
 
-    public ZReceiveDecision Decide(ZReceiveContext context)
-        => new(new ZReceiveAllocation
+    public ZReceiveAllocation Decide(ZReceiveContext context)
+        => new()
         {
             Mode = Mode,
             Segmented = context.FrameLength > ContiguousFrameLimit,
-        });
+        };
 }
 
 /// <summary>
-/// Internal signal that the receive policy rejected a frame. Propagates as
-/// the connection failure through the existing teardown path; no wire ERROR
-/// is sent for a traffic-phase rejection (0008 D5).
+/// Internal signal that the connection-level guard rejected a frame.
+/// Propagates as the connection failure through the existing teardown path; no
+/// wire ERROR is sent for a traffic-phase rejection (0008 D5).
 /// </summary>
 internal sealed class ZReceiveRejectedException(ZReceiveRejection rejection) : Exception
 {

@@ -290,24 +290,13 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         long accumulatedLength,
         int frameLength,
         bool more)
-    {
-        var decision = receivePolicy.Decide(new ZReceiveContext
+        => receivePolicy.Decide(new ZReceiveContext
         {
             FrameLength = frameLength,
             HasMore = more,
             FrameIndex = frameIndex,
             AccumulatedLength = accumulatedLength,
         });
-
-        if (decision.TryGetValue(out ZReceiveAllocation allocation))
-        {
-            return allocation;
-        }
-
-        decision.TryGetValue(out ZReceiveRejection rejection);
-        Reject(rejection);
-        return default; // Reject throws; this keeps the decision root exhaustive.
-    }
 
     private void Reject(ZReceiveRejection rejection)
     {

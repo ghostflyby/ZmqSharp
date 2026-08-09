@@ -162,7 +162,7 @@ public sealed class ZSocketTests
             ReceiveCapacity = 4,
             Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(
-                _ => new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned })),
+                _ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned }),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -197,8 +197,8 @@ public sealed class ZSocketTests
             Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(
                 ctx => ctx.FrameIndex == 0
-                    ? new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })
-                    : new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned })),
+                    ? new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }
+                    : new ZReceiveAllocation { Mode = ZReceiveMode.Owned }),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -302,14 +302,12 @@ public sealed class ZSocketTests
         var policy = new ZReceiveOptions { ContiguousFrameLimit = 100 };
 
         var small = policy.Decide(new ZReceiveContext { FrameLength = 10 });
-        small.TryGetValue(out ZReceiveAllocation smallAllocation).Should().BeTrue();
-        smallAllocation.Mode.Should().Be(ZReceiveMode.Pooled);
-        smallAllocation.Segmented.Should().BeFalse();
+        small.Mode.Should().Be(ZReceiveMode.Pooled);
+        small.Segmented.Should().BeFalse();
 
         var large = policy.Decide(new ZReceiveContext { FrameLength = 200 });
-        large.TryGetValue(out ZReceiveAllocation largeAllocation).Should().BeTrue();
-        largeAllocation.Mode.Should().Be(ZReceiveMode.Pooled);
-        largeAllocation.Segmented.Should().BeTrue();
+        large.Mode.Should().Be(ZReceiveMode.Pooled);
+        large.Segmented.Should().BeTrue();
     }
 
     [Fact]
@@ -322,8 +320,8 @@ public sealed class ZSocketTests
             Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(
                 ctx => ctx.FrameLength > 100
-                    ? new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned })
-                    : new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })),
+                    ? new ZReceiveAllocation { Mode = ZReceiveMode.Owned }
+                    : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 8 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -919,15 +917,16 @@ public sealed class ZSocketTests
     [Fact]
     public async Task Limits_EnforcedOutsidePolicy_CustomPolicyCannotBypass()
     {
-        // A policy that always accepts cannot bypass the socket-level limits:
-        // they are enforced by the connection guard before Decide is called.
+        // The policy is allocation-only and cannot reject or bypass the
+        // socket-level limits: they are enforced by the connection guard
+        // before Decide is called.
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
             ReceiveCapacity = 4,
             MaxFrameLength = 4,
             ReceivePolicy = new ZDelegateReceivePolicy(
-                _ => new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })),
+                _ => new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }),
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });

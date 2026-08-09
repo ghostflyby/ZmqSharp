@@ -16,9 +16,9 @@ implemented yet.
 
 ## Implementation status
 
-- Slice A is implemented: `ZReceiveDecision` / `ZReceiveRejection` /
+- Slice A is implemented: `ZReceiveRejection` /
   `ZReceiveRejectionReason` (0005 pattern), `IZReceivePolicy.Decide` returning
-  the decision root, `MaxFrameLength` / `MaxMessageLength` /
+  a `ZReceiveAllocation` (allocation only, no rejection case), `MaxFrameLength` / `MaxMessageLength` /
   `MaxFramesPerMessage` on `ZQueueSocketOptions` (one-time socket
   configuration) enforced by a connection-level guard in the materializer
   (fixed-order evaluation; a custom policy cannot bypass them), checked
@@ -94,26 +94,18 @@ implementation.
 The allocation decision and the resource limits are orthogonal. The numeric
 limits live on `ZQueueSocketOptions` as one-time socket configuration; each
 peer's materializer checks them after the frame header is read, before any
-allocation, and rejects the connection on violation. A custom policy decides
-allocation only and is never consulted about whether to allocate, so it
-cannot bypass the limits.
+allocation, and rejects the connection on violation.
 
-`Decide` still returns a decision root with exactly one case - Accept
-(`ZReceiveAllocation`) or Reject (`ZReceiveRejection`) - following the 0005
-union-like pattern, so a custom policy may still reject with a `Policy`
-reason. The built-in numeric limits no longer flow through the policy; the
-`ZReceiveDecision` surface remains so policy-level rejection stays possible.
+The policy decides allocation only - it never decides whether a frame may be
+received. It returns a `ZReceiveAllocation` (`Mode` + `Segmented`); there is
+no Reject case and no `ZReceiveDecision` root, because the situations a
+per-frame decision could reject (resource limits) are enforced by the guard,
+while content-based filtering cannot be expressed at the decision point (the
+frame body has not been read) and is a message-API concern (D5). Removing the
+Reject case keeps a custom policy unable to bypass the limits or to reject a
+frame in a way that would silently desynchronize the pipeline.
 
-```csharp
-public readonly struct ZReceiveDecision
-{
-    public bool TryGetValue(out ZReceiveAllocation allocation); // Accept case
-    public bool TryGetValue(out ZReceiveRejection rejection);   // Reject case
-}
-```
-
-`ZReceiveAllocation` remains the Accept payload (`Mode` + `Segmented`).
-`ZReceiveRejection` is the Reject payload:
+`ZReceiveRejection` is the guard's payload:
 
 ```csharp
 public enum ZReceiveRejectionReason
@@ -121,7 +113,6 @@ public enum ZReceiveRejectionReason
     FrameTooLarge,
     MessageTooLarge,
     TooManyFrames,
-    Policy, // arbitrary policy decision
 }
 
 public readonly struct ZReceiveRejection
@@ -170,7 +161,7 @@ identity, and cannot "decide" a message total.
 
 Consequences:
 
-- The message total is enforced in the pipeline (`Decide` against checked
+- The message total is enforced in the pipeline (the guard against checked
   `AccumulatedLength`), where the rejection can be deterministic, carry a
   reason, and terminate the peer.
 - The pool remains injectable (`ZSocketOptions.Pool`), so a custom pool may
@@ -212,7 +203,7 @@ read frame header
       -> checked accumulation; overflow reports MessageTooLarge
       -> connection guard (MaxFrameLength / MaxMessageLength /
          MaxFramesPerMessage on ZQueueSocketOptions); violation rejects
-      -> Decide: allocation only (custom policy may also reject)
+      -> Decide: allocation only
       -> if Reject: no body read, no allocation; terminal teardown
       -> if Accept: Allocate (rent/allocate) -> read body into storage
 ```
@@ -257,9 +248,9 @@ violation: `FrameTooLarge`, then `MessageTooLarge`, then `TooManyFrames`.
 Numeric limit violations set both `Limit` and `Actual`.
 
 A user-supplied `IZReceivePolicy` (delegate or custom implementation) decides
-allocation only; the connection guard enforces the limits regardless of the
-policy, so a custom policy cannot bypass them. A policy may still reject a
-frame itself with a `Policy` reason.
+allocation only: `Decide` returns a `ZReceiveAllocation` and has no rejection
+case, so the policy can neither bypass nor trigger the limits. Content-based
+filtering is a message-API concern, not a policy concern (D5).
 
 ## 5. Slices
 
@@ -271,10 +262,11 @@ documentation updates for affected statements in 0003 and this document
 
 Required work:
 
-- Add `ZReceiveDecision`, `ZReceiveRejection`,
-  `ZReceiveRejectionReason` as union-like value types (0005 pattern).
-- Change `IZReceivePolicy.Decide` to return `ZReceiveDecision`; update
-  `ZReceiveOptions` and `ZDelegateReceivePolicy`.
+- Add `ZReceiveRejection`, `ZReceiveRejectionReason` as union-like value
+  types (0005 pattern), produced by the connection guard.
+- Change `IZReceivePolicy.Decide` to return `ZReceiveAllocation` (allocation
+  only, no rejection case); update `ZReceiveOptions` and
+  `ZDelegateReceivePolicy`.
 - Add `MaxFrameLength`, `MaxMessageLength`, `MaxFramesPerMessage` to
   `ZQueueSocketOptions` with the fixed-order evaluation (D1/§4) and enforce
   them with a connection-level guard in `CreateAllocator`.

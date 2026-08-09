@@ -5,32 +5,12 @@ using ZmqSharp.Sockets;
 namespace ZmqSharp.Tests;
 
 /// <summary>
-/// Unit tests for the receive decision root and the numeric limits of
-/// <see cref="ZReceiveOptions"/> (0008 D1/D2/D4), plus the checked
-/// accumulation guard (0008 D3/D6).
+/// Unit tests for the receive policy (allocation only, 0008 D1/D6) and the
+/// connection-level numeric limits enforced by the guard (0008 D2/D4), plus
+/// the checked accumulation guard (0008 D3/D6).
 /// </summary>
 public sealed class ZReceiveOptionsTests
 {
-    [Fact]
-    public void Decision_AcceptCase_ExposesOnlyAllocation()
-    {
-        var decision = new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned });
-
-        decision.TryGetValue(out ZReceiveAllocation allocation).Should().BeTrue();
-        allocation.Mode.Should().Be(ZReceiveMode.Owned);
-        decision.TryGetValue(out ZReceiveRejection _).Should().BeFalse();
-    }
-
-    [Fact]
-    public void Decision_RejectCase_ExposesOnlyRejection()
-    {
-        var decision = new ZReceiveDecision(new ZReceiveRejection { Reason = ZReceiveRejectionReason.Policy });
-
-        decision.TryGetValue(out ZReceiveRejection rejection).Should().BeTrue();
-        rejection.Reason.Should().Be(ZReceiveRejectionReason.Policy);
-        decision.TryGetValue(out ZReceiveAllocation _).Should().BeFalse();
-    }
-
     [Fact]
     public void FrameLimit_AtLimitAccepts_OnePastRejects()
     {
@@ -181,8 +161,7 @@ public sealed class ZReceiveOptionsTests
         options.MaxFramesPerMessage.Should().Be(int.MaxValue);
 
         // The default configuration accepts a small frame pooled and contiguous.
-        policy.Decide(new ZReceiveContext { FrameLength = 100 })
-            .TryGetValue(out ZReceiveAllocation allocation).Should().BeTrue();
+        var allocation = policy.Decide(new ZReceiveContext { FrameLength = 100 });
         allocation.Mode.Should().Be(ZReceiveMode.Pooled);
         allocation.Segmented.Should().BeFalse();
     }
