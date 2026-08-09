@@ -108,7 +108,10 @@ slice in this plan.
   every semantic socket.
 - REQ may expose an operation that returns its reply. REP may expose a request
   context that owns reply routing. ROUTER may expose routing-aware send and
-  receive values. These are design candidates, not accepted signatures.
+  receive values. These are design candidates, not accepted signatures; the
+  shared architecture that fixes them (transport core, pattern core, semantic
+  seam, composition roots, ownership/move rules) is designed in 0007, and its
+  acceptance supersedes this candidate list.
 - Queue types may remain internal implementation machinery even when a
   pattern exposes an async stream or operation-oriented API.
 
