@@ -175,6 +175,12 @@ creating a segment table. Remote lengths must not escape as integer overflow,
 array length, out-of-memory, or pool implementation exceptions when a
 protocol-limit error is appropriate.
 
+The receive-side limits (maximum frame size, maximum accumulated message size,
+maximum frames per message) are implemented per 0008 Slice A with checked
+accounting and terminal rejection. The remaining explicit options - maximum
+command size (0008 Slice B), greeting and handshake timeout, and maximum
+concurrent incomplete handshakes - are not yet implemented.
+
 Completion gate:
 
 - Boundary and one-past-boundary tests exist for every numeric limit.

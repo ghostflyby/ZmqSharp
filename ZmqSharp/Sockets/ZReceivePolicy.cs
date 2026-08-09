@@ -17,7 +17,6 @@ public readonly struct ZReceiveAllocation
     public ZReceiveMode Mode { get; init; }
 
     /// <summary>
-    /// TODO:
     /// True = chained segments; false (default) = one contiguous segment.
     /// Segmented materialization is a 0003 open question; v1 always
     /// materializes contiguously.
@@ -46,24 +45,84 @@ public readonly struct ZReceiveContext
     public bool IsFirstFrame => FrameIndex == 0;
 }
 
+/// <summary>Why a received frame was rejected (0008 D1).</summary>
+public enum ZReceiveRejectionReason
+{
+    /// <summary>The frame exceeds the configured single-frame limit.</summary>
+    FrameTooLarge,
+
+    /// <summary>The accumulated message exceeds the configured total limit.</summary>
+    MessageTooLarge,
+
+    /// <summary>The message has more frames than the configured per-message limit.</summary>
+    TooManyFrames,
+
+    /// <summary>Arbitrary policy decision, not a configured numeric limit.</summary>
+    Policy,
+}
+
+/// <summary>The Reject case of a receive decision (0008 D1).</summary>
+public readonly struct ZReceiveRejection
+{
+    /// <summary>Classification of the rejection.</summary>
+    public ZReceiveRejectionReason Reason { get; init; }
+
+    /// <summary>The configured limit, when the rejection is a numeric-limit violation.</summary>
+    public long? Limit { get; init; }
+
+    /// <summary>The observed value, when the rejection is a numeric-limit violation.</summary>
+    public long? Actual { get; init; }
+}
+
+/// <summary>
+/// Receive decision root with exactly one case: Accept (<see cref="ZReceiveAllocation"/>)
+/// or Reject (<see cref="ZReceiveRejection"/>), following the 0005 union-like pattern.
+/// </summary>
+public readonly struct ZReceiveDecision
+{
+    private readonly ZReceiveAllocation? allocation; // Accept case
+    private readonly ZReceiveRejection? rejection;   // Reject case
+
+    /// <summary>Builds the Accept case.</summary>
+    public ZReceiveDecision(ZReceiveAllocation allocation) => this.allocation = allocation;
+
+    /// <summary>Builds the Reject case.</summary>
+    public ZReceiveDecision(ZReceiveRejection rejection) => this.rejection = rejection;
+
+    public bool TryGetValue(out ZReceiveAllocation allocation)
+    {
+        allocation = this.allocation.GetValueOrDefault();
+        return this.allocation is not null;
+    }
+
+    public bool TryGetValue(out ZReceiveRejection rejection)
+    {
+        rejection = this.rejection.GetValueOrDefault();
+        return this.rejection is not null;
+    }
+}
+
 /// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
 public interface IZReceivePolicy
 {
-    ZReceiveAllocation Decide(ZReceiveContext context);
+    ZReceiveDecision Decide(ZReceiveContext context);
 }
 
 /// <summary>Wraps a decide delegate as a policy.</summary>
 public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy
 {
-    public ZReceiveAllocation Decide(ZReceiveContext context) => decide(context);
+    public ZReceiveDecision Decide(ZReceiveContext context) => decide(context);
 }
 
 /// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
-public delegate ZReceiveAllocation ZDecide(ZReceiveContext context);
+public delegate ZReceiveDecision ZDecide(ZReceiveContext context);
 
 /// <summary>
-/// Numeric-configuration receive policy: fixed ownership plus a frame-length
-/// threshold that decides continuity.
+/// Numeric-configuration receive policy: fixed ownership, a frame-length
+/// threshold that decides continuity, and optional rejection limits that
+/// default to unlimited (0008 D2). Limits are evaluated in a fixed order:
+/// single frame, message total, frames per message; the first violation
+/// rejects.
 /// </summary>
 public sealed class ZReceiveOptions : IZReceivePolicy
 {
@@ -72,10 +131,86 @@ public sealed class ZReceiveOptions : IZReceivePolicy
     /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
 
-    public ZReceiveAllocation Decide(ZReceiveContext context)
-        => new()
+    /// <summary>Maximum frame length; null = unlimited (0008 D2).</summary>
+    public long? MaxFrameLength { get; init; }
+
+    /// <summary>Maximum accumulated message length; null = unlimited (0008 D2).</summary>
+    public long? MaxMessageLength { get; init; }
+
+    /// <summary>Maximum frames per message; null = unlimited (0008 D2).</summary>
+    public int? MaxFramesPerMessage { get; init; }
+
+    public ZReceiveDecision Decide(ZReceiveContext context)
+    {
+        if (MaxFrameLength is { } frameLimit && context.FrameLength > frameLimit)
+        {
+            return new ZReceiveDecision(new ZReceiveRejection
+            {
+                Reason = ZReceiveRejectionReason.FrameTooLarge,
+                Limit = frameLimit,
+                Actual = context.FrameLength,
+            });
+        }
+
+        if (MaxMessageLength is { } messageLimit && context.AccumulatedLength > messageLimit)
+        {
+            return new ZReceiveDecision(new ZReceiveRejection
+            {
+                Reason = ZReceiveRejectionReason.MessageTooLarge,
+                Limit = messageLimit,
+                Actual = context.AccumulatedLength,
+            });
+        }
+
+        if (MaxFramesPerMessage is { } frameCountLimit && context.FrameIndex >= frameCountLimit)
+        {
+            // FrameIndex is zero-based, so reaching the limit means a frame is already in excess.
+            return new ZReceiveDecision(new ZReceiveRejection
+            {
+                Reason = ZReceiveRejectionReason.TooManyFrames,
+                Limit = frameCountLimit,
+                Actual = context.FrameIndex + 1,
+            });
+        }
+
+        return new ZReceiveDecision(new ZReceiveAllocation
         {
             Mode = Mode,
             Segmented = context.FrameLength > ContiguousFrameLimit,
-        };
+        });
+    }
+}
+
+/// <summary>
+/// Internal signal that the receive policy rejected a frame. Propagates as
+/// the connection failure through the existing teardown path; no wire ERROR
+/// is sent for a traffic-phase rejection (0008 D5).
+/// </summary>
+internal sealed class ZReceiveRejectedException(ZReceiveRejection rejection) : Exception
+{
+    public ZReceiveRejection Rejection { get; } = rejection;
+}
+
+/// <summary>Checked message-total accounting for the receive pipeline (0008 D3/D6).</summary>
+internal static class ZReceiveGuard
+{
+    /// <summary>
+    /// Adds a frame length to the running message total with checked
+    /// arithmetic. Overflow reports failure instead of throwing, so an
+    /// unrepresentable total surfaces as a MessageTooLarge rejection rather
+    /// than an arithmetic exception.
+    /// </summary>
+    public static bool TryAccumulate(long current, int length, out long total)
+    {
+        try
+        {
+            total = checked(current + length);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            total = 0;
+            return false;
+        }
+    }
 }

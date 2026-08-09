@@ -71,28 +71,32 @@ public readonly struct ZReceiveContext
 
 public interface IZReceivePolicy
 {
-    ZReceiveAllocation Decide(ZReceiveContext context);
+    ZReceiveDecision Decide(ZReceiveContext context);
 }
 
 public sealed class ZReceiveOptions : IZReceivePolicy
 {
-    public ZReceiveAllocation DefaultAllocation { get; init; } =
-        new() { Mode = ZReceiveMode.Pooled };
+    public ZReceiveMode Mode { get; init; }
 
     /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
 
-    public ZReceiveAllocation Decide(ZReceiveContext context)
-        => new()
-        {
-            Mode = DefaultAllocation.Mode,
-            Segmented = context.FrameLength > ContiguousFrameLimit,
-        };
+    public long? MaxFrameLength { get; init; }     // 0008 D2: null = unlimited
+    public long? MaxMessageLength { get; init; }   // 0008 D2: null = unlimited
+    public int? MaxFramesPerMessage { get; init; } // 0008 D2: null = unlimited
 }
 
-public delegate ZReceiveAllocation ZDecide(ZReceiveContext context);
+public delegate ZReceiveDecision ZDecide(ZReceiveContext context);
 public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy;
 ```
+
+`Decide` returns a decision root with exactly one case - Accept
+(`ZReceiveAllocation`) or Reject (`ZReceiveRejection`) - following the 0005
+union-like pattern (0008 D1). `ZReceiveOptions` is the configuration-only
+policy (fixed allocation plus optional rejection limits); custom policies
+implement `IZReceivePolicy` or wrap a `ZDecide` delegate via
+`ZDelegateReceivePolicy`. The rejection contract, limits, and failure-class
+separation are defined by 0008.
 
 - Carried by `ZQueueSocketOptions.ReceivePolicy` as an `IZReceivePolicy`
   (0002); the low-tier
@@ -103,9 +107,12 @@ public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy;
   current frame. Later frames see the accumulated decisions implicitly through
   these fields, so a message's frames may use different allocations (e.g. the
   first frame pooled, a later large frame owned).
-- `ZReceiveOptions` is the configuration-only policy (fixed allocation);
-  custom policies implement `IZReceivePolicy` or wrap a `ZDecide` delegate
-  via `ZDelegateReceivePolicy`.
+- `ZReceiveOptions` is the configuration-only policy (fixed allocation plus
+  optional rejection limits); custom policies implement `IZReceivePolicy` or
+  wrap a `ZDecide` delegate via `ZDelegateReceivePolicy`.
+- A Reject decision is terminal for the peer connection (0008 D6); it is not a
+  per-message drop. Consumers that want per-message filtering must do it at
+  the message API, not by rejecting in the allocator.
 - `Borrowed` is not a mode here: borrowed delivery is the identity of the
   `IZCallbackSocket` tier, not an option of queue materialization.
 

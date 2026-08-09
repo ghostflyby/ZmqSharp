@@ -14,6 +14,20 @@ extends 0003 (receive policy) and 0005 (union-like value types). It records
 the decisions already accepted in review on 2026-08-09; nothing here is
 implemented yet.
 
+## Implementation status
+
+- Slice A is implemented: `ZReceiveDecision` / `ZReceiveRejection` /
+  `ZReceiveRejectionReason` (0005 pattern), `IZReceivePolicy.Decide` returning
+  the decision root, `MaxFrameLength` / `MaxMessageLength` /
+  `MaxFramesPerMessage` on `ZReceiveOptions` (fixed-order evaluation),
+  checked accumulation via `ZReceiveGuard`, terminal teardown through the
+  existing failure-safe path, and a `ReceiveRejections` diagnostic counter on
+  `ZQueueSocket` (decision on open question 3: counter only, for now).
+  Rejection is signaled by an internal `ZReceiveRejectedException`; the public
+  exception hierarchy stays open per 0006 §2.3.
+- Slice B (configurable command size) and Slice C (segmented materialization)
+  are not implemented.
+
 ## 1. Context
 
 The queue tier materializes each message through a per-frame decision hook
@@ -311,6 +325,8 @@ not depend on it: rejection checks run before any segmentation decision.
    provides the count at the decision point.
 3. Diagnostic API shape: counter, event, or both; and whether the rejection
    reason should be a dedicated exception type or a
-   `ZeroMqProtocolException` subclass with the reason attached.
+   `ZeroMqProtocolException` subclass with the reason attached. Slice A landed
+   a `ReceiveRejections` counter plus the internal
+   `ZReceiveRejectedException`; revisiting this is open.
 4. Whether the fixed evaluation order (frame, message total, frame count,
    policy) is the desired precedence when multiple limits are exceeded.

@@ -60,6 +60,8 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
     }
 
+    private static readonly ZReceiveAllocation DefaultPooledAllocation = new() { Mode = ZReceiveMode.Pooled };
+
     private readonly TSocket socket;
     private readonly Channel<ZMessage>? sendChannel;
     private readonly Task? sendPump;
@@ -67,6 +69,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly int receiveCapacity;
     private readonly IZReceivePolicy? receivePolicy;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private long rejections;
     private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
 
@@ -92,6 +95,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     }
 
     public ChannelReader<ZMessage> Messages { get; }
+
+    /// <summary>Total frames rejected by the receive policy since construction.</summary>
+    public long ReceiveRejections => Volatile.Read(ref rejections);
 
     public ChannelWriter<ZMessage>? Outbound => sendChannel?.Writer;
 
@@ -247,7 +253,13 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             }
 
             var frameIndex = state.FrameIndex;
-            var accumulated = state.AccumulatedLength + length;
+            if (!ZReceiveGuard.TryAccumulate(state.AccumulatedLength, length, out var accumulated))
+            {
+                // An unrepresentable message total is a rejection, never an
+                // arithmetic exception (0008 D3/D6).
+                Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
+            }
+
             state.FrameIndex = frameIndex + 1;
             state.AccumulatedLength = accumulated;
 
@@ -262,20 +274,34 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         int frameLength,
         bool more)
     {
-        if (receivePolicy is null)
+        var decision = receivePolicy is null
+            ? new ZReceiveDecision(DefaultPooledAllocation)
+            : receivePolicy.Decide(new ZReceiveContext
+            {
+                FrameLength = frameLength,
+                HasMore = more,
+                FrameIndex = frameIndex,
+                AccumulatedLength = accumulatedLength,
+            });
+
+        if (decision.TryGetValue(out ZReceiveAllocation allocation))
         {
-            return new ZReceiveAllocation { Mode = ZReceiveMode.Pooled };
+            return allocation;
         }
 
-        var context = new ZReceiveContext
-        {
-            FrameLength = frameLength,
-            HasMore = more,
-            FrameIndex = frameIndex,
-            AccumulatedLength = accumulatedLength,
-        };
-        return receivePolicy.Decide(context);
+        decision.TryGetValue(out ZReceiveRejection rejection);
+        Reject(rejection);
+        return default; // Reject throws; this keeps the decision root exhaustive.
     }
+
+    private void Reject(ZReceiveRejection rejection)
+    {
+        Interlocked.Increment(ref rejections);
+        throw new ZReceiveRejectedException(rejection);
+    }
+
+    private void Reject(ZReceiveRejectionReason reason, long? limit, long? actual)
+        => Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
 
     private (object Owner, Memory<byte> Memory) Allocate(ZReceiveMode mode, int length)
     {

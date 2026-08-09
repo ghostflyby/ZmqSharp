@@ -97,6 +97,45 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
     }
 }
 
+/// <summary>
+/// Pool that probes the receive path: counts every Rent and can be armed to
+/// throw from Rent, proving whether an over-limit frame was allocated.
+/// </summary>
+internal sealed class ProbingMemoryPool : MemoryPool<byte>
+{
+    private readonly MemoryPool<byte> inner = Shared;
+    private int rented;
+
+    /// <summary>Total Rent calls since construction or the last <see cref="Reset"/>.</summary>
+    public int Rentals => Volatile.Read(ref rented);
+
+    /// <summary>When set, Rent throws before allocating anything.</summary>
+    public Exception? FailOnRent { get; set; }
+
+    public override int MaxBufferSize => inner.MaxBufferSize;
+
+    public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
+    {
+        Interlocked.Increment(ref rented);
+        if (FailOnRent is { } failure)
+        {
+            throw failure;
+        }
+
+        return inner.Rent(minimumBufferSize);
+    }
+
+    public void Reset() => Interlocked.Exchange(ref rented, 0);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            inner.Dispose();
+        }
+    }
+}
+
 /// <summary>Test factory for building ZMessage instances directly.</summary>
 internal static class MessageFactory
 {

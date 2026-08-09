@@ -162,7 +162,7 @@ public sealed class ZSocketTests
             ReceiveCapacity = 4,
             Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(
-                _ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned }),
+                _ => new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned })),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -197,8 +197,8 @@ public sealed class ZSocketTests
             Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(
                 ctx => ctx.FrameIndex == 0
-                    ? new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }
-                    : new ZReceiveAllocation { Mode = ZReceiveMode.Owned }),
+                    ? new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })
+                    : new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned })),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -302,12 +302,14 @@ public sealed class ZSocketTests
         var policy = new ZReceiveOptions { ContiguousFrameLimit = 100 };
 
         var small = policy.Decide(new ZReceiveContext { FrameLength = 10 });
-        small.Mode.Should().Be(ZReceiveMode.Pooled);
-        small.Segmented.Should().BeFalse();
+        small.TryGetValue(out ZReceiveAllocation smallAllocation).Should().BeTrue();
+        smallAllocation.Mode.Should().Be(ZReceiveMode.Pooled);
+        smallAllocation.Segmented.Should().BeFalse();
 
         var large = policy.Decide(new ZReceiveContext { FrameLength = 200 });
-        large.Mode.Should().Be(ZReceiveMode.Pooled);
-        large.Segmented.Should().BeTrue();
+        large.TryGetValue(out ZReceiveAllocation largeAllocation).Should().BeTrue();
+        largeAllocation.Mode.Should().Be(ZReceiveMode.Pooled);
+        largeAllocation.Segmented.Should().BeTrue();
     }
 
     [Fact]
@@ -320,8 +322,8 @@ public sealed class ZSocketTests
             Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(
                 ctx => ctx.FrameLength > 100
-                    ? new ZReceiveAllocation { Mode = ZReceiveMode.Owned }
-                    : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }),
+                    ? new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Owned })
+                    : new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })),
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 8 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -757,6 +759,161 @@ public sealed class ZSocketTests
         failure.Should().BeOfType<InvalidOperationException>();
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OversizedFrame_RejectsPeerAndReclaimsPool()
+    {
+        using var pool = new CountingMemoryPool();
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            Pool = pool,
+            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+        });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
+        rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
+        rejected.Rejection.Limit.Should().Be(4);
+        rejected.Rejection.Actual.Should().Be(5);
+        server.ReceiveRejections.Should().Be(1);
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OversizedMessage_RejectsBeforeDeliveringAnyFrame()
+    {
+        using var pool = new CountingMemoryPool();
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            Pool = pool,
+            ReceivePolicy = new ZReceiveOptions { MaxMessageLength = 10 },
+        });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await client.SendAsync(MessageFactory.Multipart("aaaaaa"u8.ToArray(), "bbbbbb"u8.ToArray()), cts.Token);
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
+        rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
+        rejected.Rejection.Limit.Should().Be(10);
+        rejected.Rejection.Actual.Should().Be(12);
+        server.ReceiveRejections.Should().Be(1);
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RejectedPeer_IsNotRoutable_NoFurtherMessages()
+    {
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        // A message below the limit establishes and flows first.
+        var first = false;
+        for (var attempt = 0; attempt < 50 && !first; attempt++)
+        {
+            await client.SendAsync(ZMessage.FromOwned("ok"u8.ToArray()), cts.Token);
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            if (message is not null)
+            {
+                message.Value.Dispose();
+                first = true;
+            }
+        }
+
+        first.Should().BeTrue();
+
+        // The oversized message rejects the peer; later sends must not be
+        // delivered to the server.
+        await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned("ok"u8.ToArray()), cts.Token);
+
+        var extra = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), cts.Token);
+        extra.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RejectedPeer_EndsWithClose_NotWithPeerError()
+    {
+        var clientEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        client.PeerEnded += (_, failure) => clientEnded.TrySetResult(failure);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+
+        // Traffic-phase rejection is a plain close, never an ERROR command
+        // (0008 D5): the client sees EOF/IO, not a peer protocol error.
+        var failure = await clientEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        (failure is null or IOException or SocketException).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task OverLimitFrame_DoesNotRentFromPool()
+    {
+        using var pool = new ProbingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            Pool = pool,
+            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        // Prove the probe works for in-limit frames.
+        await client.SendAsync(ZMessage.FromOwned("ok"u8.ToArray()), cts.Token);
+        var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), cts.Token);
+        message.Should().NotBeNull();
+        message.Value.Dispose();
+        pool.Rentals.Should().BeGreaterThan(0);
+
+        // The over-limit frame is rejected before any allocation.
+        pool.Reset();
+        await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+        await Task.Delay(200, cts.Token);
+        pool.Rentals.Should().Be(0);
     }
 
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)
