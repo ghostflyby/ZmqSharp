@@ -60,14 +60,12 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
     }
 
-    private static readonly ZReceiveAllocation DefaultPooledAllocation = new() { Mode = ZReceiveMode.Pooled };
-
     private readonly TSocket socket;
     private readonly Channel<ZMessage>? sendChannel;
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
-    private readonly IZReceivePolicy? receivePolicy;
+    private readonly IZReceivePolicy receivePolicy;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long rejections;
     private Action<IZConnection, Exception?>? peerEnded;
@@ -274,15 +272,13 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         int frameLength,
         bool more)
     {
-        var decision = receivePolicy is null
-            ? new ZReceiveDecision(DefaultPooledAllocation)
-            : receivePolicy.Decide(new ZReceiveContext
-            {
-                FrameLength = frameLength,
-                HasMore = more,
-                FrameIndex = frameIndex,
-                AccumulatedLength = accumulatedLength,
-            });
+        var decision = receivePolicy.Decide(new ZReceiveContext
+        {
+            FrameLength = frameLength,
+            HasMore = more,
+            FrameIndex = frameIndex,
+            AccumulatedLength = accumulatedLength,
+        });
 
         if (decision.TryGetValue(out ZReceiveAllocation allocation))
         {

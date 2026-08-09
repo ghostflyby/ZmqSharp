@@ -32,8 +32,8 @@ pooled/owned choice.
 - Frame continuity by policy: frames up to a limit are contiguous (single
   segment); larger frames may be segmented (off the LOH).
 - Owned `byte[]` access that is zero-copy and explicit.
-- Default behavior (`Decide == null`, default mode) reproduces plain pooled
-  materialization.
+- Default behavior (the default `ZReceiveOptions` configuration) reproduces
+  plain pooled materialization, segmented only above the contiguous limit.
 
 ## 3. Non-Goals (v1)
 
@@ -76,7 +76,7 @@ public interface IZReceivePolicy
 
 public sealed class ZReceiveOptions : IZReceivePolicy
 {
-    public ZReceiveMode Mode { get; init; }
+    public ZReceiveMode Mode { get; init; } = ZReceiveMode.Pooled;
 
     /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
@@ -98,8 +98,9 @@ implement `IZReceivePolicy` or wrap a `ZDecide` delegate via
 `ZDelegateReceivePolicy`. The rejection contract, limits, and failure-class
 separation are defined by 0008.
 
-- Carried by `ZQueueSocketOptions.ReceivePolicy` as an `IZReceivePolicy`
-  (0002); the low-tier
+- Carried by `ZQueueSocketOptions.ReceivePolicy` as a non-null
+  `IZReceivePolicy` defaulting to `new ZReceiveOptions()` (0002), so the
+  default behavior is the declarative default configuration; the low-tier
   `IZCallbackSocket.OnFrame` is not involved and stays borrowed.
 - `Decide` is invoked **once per frame**, with the current frame's context
   plus message accumulation: `FrameIndex` is the zero-based index within the
@@ -167,7 +168,7 @@ public interface IZMessage
 
 - `Decide` returning `Owned`: queue messages are owned; a counting pool
   asserts zero outstanding rentals.
-- `Decide` returning `Pooled` and `Decide == null`: plain pooled
+- Default configuration (`new ZReceiveOptions()`): plain pooled
   materialization, released on `Dispose`.
 - `TryGetOwnedArray`: true for owned single frames (same instance as the
   source array); false for pooled and segmented; throws after `Dispose`.

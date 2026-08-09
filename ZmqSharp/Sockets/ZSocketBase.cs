@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using ZmqSharp.Messages;
@@ -28,7 +27,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private Action<IZConnection, Exception?>? peerEnded;
 
     protected ZSocketBase(ZSocketOptions options)
-        : base(options.Pool ?? MemoryPool<byte>.Shared)
+        : base(options.Pool)
     {
         ArgumentNullException.ThrowIfNull(options);
     }

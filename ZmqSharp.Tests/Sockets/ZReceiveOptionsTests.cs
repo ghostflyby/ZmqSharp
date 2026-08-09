@@ -127,4 +127,24 @@ public sealed class ZReceiveOptionsTests
         ZReceiveGuard.TryAccumulate(41, 1, out var small).Should().BeTrue();
         small.Should().Be(42);
     }
+
+    [Fact]
+    public void QueueOptions_DefaultPolicy_IsDefaultConfiguration()
+    {
+        var policy = new ZQueueSocketOptions().ReceivePolicy;
+
+        policy.Should().BeOfType<ZReceiveOptions>();
+        var options = (ZReceiveOptions)policy;
+        options.Mode.Should().Be(ZReceiveMode.Pooled);
+        options.ContiguousFrameLimit.Should().Be(85_000);
+        options.MaxFrameLength.Should().BeNull();
+        options.MaxMessageLength.Should().BeNull();
+        options.MaxFramesPerMessage.Should().BeNull();
+
+        // The default configuration accepts a small frame pooled and contiguous.
+        policy.Decide(new ZReceiveContext { FrameLength = 100 })
+            .TryGetValue(out ZReceiveAllocation allocation).Should().BeTrue();
+        allocation.Mode.Should().Be(ZReceiveMode.Pooled);
+        allocation.Segmented.Should().BeFalse();
+    }
 }

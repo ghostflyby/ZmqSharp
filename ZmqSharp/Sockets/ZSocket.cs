@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace ZmqSharp.Sockets;
 
 /// <summary>
@@ -7,10 +9,10 @@ namespace ZmqSharp.Sockets;
 public static class ZSocket
 {
     public static ZQueueSocket<ZPairSocket> CreatePair(ZQueueSocketOptions? options = null)
-        => new(new ZPairSocket(new ZSocketOptions { Pool = options?.Pool }), options);
+        => new(new ZPairSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
 
     public static ZQueueSocket<ZDealerSocket> CreateDealer(ZQueueSocketOptions? options = null)
-        => new(new ZDealerSocket(new ZSocketOptions { Pool = options?.Pool }), options);
+        => new(new ZDealerSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
 
     public static ZPairSocket CreatePairCallback(ZSocketOptions? options = null)
         => new(options ?? new ZSocketOptions());

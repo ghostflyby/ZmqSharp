@@ -535,7 +535,7 @@ public sealed class ZSocketTests
         await using var client = ZSocket.CreatePair();
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
         raw.Dispose();
 
         Exception? caught = null;
@@ -741,7 +741,7 @@ public sealed class ZSocketTests
     public async Task CallbackException_StillRaisesPeerEndedAndReclaimsPool()
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
+        var server = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();

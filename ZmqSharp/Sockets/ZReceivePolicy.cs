@@ -126,7 +126,7 @@ public delegate ZReceiveDecision ZDecide(ZReceiveContext context);
 /// </summary>
 public sealed class ZReceiveOptions : IZReceivePolicy
 {
-    public ZReceiveMode Mode { get; init; }
+    public ZReceiveMode Mode { get; init; } = ZReceiveMode.Pooled;
 
     /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
