@@ -66,6 +66,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
     private readonly IZReceivePolicy receivePolicy;
+    private readonly long maxFrameLength;
+    private readonly long maxMessageLength;
+    private readonly int maxFramesPerMessage;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long rejections;
     private Action<IZConnection, Exception?>? peerEnded;
@@ -79,6 +82,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         options ??= new ZQueueSocketOptions();
         receiveCapacity = options.ReceiveCapacity;
         receivePolicy = options.ReceivePolicy;
+        maxFrameLength = options.MaxFrameLength;
+        maxMessageLength = options.MaxMessageLength;
+        maxFramesPerMessage = options.MaxFramesPerMessage;
         Messages = new AggregateReader(this);
 
         if (options.SendCapacity is { } sendCapacity)
@@ -260,6 +266,19 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
             state.FrameIndex = frameIndex + 1;
             state.AccumulatedLength = accumulated;
+
+            // Connection-level limits are enforced here, before any allocation,
+            // so a custom policy can never bypass them (0008 D1).
+            if (ZReceiveGuard.CheckLimits(
+                    length,
+                    accumulated,
+                    frameIndex,
+                    maxFrameLength,
+                    maxMessageLength,
+                    maxFramesPerMessage) is { } rejection)
+            {
+                Reject(rejection);
+            }
 
             var allocation = DecideAllocation(frameIndex, accumulated, length, more);
             return AllocateSegments(allocation, length, more);

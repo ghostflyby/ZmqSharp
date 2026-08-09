@@ -19,9 +19,11 @@ implemented yet.
 - Slice A is implemented: `ZReceiveDecision` / `ZReceiveRejection` /
   `ZReceiveRejectionReason` (0005 pattern), `IZReceivePolicy.Decide` returning
   the decision root, `MaxFrameLength` / `MaxMessageLength` /
-  `MaxFramesPerMessage` on `ZReceiveOptions` (fixed-order evaluation),
-  checked accumulation via `ZReceiveGuard`, terminal teardown through the
-  existing failure-safe path, and a `ReceiveRejections` diagnostic counter on
+  `MaxFramesPerMessage` on `ZQueueSocketOptions` (one-time socket
+  configuration) enforced by a connection-level guard in the materializer
+  (fixed-order evaluation; a custom policy cannot bypass them), checked
+  accumulation via `ZReceiveGuard`, terminal teardown through the existing
+  failure-safe path, and a `ReceiveRejections` diagnostic counter on
   `ZQueueSocket` (decision on open question 3: counter only, for now).
   Rejection is signaled by an internal `ZReceiveRejectedException`; the public
   exception hierarchy stays open per 0006 §2.3.
@@ -87,10 +89,20 @@ total, and `FrameIndex` for the frames-per-message limit.
 The following decisions were made during review and are binding for the
 implementation.
 
-### D1. Rejection is a third allocation-decision result
+### D1. Rejection is enforced by a connection-level guard, not the policy
 
-`Decide` returns a decision root, not a bare allocation. Following the 0005
-union-like pattern, the root carries exactly one case:
+The allocation decision and the resource limits are orthogonal. The numeric
+limits live on `ZQueueSocketOptions` as one-time socket configuration; each
+peer's materializer checks them after the frame header is read, before any
+allocation, and rejects the connection on violation. A custom policy decides
+allocation only and is never consulted about whether to allocate, so it
+cannot bypass the limits.
+
+`Decide` still returns a decision root with exactly one case - Accept
+(`ZReceiveAllocation`) or Reject (`ZReceiveRejection`) - following the 0005
+union-like pattern, so a custom policy may still reject with a `Policy`
+reason. The built-in numeric limits no longer flow through the policy; the
+`ZReceiveDecision` surface remains so policy-level rejection stays possible.
 
 ```csharp
 public readonly struct ZReceiveDecision
@@ -128,9 +140,11 @@ libzmq enforces no frame-size limit by default (`ZMQ_MAXMSGSIZE` defaults to
 handshake metadata, so the limits are purely local policy and are never
 negotiated or transmitted.
 
-Therefore the numeric receive limits default to **unlimited** (`null`):
-explicit configuration is the user's informed opt-in. The mandatory command
-size limit (see D5) is the only limit that is not opt-out.
+Therefore the numeric receive limits default to **effectively unlimited**
+(`long.MaxValue` / `int.MaxValue`), expressed as non-null defaults on
+`ZQueueSocketOptions` rather than nullable fields: explicit configuration is
+the user's informed opt-in. The mandatory command size limit (see D5) is the
+only limit that is not opt-out.
 
 ### D3. Rejection is zero-allocation and happens at the header
 
@@ -180,7 +194,7 @@ message API, not by rejecting in the allocator.
 ### D6. Rejection and failure are terminal for the connection
 
 `PeerState.FrameIndex` and `AccumulatedLength` advance before allocation
-([ZQueueSocket.cs](/Users/ghostflyby/repos/tests/ZmqSharp/ZmqSharp/Sockets/ZQueueSocket.cs:250)).
+([ZQueueSocket.cs](/Users/ghostflyby/repos/tests/ZmqSharp/ZmqSharp/Sockets/ZQueueSocket.cs:267)).
 Continuing a connection after a rejection would desynchronize that accounting,
 so rejection always tears the connection down: the peer is removed, its
 accumulated owning frames are reclaimed (0006 §3.2 gate), and the parser and
@@ -194,7 +208,11 @@ For every message frame, the parser order becomes:
 ```text
 read frame header
   -> checked header size validation (existing, header.Size > int.MaxValue)
-  -> allocator(length, more)      // calls Decide; may reject
+  -> allocator(length, more)
+      -> checked accumulation; overflow reports MessageTooLarge
+      -> connection guard (MaxFrameLength / MaxMessageLength /
+         MaxFramesPerMessage on ZQueueSocketOptions); violation rejects
+      -> Decide: allocation only (custom policy may also reject)
       -> if Reject: no body read, no allocation; terminal teardown
       -> if Accept: Allocate (rent/allocate) -> read body into storage
 ```
@@ -208,37 +226,40 @@ Invariants:
 1. Checked accumulation: `AccumulatedLength` uses `checked` arithmetic; an
    overflow is reported as `MessageTooLarge`, never as a raw overflow
    exception.
-2. No allocation precedes the decision for message frames.
+2. No allocation precedes the guard or the decision for message frames.
 3. A rejected or failed connection never remains routable and never resumes
    parsing.
-4. Default behavior is unchanged: no policy and no limits configured means
-   Accept(Pooled, contiguous) for every frame.
+4. Default behavior is unchanged: the default options mean
+   Accept(Pooled, contiguous) for every frame, and the default limits are
+   effectively unlimited.
 
-## 4. Proposed Options Surface
+## 4. Options Surface
 
-`ZReceiveOptions` gains numeric limits (all default `null` = unlimited, per
-D2):
+The numeric limits are one-time socket configuration on `ZQueueSocketOptions`
+(all default to effectively unlimited, per D2), alongside the receive policy
+which decides allocation only:
 
 ```csharp
-public sealed class ZReceiveOptions : IZReceivePolicy
+public sealed class ZQueueSocketOptions
 {
-    public ZReceiveMode Mode { get; init; }
-    public int ContiguousFrameLimit { get; init; } = 85_000;
+    public int ReceiveCapacity { get; init; } = 16;
+    public int? SendCapacity { get; init; }
+    public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions();
 
-    public long? MaxFrameLength { get; init; }     // D2: null = unlimited
-    public long? MaxMessageLength { get; init; }   // D2: null = unlimited
-    public int? MaxFramesPerMessage { get; init; } // D2: null = unlimited
+    public long MaxFrameLength { get; init; }     // D2: long.MaxValue = unlimited
+    public long MaxMessageLength { get; init; }   // D2: long.MaxValue = unlimited
+    public int MaxFramesPerMessage { get; init; } // D2: int.MaxValue = unlimited
 }
 ```
 
-`Decide` evaluates the limits in a fixed order and returns the first
-rejection: `FrameTooLarge`, then `MessageTooLarge`, then `TooManyFrames`,
-then the user's own policy decision. Numeric limit violations set both
-`Limit` and `Actual`.
+The guard checks the limits in a fixed order and rejects with the first
+violation: `FrameTooLarge`, then `MessageTooLarge`, then `TooManyFrames`.
+Numeric limit violations set both `Limit` and `Actual`.
 
-Where the policy is a user-supplied `IZReceivePolicy` (delegate or custom
-implementation), it is responsible for its own limit decisions; the numeric
-configuration in `ZReceiveOptions` is just the built-in policy implementation.
+A user-supplied `IZReceivePolicy` (delegate or custom implementation) decides
+allocation only; the connection guard enforces the limits regardless of the
+policy, so a custom policy cannot bypass them. A policy may still reject a
+frame itself with a `Policy` reason.
 
 ## 5. Slices
 
@@ -255,7 +276,8 @@ Required work:
 - Change `IZReceivePolicy.Decide` to return `ZReceiveDecision`; update
   `ZReceiveOptions` and `ZDelegateReceivePolicy`.
 - Add `MaxFrameLength`, `MaxMessageLength`, `MaxFramesPerMessage` to
-  `ZReceiveOptions` with the fixed-order evaluation in D4/§4.
+  `ZQueueSocketOptions` with the fixed-order evaluation (D1/§4) and enforce
+  them with a connection-level guard in `CreateAllocator`.
 - Add checked accumulation (`checked(AccumulatedLength + length)`) in
   `CreateAllocator`; overflow maps to `MessageTooLarge`.
 - Plumb rejection out of the allocator so the parser skips the body read:
@@ -317,16 +339,17 @@ not depend on it: rejection checks run before any segmentation decision.
 
 ## 7. Open Questions for Review
 
-1. Limit types: `long?` with `null` = unlimited (this plan) versus a
-   libzmq-style `-1` sentinel. The plan prefers nullable types for
-   self-documentation.
-2. Whether `MaxFramesPerMessage` belongs here or in a message-layer policy;
-   the plan places it here because `ZReceiveContext.FrameIndex` already
-   provides the count at the decision point.
+1. Limit types: non-null `long.MaxValue` / `int.MaxValue` defaults on
+   `ZQueueSocketOptions` (this plan) versus a libzmq-style `-1` sentinel or
+   nullable fields. The plan uses non-null defaults so the options are
+   declarative and require no null handling.
+2. Whether `MaxFramesPerMessage` belongs with the other limits or in a
+   message-layer policy. The plan keeps it with the limits because
+   `ZReceiveContext.FrameIndex` already provides the count at the guard point.
 3. Diagnostic API shape: counter, event, or both; and whether the rejection
    reason should be a dedicated exception type or a
    `ZeroMqProtocolException` subclass with the reason attached. Slice A landed
    a `ReceiveRejections` counter plus the internal
    `ZReceiveRejectedException`; revisiting this is open.
-4. Whether the fixed evaluation order (frame, message total, frame count,
-   policy) is the desired precedence when multiple limits are exceeded.
+4. Whether the fixed evaluation order (frame, message total, frame count) is
+   the desired precedence when multiple limits are exceeded.

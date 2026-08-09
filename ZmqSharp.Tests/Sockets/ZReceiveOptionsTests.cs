@@ -34,88 +34,123 @@ public sealed class ZReceiveOptionsTests
     [Fact]
     public void FrameLimit_AtLimitAccepts_OnePastRejects()
     {
-        var policy = new ZReceiveOptions { MaxFrameLength = 100 };
+        // Limits are enforced by the connection-level guard, not the policy.
+        ZReceiveGuard.CheckLimits(
+            frameLength: 100,
+            accumulatedLength: 100,
+            frameIndex: 0,
+            maxFrameLength: 100,
+            maxMessageLength: long.MaxValue,
+            maxFramesPerMessage: int.MaxValue).Should().BeNull();
 
-        policy.Decide(new ZReceiveContext { FrameLength = 100 })
-            .TryGetValue(out ZReceiveAllocation _).Should().BeTrue();
-
-        var decision = policy.Decide(new ZReceiveContext { FrameLength = 101 });
-        decision.TryGetValue(out ZReceiveRejection rejection).Should().BeTrue();
-        rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
-        rejection.Limit.Should().Be(100);
-        rejection.Actual.Should().Be(101);
+        var rejection = ZReceiveGuard.CheckLimits(
+            frameLength: 101,
+            accumulatedLength: 101,
+            frameIndex: 0,
+            maxFrameLength: 100,
+            maxMessageLength: long.MaxValue,
+            maxFramesPerMessage: int.MaxValue);
+        rejection.Should().NotBeNull();
+        rejection.Value.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
+        rejection.Value.Limit.Should().Be(100);
+        rejection.Value.Actual.Should().Be(101);
     }
 
     [Fact]
     public void MessageLimit_AtLimitAccepts_OnePastRejects()
     {
-        var policy = new ZReceiveOptions { MaxMessageLength = 100 };
+        ZReceiveGuard.CheckLimits(
+            frameLength: 1,
+            accumulatedLength: 100,
+            frameIndex: 0,
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: 100,
+            maxFramesPerMessage: int.MaxValue).Should().BeNull();
 
-        policy.Decide(new ZReceiveContext { FrameLength = 100, AccumulatedLength = 100 })
-            .TryGetValue(out ZReceiveAllocation _).Should().BeTrue();
-
-        var decision = policy.Decide(new ZReceiveContext { FrameLength = 1, AccumulatedLength = 101 });
-        decision.TryGetValue(out ZReceiveRejection rejection).Should().BeTrue();
-        rejection.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
-        rejection.Limit.Should().Be(100);
-        rejection.Actual.Should().Be(101);
+        var rejection = ZReceiveGuard.CheckLimits(
+            frameLength: 1,
+            accumulatedLength: 101,
+            frameIndex: 0,
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: 100,
+            maxFramesPerMessage: int.MaxValue);
+        rejection.Should().NotBeNull();
+        rejection.Value.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
+        rejection.Value.Limit.Should().Be(100);
+        rejection.Value.Actual.Should().Be(101);
     }
 
     [Fact]
     public void FramesPerMessage_AtLimitAccepts_OnePastRejects()
     {
-        var policy = new ZReceiveOptions { MaxFramesPerMessage = 3 };
+        ZReceiveGuard.CheckLimits(
+            frameLength: 1,
+            accumulatedLength: 3,
+            frameIndex: 2,
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: long.MaxValue,
+            maxFramesPerMessage: 3).Should().BeNull();
 
-        policy.Decide(new ZReceiveContext { FrameIndex = 2 })
-            .TryGetValue(out ZReceiveAllocation _).Should().BeTrue();
-
-        var decision = policy.Decide(new ZReceiveContext { FrameIndex = 3 });
-        decision.TryGetValue(out ZReceiveRejection rejection).Should().BeTrue();
-        rejection.Reason.Should().Be(ZReceiveRejectionReason.TooManyFrames);
-        rejection.Limit.Should().Be(3);
-        rejection.Actual.Should().Be(4);
+        var rejection = ZReceiveGuard.CheckLimits(
+            frameLength: 1,
+            accumulatedLength: 4,
+            frameIndex: 3,
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: long.MaxValue,
+            maxFramesPerMessage: 3);
+        rejection.Should().NotBeNull();
+        rejection.Value.Reason.Should().Be(ZReceiveRejectionReason.TooManyFrames);
+        rejection.Value.Limit.Should().Be(3);
+        rejection.Value.Actual.Should().Be(4);
     }
 
     [Fact]
     public void Limits_UnlimitedByDefault_AcceptEveryFrame()
     {
-        var policy = new ZReceiveOptions();
-
-        policy.Decide(new ZReceiveContext { FrameLength = int.MaxValue, AccumulatedLength = long.MaxValue })
-            .TryGetValue(out ZReceiveAllocation allocation).Should().BeTrue();
-        allocation.Mode.Should().Be(ZReceiveMode.Pooled);
-        allocation.Segmented.Should().BeTrue(); // above the contiguous threshold
+        ZReceiveGuard.CheckLimits(
+            frameLength: int.MaxValue,
+            accumulatedLength: long.MaxValue,
+            frameIndex: int.MaxValue - 1, // the int.MaxValue-th frame is still in range
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: long.MaxValue,
+            maxFramesPerMessage: int.MaxValue).Should().BeNull();
     }
 
     [Fact]
     public void Limits_EvaluateInFixedOrder_FirstViolationWins()
     {
-        var policy = new ZReceiveOptions
-        {
-            MaxFrameLength = 10,
-            MaxMessageLength = 20,
-            MaxFramesPerMessage = 2,
-        };
-
         // Frame violation wins over the message total.
-        var frameFirst = policy.Decide(new ZReceiveContext { FrameLength = 11, AccumulatedLength = 11 });
-        frameFirst.TryGetValue(out ZReceiveRejection frameRejection).Should().BeTrue();
-        frameRejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
+        var frameFirst = ZReceiveGuard.CheckLimits(
+            frameLength: 11,
+            accumulatedLength: 11,
+            frameIndex: 0,
+            maxFrameLength: 10,
+            maxMessageLength: 20,
+            maxFramesPerMessage: 2);
+        frameFirst.Should().NotBeNull();
+        frameFirst.Value.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
 
         // Message-total violation wins over the frame count.
-        var messageFirst = policy.Decide(new ZReceiveContext
-        {
-            FrameLength = 5,
-            AccumulatedLength = 25,
-            FrameIndex = 3,
-        });
-        messageFirst.TryGetValue(out ZReceiveRejection messageRejection).Should().BeTrue();
-        messageRejection.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
+        var messageFirst = ZReceiveGuard.CheckLimits(
+            frameLength: 5,
+            accumulatedLength: 25,
+            frameIndex: 3,
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: 20,
+            maxFramesPerMessage: 2);
+        messageFirst.Should().NotBeNull();
+        messageFirst.Value.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
 
         // Frame-count violation wins when the earlier limits are satisfied.
-        var countFirst = policy.Decide(new ZReceiveContext { FrameLength = 5, AccumulatedLength = 15, FrameIndex = 3 });
-        countFirst.TryGetValue(out ZReceiveRejection countRejection).Should().BeTrue();
-        countRejection.Reason.Should().Be(ZReceiveRejectionReason.TooManyFrames);
+        var countFirst = ZReceiveGuard.CheckLimits(
+            frameLength: 5,
+            accumulatedLength: 15,
+            frameIndex: 3,
+            maxFrameLength: long.MaxValue,
+            maxMessageLength: 20,
+            maxFramesPerMessage: 2);
+        countFirst.Should().NotBeNull();
+        countFirst.Value.Reason.Should().Be(ZReceiveRejectionReason.TooManyFrames);
     }
 
     [Fact]
@@ -131,15 +166,19 @@ public sealed class ZReceiveOptionsTests
     [Fact]
     public void QueueOptions_DefaultPolicy_IsDefaultConfiguration()
     {
-        var policy = new ZQueueSocketOptions().ReceivePolicy;
+        var options = new ZQueueSocketOptions();
 
+        var policy = options.ReceivePolicy;
         policy.Should().BeOfType<ZReceiveOptions>();
-        var options = (ZReceiveOptions)policy;
-        options.Mode.Should().Be(ZReceiveMode.Pooled);
-        options.ContiguousFrameLimit.Should().Be(85_000);
-        options.MaxFrameLength.Should().BeNull();
-        options.MaxMessageLength.Should().BeNull();
-        options.MaxFramesPerMessage.Should().BeNull();
+        var receiveOptions = (ZReceiveOptions)policy;
+        receiveOptions.Mode.Should().Be(ZReceiveMode.Pooled);
+        receiveOptions.ContiguousFrameLimit.Should().Be(85_000);
+
+        // The policy is allocation-only; limits are socket-level and default
+        // to effectively unlimited.
+        options.MaxFrameLength.Should().Be(long.MaxValue);
+        options.MaxMessageLength.Should().Be(long.MaxValue);
+        options.MaxFramesPerMessage.Should().Be(int.MaxValue);
 
         // The default configuration accepts a small frame pooled and contiguous.
         policy.Decide(new ZReceiveContext { FrameLength = 100 })

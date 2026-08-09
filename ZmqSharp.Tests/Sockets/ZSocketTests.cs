@@ -770,7 +770,7 @@ public sealed class ZSocketTests
         {
             ReceiveCapacity = 4,
             Pool = pool,
-            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+            MaxFrameLength = 4,
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
@@ -800,7 +800,7 @@ public sealed class ZSocketTests
         {
             ReceiveCapacity = 4,
             Pool = pool,
-            ReceivePolicy = new ZReceiveOptions { MaxMessageLength = 10 },
+            MaxMessageLength = 10,
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
@@ -827,7 +827,7 @@ public sealed class ZSocketTests
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
             ReceiveCapacity = 4,
-            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+            MaxFrameLength = 4,
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -867,7 +867,7 @@ public sealed class ZSocketTests
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
             ReceiveCapacity = 4,
-            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+            MaxFrameLength = 4,
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         client.PeerEnded += (_, failure) => clientEnded.TrySetResult(failure);
@@ -893,7 +893,7 @@ public sealed class ZSocketTests
         {
             ReceiveCapacity = 4,
             Pool = pool,
-            ReceivePolicy = new ZReceiveOptions { MaxFrameLength = 4 },
+            MaxFrameLength = 4,
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -914,6 +914,35 @@ public sealed class ZSocketTests
         await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
         await Task.Delay(200, cts.Token);
         pool.Rentals.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Limits_EnforcedOutsidePolicy_CustomPolicyCannotBypass()
+    {
+        // A policy that always accepts cannot bypass the socket-level limits:
+        // they are enforced by the connection guard before Decide is called.
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 4,
+            MaxFrameLength = 4,
+            ReceivePolicy = new ZDelegateReceivePolicy(
+                _ => new ZReceiveDecision(new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })),
+        });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 4 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
+        rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
+        server.ReceiveRejections.Should().Be(1);
     }
 
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)

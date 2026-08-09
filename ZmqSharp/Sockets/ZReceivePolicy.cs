@@ -118,11 +118,11 @@ public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy
 public delegate ZReceiveDecision ZDecide(ZReceiveContext context);
 
 /// <summary>
-/// Numeric-configuration receive policy: fixed ownership, a frame-length
-/// threshold that decides continuity, and optional rejection limits that
-/// default to unlimited (0008 D2). Limits are evaluated in a fixed order:
-/// single frame, message total, frames per message; the first violation
-/// rejects.
+/// Numeric-configuration receive policy: fixed ownership plus a frame-length
+/// threshold that decides continuity. Rejection limits are not part of the
+/// policy; they are enforced by a connection-level guard on
+/// <see cref="ZQueueSocketOptions"/> (0008 D1/D6), so a custom policy can
+/// never bypass them.
 /// </summary>
 public sealed class ZReceiveOptions : IZReceivePolicy
 {
@@ -131,54 +131,12 @@ public sealed class ZReceiveOptions : IZReceivePolicy
     /// <summary>Frames longer than this materialize segmented; at or below, contiguous.</summary>
     public int ContiguousFrameLimit { get; init; } = 85_000;
 
-    /// <summary>Maximum frame length; null = unlimited (0008 D2).</summary>
-    public long? MaxFrameLength { get; init; }
-
-    /// <summary>Maximum accumulated message length; null = unlimited (0008 D2).</summary>
-    public long? MaxMessageLength { get; init; }
-
-    /// <summary>Maximum frames per message; null = unlimited (0008 D2).</summary>
-    public int? MaxFramesPerMessage { get; init; }
-
     public ZReceiveDecision Decide(ZReceiveContext context)
-    {
-        if (MaxFrameLength is { } frameLimit && context.FrameLength > frameLimit)
-        {
-            return new ZReceiveDecision(new ZReceiveRejection
-            {
-                Reason = ZReceiveRejectionReason.FrameTooLarge,
-                Limit = frameLimit,
-                Actual = context.FrameLength,
-            });
-        }
-
-        if (MaxMessageLength is { } messageLimit && context.AccumulatedLength > messageLimit)
-        {
-            return new ZReceiveDecision(new ZReceiveRejection
-            {
-                Reason = ZReceiveRejectionReason.MessageTooLarge,
-                Limit = messageLimit,
-                Actual = context.AccumulatedLength,
-            });
-        }
-
-        if (MaxFramesPerMessage is { } frameCountLimit && context.FrameIndex >= frameCountLimit)
-        {
-            // FrameIndex is zero-based, so reaching the limit means a frame is already in excess.
-            return new ZReceiveDecision(new ZReceiveRejection
-            {
-                Reason = ZReceiveRejectionReason.TooManyFrames,
-                Limit = frameCountLimit,
-                Actual = context.FrameIndex + 1,
-            });
-        }
-
-        return new ZReceiveDecision(new ZReceiveAllocation
+        => new(new ZReceiveAllocation
         {
             Mode = Mode,
             Segmented = context.FrameLength > ContiguousFrameLimit,
         });
-    }
 }
 
 /// <summary>
@@ -212,5 +170,52 @@ internal static class ZReceiveGuard
             total = 0;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Checks the connection-level receive limits for one frame in the fixed
+    /// order frame, message total, frames per message (0008 D4). Returns null
+    /// when the frame passes every limit.
+    /// </summary>
+    public static ZReceiveRejection? CheckLimits(
+        int frameLength,
+        long accumulatedLength,
+        int frameIndex,
+        long maxFrameLength,
+        long maxMessageLength,
+        int maxFramesPerMessage)
+    {
+        if (frameLength > maxFrameLength)
+        {
+            return new ZReceiveRejection
+            {
+                Reason = ZReceiveRejectionReason.FrameTooLarge,
+                Limit = maxFrameLength,
+                Actual = frameLength,
+            };
+        }
+
+        if (accumulatedLength > maxMessageLength)
+        {
+            return new ZReceiveRejection
+            {
+                Reason = ZReceiveRejectionReason.MessageTooLarge,
+                Limit = maxMessageLength,
+                Actual = accumulatedLength,
+            };
+        }
+
+        if (frameIndex >= maxFramesPerMessage)
+        {
+            // FrameIndex is zero-based, so reaching the limit means a frame is already in excess.
+            return new ZReceiveRejection
+            {
+                Reason = ZReceiveRejectionReason.TooManyFrames,
+                Limit = maxFramesPerMessage,
+                Actual = frameIndex + 1L,
+            };
+        }
+
+        return null;
     }
 }

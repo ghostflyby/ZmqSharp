@@ -15,9 +15,28 @@ public sealed class ZQueueSocketOptions
     /// Receive materialization policy; defaults to the numeric
     /// <see cref="ZReceiveOptions"/> configuration, which accepts every frame
     /// pooled, contiguous up to <c>ContiguousFrameLimit</c> and segmented
-    /// above it, with unlimited rejection limits.
+    /// above it. The policy only decides allocation; the rejection limits
+    /// below are enforced outside it.
     /// </summary>
     public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions();
+
+    /// <summary>
+    /// Maximum accepted frame length; a longer frame rejects the connection
+    /// (0008 D3/D6). Defaults to effectively unlimited.
+    /// </summary>
+    public long MaxFrameLength { get; init; } = long.MaxValue;
+
+    /// <summary>
+    /// Maximum accepted accumulated message length; a larger total rejects
+    /// the connection (0008 D3/D6). Defaults to effectively unlimited.
+    /// </summary>
+    public long MaxMessageLength { get; init; } = long.MaxValue;
+
+    /// <summary>
+    /// Maximum accepted frames per message; more frames reject the connection
+    /// (0008 D3/D6). Defaults to effectively unlimited.
+    /// </summary>
+    public int MaxFramesPerMessage { get; init; } = int.MaxValue;
 
     /// <summary>
     /// Memory pool used for receive materialization and the send copy path;
