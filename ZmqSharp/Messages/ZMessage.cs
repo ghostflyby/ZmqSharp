@@ -16,6 +16,12 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 
     public ZMessage(ZMultiMessage multi) => this.multi = multi;
 
+    /// <summary>Implicit conversion from the single case (0005).</summary>
+    public static implicit operator ZMessage(ZSingleMessage single) => new(single);
+
+    /// <summary>Implicit conversion from the multi case (0005).</summary>
+    public static implicit operator ZMessage(ZMultiMessage multi) => new(multi);
+
     /// <summary>Builds a single-frame owned message (zero copy; Dispose never touches a pool).</summary>
     public static ZMessage FromOwned(byte[] data)
     {

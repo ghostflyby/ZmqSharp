@@ -17,6 +17,12 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
     public ZFrame(ZSegments segments) => nonContiguous = segments;
 
+    /// <summary>Implicit conversion from the contiguous case (0005).</summary>
+    public static implicit operator ZFrame(ZSegment segment) => new(segment);
+
+    /// <summary>Implicit conversion from the non-contiguous case (0005).</summary>
+    public static implicit operator ZFrame(ZSegments segments) => new(segments);
+
     internal ZFrame(ZSegment segment, bool more)
     {
         contiguous = segment;

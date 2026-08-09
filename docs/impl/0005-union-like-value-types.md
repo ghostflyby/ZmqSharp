@@ -157,6 +157,11 @@ its `byte[]` only when it is actually a `byte[]`.
   borrowed path keeps zero-copy semantics through the no-op owner.
 - Parser reads segment content through the `ZSegments` indexer; encoder reads
   each segment's `Memory`.
+- Each union root provides an implicit conversion from its case types
+  (`ZSegment`/`ZSegments` to `ZFrame`; `ZSingleMessage`/`ZMultiMessage` to
+  `ZMessage`), so a case value can be used directly where its root is
+  expected. The reverse direction stays explicit (`TryGetValue` overloads),
+  keeping the active case discoverable.
 - Open: whether the `ZMultiMessage` frame table should be exposed as a span or stay
   hidden behind index-based access.
 

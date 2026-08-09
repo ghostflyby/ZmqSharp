@@ -230,4 +230,56 @@ public sealed class ZMessageTests
         items[0].Should().Equal([1, 2, 3]);
         message.Dispose();
     }
+
+    [Fact]
+    public void ImplicitConversion_SegmentToFrame()
+    {
+        byte[] data = [1, 2, 3];
+        ZFrame frame = new ZSegment(data, data);
+
+        frame.TryGetValue(out ZSegment segment).Should().BeTrue();
+        segment.Memory.ToArray().Should().Equal(data);
+        frame.TryGetValue(out ZSegments _).Should().BeFalse();
+        frame.Dispose();
+    }
+
+    [Fact]
+    public void ImplicitConversion_SegmentsToFrame()
+    {
+        var message = MessageFactory.SegmentedFrame([1, 2], [3, 4, 5]);
+        message[0].TryGetValue(out ZSegments segments).Should().BeTrue();
+        ZFrame frame = segments;
+
+        frame.TryGetValue(out ZSegments converted).Should().BeTrue();
+        converted.Count.Should().Be(2);
+        frame.ToSequence().ToArray().Should().Equal([1, 2, 3, 4, 5]);
+        message.Dispose();
+    }
+
+    [Fact]
+    public void ImplicitConversion_SingleToMessage()
+    {
+        var message = ZMessage.FromOwned([1, 2, 3]);
+        message.TryGetValue(out ZSingleMessage single).Should().BeTrue();
+        ZMessage converted = single;
+
+        converted.TryGetValue(out ZSingleMessage convertedSingle).Should().BeTrue();
+        convertedSingle.Count.Should().Be(1);
+        converted[0].ToSequence().ToArray().Should().Equal([1, 2, 3]);
+        converted.Dispose();
+    }
+
+    [Fact]
+    public void ImplicitConversion_MultiToMessage()
+    {
+        var message = MessageFactory.Multipart("ab"u8.ToArray(), "cde"u8.ToArray());
+        message.TryGetValue(out ZMultiMessage multi).Should().BeTrue();
+        ZMessage converted = multi;
+
+        converted.TryGetValue(out ZMultiMessage convertedMulti).Should().BeTrue();
+        convertedMulti.Count.Should().Be(2);
+        converted[0].ToSequence().ToArray().Should().Equal("ab"u8.ToArray());
+        converted[1].ToSequence().ToArray().Should().Equal("cde"u8.ToArray());
+        converted.Dispose();
+    }
 }
