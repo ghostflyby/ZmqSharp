@@ -233,7 +233,7 @@ which decides allocation only:
 ```csharp
 public sealed class ZQueueSocketOptions
 {
-    public ZQueueFactory ReceiveQueueFactory { get; init; } = new ZBoundedQueueFactory(16); // per-peer queue (0009)
+    public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true }; // per-peer queue (0009)
     public ZQueueFactory? SendQueueFactory { get; init; }   // optional outbound (0009)
     public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions();
 

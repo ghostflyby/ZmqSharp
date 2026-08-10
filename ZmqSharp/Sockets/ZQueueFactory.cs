@@ -5,14 +5,11 @@ namespace ZmqSharp.Sockets;
 
 /// <summary>
 /// Declaration-style channel construction strategy (0009), mirroring the
-/// receive policy system. The type parameter names the channel-option type
-/// the factory is configured by (<see cref="BoundedChannelOptions"/> or
-/// <see cref="UnboundedChannelOptions"/>); every factory produces a
+/// receive policy system. Every factory produces a
 /// <c>Channel&lt;ZMessage&gt;</c>. Factories must be stateless and
 /// thread-safe; the same factory may create many channels.
 /// </summary>
-public interface IZQueueFactory<TOptions>
-    where TOptions : ChannelOptions
+public interface IZQueueFactory
 {
     /// <summary>
     /// Creates a fresh channel. <paramref name="itemDropped"/> is the
@@ -26,18 +23,15 @@ public interface IZQueueFactory<TOptions>
 }
 
 /// <summary>
-/// Message-channel factory as a socket configuration value. Implements the
-/// generic strategy contract closed at <see cref="ChannelOptions"/>, the
-/// common option base, so any factory is consumable as an
-/// <see cref="IZQueueFactory{TOptions}"/>; each concrete factory additionally
-/// implements the contract closed at its own option type. BCL channel options
-/// convert implicitly into a factory (the conversion operator lives on this
-/// type, since C# requires it on either the source or the target type), so
-/// <c>ReceiveQueueFactory = new BoundedChannelOptions(16)</c> works.
+/// Message-channel factory as a socket configuration value. The concrete
+/// factories are internal; the public surface is this abstract base plus its
+/// implicit conversions, so <c>ReceiveQueueFactory = new BoundedChannelOptions(16)</c>
+/// works (the conversion operator lives here, since C# requires it on either
+/// the source or the target type).
 /// </summary>
-public abstract class ZQueueFactory : IZQueueFactory<ChannelOptions>
+public abstract class ZQueueFactory : IZQueueFactory
 {
-    /// <summary>Creates a fresh channel; see <see cref="IZQueueFactory{TOptions}.Create"/>.</summary>
+    /// <summary>Creates a fresh channel; see <see cref="IZQueueFactory.Create"/>.</summary>
     public abstract Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 
     public static implicit operator ZQueueFactory(BoundedChannelOptions options) => new ZBoundedQueueFactory(options);
@@ -48,27 +42,12 @@ public abstract class ZQueueFactory : IZQueueFactory<ChannelOptions>
 /// <summary>
 /// Bounded channel factory (configured by <see cref="BoundedChannelOptions"/>):
 /// capacity is the HWM, so a full queue drops or backpressures per the
-/// configured mode. Constructed from <see cref="BoundedChannelOptions"/> (or
-/// the convenience arguments), which are copied at construction and fixed:
-/// later mutation of the original options instance does not affect this
-/// factory.
+/// configured mode. Constructed from <see cref="BoundedChannelOptions"/>,
+/// which is copied at construction and fixed: later mutation of the original
+/// options instance does not affect this factory.
 /// </summary>
-public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<BoundedChannelOptions>
+internal sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory
 {
-    public ZBoundedQueueFactory(
-        int capacity,
-        BoundedChannelFullMode fullMode = BoundedChannelFullMode.Wait,
-        bool singleWriter = true,
-        bool allowSynchronousContinuations = false)
-    {
-        Options = Build(new BoundedChannelOptions(capacity)
-        {
-            FullMode = fullMode,
-            SingleWriter = singleWriter,
-            AllowSynchronousContinuations = allowSynchronousContinuations,
-        });
-    }
-
     public ZBoundedQueueFactory(BoundedChannelOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -105,31 +84,20 @@ public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<Bounded
 /// queue gives up the per-peer peak-memory bound (0004 constraint 3, revised
 /// by 0009).
 /// </summary>
-public sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory<UnboundedChannelOptions>
+internal sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory
 {
-    private readonly UnboundedChannelOptions copy;
-
-    public ZUnboundedQueueFactory(bool singleWriter = true, bool allowSynchronousContinuations = false)
-    {
-        copy = Build(new UnboundedChannelOptions
-        {
-            SingleWriter = singleWriter,
-            AllowSynchronousContinuations = allowSynchronousContinuations,
-        });
-    }
-
     public ZUnboundedQueueFactory(UnboundedChannelOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        copy = Build(options);
+        Options = Build(options);
     }
 
     /// <summary>The fixed options snapshot applied to every created channel.</summary>
-    internal UnboundedChannelOptions Options => copy;
+    private UnboundedChannelOptions Options { get; }
 
     /// <inheritdoc />
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
-        => Channel.CreateUnbounded<ZMessage>(copy);
+        => Channel.CreateUnbounded<ZMessage>(Options);
 
     private static UnboundedChannelOptions Build(UnboundedChannelOptions source)
         => new()

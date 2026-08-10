@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Threading.Channels;
 using ZmqSharp.Messages;
 
 namespace ZmqSharp.Sockets;
@@ -13,7 +14,7 @@ public sealed class ZQueueSocketOptions
     /// implicitly into a factory, so <c>new BoundedChannelOptions(16)</c> is
     /// assignable here.
     /// </summary>
-    public ZQueueFactory ReceiveQueueFactory { get; init; } = new ZBoundedQueueFactory(16);
+    public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true };
 
     /// <summary>When set, enables the optional outbound channel built by this factory (0009).</summary>
     public ZQueueFactory? SendQueueFactory { get; init; }

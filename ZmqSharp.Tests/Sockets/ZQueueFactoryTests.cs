@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Threading.Channels;
 using FluentAssertions;
 using Xunit;
@@ -8,8 +7,10 @@ using ZmqSharp.Sockets;
 
 namespace ZmqSharp.Tests;
 
-/// <summary>Pins the 0009 queue-factory contract: SingleReader forcing,
-/// SingleWriter preservation, construction-time copying, and itemDropped wiring.</summary>
+/// <summary>Pins the 0009 queue-factory contract: every public use goes
+/// through a BCL options instance converted implicitly into a factory (the
+/// concrete factories are internal); the factory forces SingleReader,
+/// preserves SingleWriter, copies at construction, and wires itemDropped.</summary>
 public sealed class ZQueueFactoryTests
 {
     private static ZMessage Item(byte value = 1) => MessageFactory.SingleFrame([value]);
@@ -28,7 +29,7 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void Factory_SingleWriterTrue_IsPreserved()
     {
-        var factory = new ZBoundedQueueFactory(4);
+        var factory = new ZBoundedQueueFactory(new BoundedChannelOptions(4) { SingleWriter = true });
         factory.Options.SingleReader.Should().BeTrue();
         factory.Options.SingleWriter.Should().BeTrue();
     }
@@ -38,7 +39,7 @@ public sealed class ZQueueFactoryTests
     {
         // The outbound channel is a shared producer surface: singleWriter must
         // be false there, and the factory preserves the caller's choice.
-        var channel = new ZBoundedQueueFactory(4, singleWriter: false).Create(_ => { });
+        var channel = new ZBoundedQueueFactory(new BoundedChannelOptions(4) { SingleWriter = false }).Create(_ => { });
         var accepted = 0;
         var writers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
         {
@@ -80,7 +81,7 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void Factory_WiresItemDropped()
     {
-        var factory = new ZBoundedQueueFactory(1, BoundedChannelFullMode.DropWrite);
+        var factory = new ZBoundedQueueFactory(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);
 
@@ -95,7 +96,7 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void UnboundedFactory_IgnoresItemDropped_AndNeverDrops()
     {
-        var factory = new ZUnboundedQueueFactory();
+        var factory = new ZUnboundedQueueFactory(new UnboundedChannelOptions());
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);
 
@@ -131,7 +132,7 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void Factory_InvalidCapacity_Throws()
     {
-        var act = () => new ZBoundedQueueFactory(-1);
+        var act = () => new BoundedChannelOptions(-1);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -139,27 +140,22 @@ public sealed class ZQueueFactoryTests
     public void Factory_InvalidFullMode_Throws()
     {
         // BoundedChannelOptions validates the full mode in its setter, so the
-        // failure surfaces from the factory constructor.
-        var act = () => new ZBoundedQueueFactory(4, (BoundedChannelFullMode)99);
+        // failure surfaces at the options construction the factory consumes.
+        var act = () => new BoundedChannelOptions(4) { FullMode = (BoundedChannelFullMode)99 };
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]
     public void StrategyContract_IsSatisfiedByBaseAndConcreteFactories()
     {
-        // The non-generic base implements the contract closed at the common
-        // option base, and each concrete factory at its own option type
-        // (0009 D1): the relationship between IZQueueFactory and ZQueueFactory
-        // is inheritance, not coincidence.
-        IZQueueFactory<ChannelOptions> any = new ZBoundedQueueFactory(16);
-        IZQueueFactory<BoundedChannelOptions> bounded = new ZBoundedQueueFactory(16);
-        IZQueueFactory<UnboundedChannelOptions> unbounded = new ZUnboundedQueueFactory();
-
-        bounded.Should().BeOfType<ZBoundedQueueFactory>();
-        unbounded.Should().BeOfType<ZUnboundedQueueFactory>();
-        var channel = any.Create(_ => { });
-        channel.Writer.TryWrite(Item()).Should().BeTrue();
-        Drain(channel);
+        // The concrete factories are internal (0009 D1): every public use goes
+        // through the ZQueueFactory base and its implicit conversions, and the
+        // base satisfies the IZQueueFactory strategy contract.
+        ZQueueFactory fromOptions = new BoundedChannelOptions(16);
+        IZQueueFactory viaBase = new ZBoundedQueueFactory(new BoundedChannelOptions(16));
+        fromOptions.Should().BeOfType<ZBoundedQueueFactory>();
+        viaBase.Create(_ => { });
+        viaBase.Should().BeOfType<ZBoundedQueueFactory>();
     }
 
     [Fact]
