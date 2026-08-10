@@ -13,7 +13,7 @@ public sealed class ZmtpFrameEncoder(Stream stream)
     private readonly byte[] header = new byte[9];
 
     /// <summary>ZMTP 3.0 greeting with the NULL mechanism; fixed wire constant.</summary>
-    internal static readonly byte[] NullGreeting = BuildNullGreeting();
+    private static readonly byte[] NullGreeting = BuildNullGreeting();
 
     /// <summary>Writes the 64-byte ZMTP 3.0 greeting (NULL mechanism).</summary>
     public async ValueTask WriteGreetingAsync(CancellationToken token = default)

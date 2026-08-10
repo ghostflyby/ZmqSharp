@@ -204,7 +204,7 @@ internal static class ZmtpTestRunner
 {
     public static ZmtpParser CreateParser(IZConnection connection, IZMessageSink sink)
     {
-        connection.SetFrameHandler((frame, ct) => sink.OnFrameAsync(frame, ct));
+        connection.SetFrameHandler(sink.OnFrameAsync);
         return new ZmtpParser(connection);
     }
 
@@ -241,7 +241,7 @@ internal static class ZmtpTestData
 
     public static byte[] Ready(string socketType = "PAIR") => Frame(ReadyBody(socketType), command: true);
 
-    public static byte[] ReadyBody(string socketType = "PAIR")
+    private static byte[] ReadyBody(string socketType = "PAIR")
         => ReadyBodyWithProperties(("Socket-Type", socketType));
 
     public static byte[] ReadyWithProperties(params (string Name, string Value)[] properties)
