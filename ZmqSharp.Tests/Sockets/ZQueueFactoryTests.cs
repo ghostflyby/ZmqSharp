@@ -143,6 +143,24 @@ public sealed class ZQueueFactoryTests
     }
 
     [Fact]
+    public void StrategyContract_IsSatisfiedByBaseAndConcreteFactories()
+    {
+        // The non-generic base implements the contract closed at the common
+        // option base, and each concrete factory at its own option type
+        // (0009 D1): the relationship between IZQueueFactory and ZQueueFactory
+        // is inheritance, not coincidence.
+        IZQueueFactory<ChannelOptions> any = new ZBoundedQueueFactory(16);
+        IZQueueFactory<BoundedChannelOptions> bounded = new ZBoundedQueueFactory(16);
+        IZQueueFactory<UnboundedChannelOptions> unbounded = new ZUnboundedQueueFactory();
+
+        bounded.Should().BeOfType<ZBoundedQueueFactory>();
+        unbounded.Should().BeOfType<ZUnboundedQueueFactory>();
+        var channel = any.Create(_ => { });
+        channel.Writer.TryWrite(Item()).Should().BeTrue();
+        Drain(channel);
+    }
+
+    [Fact]
     public void Options_Defaults_ReceiveBoundedSendDisabled()
     {
         var options = new ZQueueSocketOptions();

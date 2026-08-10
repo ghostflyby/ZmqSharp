@@ -26,12 +26,16 @@ public interface IZQueueFactory<TOptions>
 }
 
 /// <summary>
-/// Message-channel factory as a socket configuration value. BCL channel
-/// options convert implicitly into a factory (the conversion operator lives
-/// on this type, since C# requires it on either the source or the target
-/// type), so <c>ReceiveQueueFactory = new BoundedChannelOptions(16)</c> works.
+/// Message-channel factory as a socket configuration value. Implements the
+/// generic strategy contract closed at <see cref="ChannelOptions"/>, the
+/// common option base, so any factory is consumable as an
+/// <see cref="IZQueueFactory{TOptions}"/>; each concrete factory additionally
+/// implements the contract closed at its own option type. BCL channel options
+/// convert implicitly into a factory (the conversion operator lives on this
+/// type, since C# requires it on either the source or the target type), so
+/// <c>ReceiveQueueFactory = new BoundedChannelOptions(16)</c> works.
 /// </summary>
-public abstract class ZQueueFactory
+public abstract class ZQueueFactory : IZQueueFactory<ChannelOptions>
 {
     /// <summary>Creates a fresh channel; see <see cref="IZQueueFactory{TOptions}.Create"/>.</summary>
     public abstract Channel<ZMessage> Create(Action<ZMessage> itemDropped);

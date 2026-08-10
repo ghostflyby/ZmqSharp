@@ -33,7 +33,7 @@ public interface IZQueueFactory<TOptions>
     Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 }
 
-public abstract class ZQueueFactory
+public abstract class ZQueueFactory : IZQueueFactory<ChannelOptions>
 {
     public abstract Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 
@@ -60,7 +60,14 @@ public sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory<Unbou
 The channel element type is fixed to `ZMessage`; the generic type parameter
 names the channel-option type the factory is configured by
 (`BoundedChannelOptions` or `UnboundedChannelOptions`), so the factory
-strategy is typed by its configuration source rather than by the message type.
+strategy is typed by its configuration source rather than by the message
+type. The hierarchy is a chain: `ZBoundedQueueFactory` /
+`ZUnboundedQueueFactory` inherit the non-generic `ZQueueFactory` base, which
+implements the strategy contract closed at the common `ChannelOptions` base,
+and each concrete factory additionally implements the contract closed at its
+own option type. A bounded factory is therefore consumable both as
+`IZQueueFactory<ChannelOptions>` (through the base) and as
+`IZQueueFactory<BoundedChannelOptions>` (directly).
 
 `ZQueueSocketOptions`:
 
@@ -121,7 +128,7 @@ trades that bound for never blocking.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D1 | `ZQueueFactory` non-generic base hosts the implicit conversions; `IZQueueFactory&lt;TOptions&gt;` is typed by the option type and produces `Channel&lt;ZMessage&gt;` | C# requires the operator on source or target; a generic-interface target is invisible to operator lookup; the element type is fixed and only the configuration type varies |
+| D1 | `ZQueueFactory` non-generic base implements `IZQueueFactory&lt;ChannelOptions&gt;` and hosts the implicit conversions; each concrete factory additionally implements the contract closed at its own option type | C# requires the operator on source or target, and a generic-interface target is invisible to operator lookup; the element type is fixed to `ZMessage`, so only the configuration type varies and it does so through inheritance |
 | D2 | `Create(Action<T> itemDropped)` takes the reclamation hook as an argument | Mandatory drop disposal stays a library responsibility (0006 2.2); a user factory cannot bypass it |
 | D3 | `SingleReader` forced true; `SingleWriter` preserved | The library is the sole reader; the outbound channel is a shared producer surface, so single-writer is a per-use decision |
 | D4 | Options copied at construction | `BoundedChannelOptions` is a mutable class without a clone; the snapshot keeps factories consistent and immune to later mutation |
