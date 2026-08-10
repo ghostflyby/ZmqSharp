@@ -44,7 +44,7 @@ public abstract class ZQueueFactory : IZQueueFactory<ChannelOptions>
 public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<BoundedChannelOptions>
 {
     public ZBoundedQueueFactory(int capacity,
-        ZQueueFullMode fullMode = ZQueueFullMode.Wait,
+        BoundedChannelFullMode fullMode = BoundedChannelFullMode.Wait,
         bool singleWriter = true,
         bool allowSynchronousContinuations = false);
     public ZBoundedQueueFactory(BoundedChannelOptions options);
@@ -132,7 +132,7 @@ trades that bound for never blocking.
 | D2 | `Create(Action<T> itemDropped)` takes the reclamation hook as an argument | Mandatory drop disposal stays a library responsibility (0006 2.2); a user factory cannot bypass it |
 | D3 | `SingleReader` forced true; `SingleWriter` preserved | The library is the sole reader; the outbound channel is a shared producer surface, so single-writer is a per-use decision |
 | D4 | Options copied at construction | `BoundedChannelOptions` is a mutable class without a clone; the snapshot keeps factories consistent and immune to later mutation |
-| D5 | `ZQueueFullMode` retained only as the convenience-constructor enum | Users configuring via `BoundedChannelOptions` use the BCL `BoundedChannelFullMode` directly |
+| D5 | The convenience constructor takes the BCL `BoundedChannelFullMode` directly; no ZmqSharp full-mode enum exists | Users configuring via `BoundedChannelOptions` and via the convenience constructor use the same BCL enum, removing a redundant parallel type |
 | D6 | Unbounded is opt-in and revises 0004 constraint 3 | Default remains bounded with HWM control; unbounded trades the peak-memory bound for never blocking |
 
 ## 6. Non-Goals
@@ -141,4 +141,3 @@ trades that bound for never blocking.
   reusable; the outbound channel remains one socket-level queue drained by
   one pump.
 - Drop diagnostics counters or events (0006 section 2.2).
-- Removing `ZQueueFullMode`.

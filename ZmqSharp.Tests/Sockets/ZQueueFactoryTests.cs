@@ -80,7 +80,7 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void Factory_WiresItemDropped()
     {
-        var factory = new ZBoundedQueueFactory(1, ZQueueFullMode.DropWrite);
+        var factory = new ZBoundedQueueFactory(1, BoundedChannelFullMode.DropWrite);
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);
 
@@ -138,7 +138,9 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void Factory_InvalidFullMode_Throws()
     {
-        var act = () => new ZBoundedQueueFactory(4, (ZQueueFullMode)99);
+        // BoundedChannelOptions validates the full mode in its setter, so the
+        // failure surfaces from the factory constructor.
+        var act = () => new ZBoundedQueueFactory(4, (BoundedChannelFullMode)99);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 

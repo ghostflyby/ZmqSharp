@@ -3,31 +3,6 @@ using ZmqSharp.Messages;
 
 namespace ZmqSharp.Sockets;
 
-/// <summary>How a full per-peer receive queue is handled (0006 section 2.2).</summary>
-public enum ZQueueFullMode
-{
-    /// <summary>
-    /// The peer's pump blocks on the queue write until a slot frees up
-    /// (backpressure); default.
-    /// </summary>
-    Wait,
-
-    /// <summary>Discard the message being written; the peer's pump never blocks.</summary>
-    DropWrite,
-
-    /// <summary>
-    /// Discard the newest buffered message and keep the incoming one; the
-    /// peer's pump never blocks.
-    /// </summary>
-    DropNewest,
-
-    /// <summary>
-    /// Discard the oldest buffered message and keep the incoming one; the
-    /// peer's pump never blocks.
-    /// </summary>
-    DropOldest,
-}
-
 /// <summary>Queue socket configuration.</summary>
 public sealed class ZQueueSocketOptions
 {

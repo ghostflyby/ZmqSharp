@@ -1040,7 +1040,7 @@ public sealed class ZSocketTests
         using var pool = new CountingMemoryPool();
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new ZBoundedQueueFactory(2, ZQueueFullMode.DropWrite),
+            ReceiveQueueFactory = new ZBoundedQueueFactory(2, BoundedChannelFullMode.DropWrite),
             Pool = pool,
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveQueueFactory = new ZBoundedQueueFactory(2) });
@@ -1080,7 +1080,7 @@ public sealed class ZSocketTests
         using var pool = new CountingMemoryPool();
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new ZBoundedQueueFactory(2, ZQueueFullMode.DropNewest),
+            ReceiveQueueFactory = new ZBoundedQueueFactory(2, BoundedChannelFullMode.DropNewest),
             Pool = pool,
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveQueueFactory = new ZBoundedQueueFactory(2) });
@@ -1118,7 +1118,7 @@ public sealed class ZSocketTests
         using var pool = new CountingMemoryPool();
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new ZBoundedQueueFactory(2, ZQueueFullMode.DropOldest),
+            ReceiveQueueFactory = new ZBoundedQueueFactory(2, BoundedChannelFullMode.DropOldest),
             Pool = pool,
         });
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveQueueFactory = new ZBoundedQueueFactory(2) });
@@ -1153,7 +1153,7 @@ public sealed class ZSocketTests
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new ZBoundedQueueFactory(2, ZQueueFullMode.DropWrite),
+            ReceiveQueueFactory = new ZBoundedQueueFactory(2, BoundedChannelFullMode.DropWrite),
             Pool = pool,
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
@@ -1247,10 +1247,10 @@ public sealed class ZSocketTests
     }
 
     [Theory]
-    [InlineData(ZQueueFullMode.DropWrite)]
-    [InlineData(ZQueueFullMode.DropNewest)]
-    [InlineData(ZQueueFullMode.DropOldest)]
-    public async Task SendDropMode_ProducersNeverBlock_AndAllReclaimed(ZQueueFullMode mode)
+    [InlineData(BoundedChannelFullMode.DropWrite)]
+    [InlineData(BoundedChannelFullMode.DropNewest)]
+    [InlineData(BoundedChannelFullMode.DropOldest)]
+    public async Task SendDropMode_ProducersNeverBlock_AndAllReclaimed(BoundedChannelFullMode mode)
     {
         using var pool = new CountingMemoryPool();
         using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());

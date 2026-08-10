@@ -6,27 +6,12 @@ using ZmqSharp.Sockets;
 namespace ZmqSharp.Tests;
 
 /// <summary>
-/// Pins the receive full-mode mapping and the BCL bounded-channel drop
-/// contract the socket relies on (0006 section 3.5: the item-dropped callback
-/// receives the item selected by each mode).
+/// Pins the BCL bounded-channel drop contract the socket relies on (0006
+/// section 3.5: the item-dropped callback receives the item selected by each
+/// drop mode), exercised through the options the factory applies.
 /// </summary>
-public sealed class ZQueueFullModeTests
+public sealed class BoundedChannelDropTests
 {
-    [Theory]
-    [InlineData(ZQueueFullMode.Wait, BoundedChannelFullMode.Wait)]
-    [InlineData(ZQueueFullMode.DropWrite, BoundedChannelFullMode.DropWrite)]
-    [InlineData(ZQueueFullMode.DropNewest, BoundedChannelFullMode.DropNewest)]
-    [InlineData(ZQueueFullMode.DropOldest, BoundedChannelFullMode.DropOldest)]
-    public void FullMode_MapsToBoundedChannelFullMode(ZQueueFullMode mode, BoundedChannelFullMode expected)
-        => ZBoundedQueueFactory.ToBoundedFullMode(mode).Should().Be(expected);
-
-    [Fact]
-    public void FullMode_InvalidValue_Throws()
-    {
-        var act = () => ZBoundedQueueFactory.ToBoundedFullMode((ZQueueFullMode)99);
-        act.Should().Throw<ArgumentOutOfRangeException>();
-    }
-
     [Fact]
     public void DropWrite_ItemDropped_ReceivesIncomingItem()
     {

@@ -57,13 +57,13 @@ public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<Bounded
 {
     public ZBoundedQueueFactory(
         int capacity,
-        ZQueueFullMode fullMode = ZQueueFullMode.Wait,
+        BoundedChannelFullMode fullMode = BoundedChannelFullMode.Wait,
         bool singleWriter = true,
         bool allowSynchronousContinuations = false)
     {
         Options = Build(new BoundedChannelOptions(capacity)
         {
-            FullMode = ToBoundedFullMode(fullMode),
+            FullMode = fullMode,
             SingleWriter = singleWriter,
             AllowSynchronousContinuations = allowSynchronousContinuations,
         });
@@ -81,16 +81,6 @@ public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<Bounded
     /// <inheritdoc />
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
         => Channel.CreateBounded(Options, itemDropped);
-
-    /// <summary>Maps the convenience full-mode enum to the BCL channel mode.</summary>
-    internal static BoundedChannelFullMode ToBoundedFullMode(ZQueueFullMode mode) => mode switch
-    {
-        ZQueueFullMode.Wait => BoundedChannelFullMode.Wait,
-        ZQueueFullMode.DropWrite => BoundedChannelFullMode.DropWrite,
-        ZQueueFullMode.DropNewest => BoundedChannelFullMode.DropNewest,
-        ZQueueFullMode.DropOldest => BoundedChannelFullMode.DropOldest,
-        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "unknown queue full mode"),
-    };
 
     /// <summary>
     /// Copies the caller's options into the factory-owned snapshot, forcing
