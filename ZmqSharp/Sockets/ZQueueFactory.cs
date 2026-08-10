@@ -5,10 +5,14 @@ namespace ZmqSharp.Sockets;
 
 /// <summary>
 /// Declaration-style channel construction strategy (0009), mirroring the
-/// receive policy system. Factories must be stateless and thread-safe; the
-/// same factory may create many channels.
+/// receive policy system. The type parameter names the channel-option type
+/// the factory is configured by (<see cref="BoundedChannelOptions"/> or
+/// <see cref="UnboundedChannelOptions"/>); every factory produces a
+/// <c>Channel&lt;ZMessage&gt;</c>. Factories must be stateless and
+/// thread-safe; the same factory may create many channels.
 /// </summary>
-public interface IZQueueFactory<T>
+public interface IZQueueFactory<TOptions>
+    where TOptions : ChannelOptions
 {
     /// <summary>
     /// Creates a fresh channel. <paramref name="itemDropped"/> is the
@@ -18,7 +22,7 @@ public interface IZQueueFactory<T>
     /// (explicit drains still reclaim). <c>SingleReader</c> is always forced
     /// on: the library is the sole reader of every channel it builds.
     /// </summary>
-    Channel<T> Create(Action<T> itemDropped);
+    Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 }
 
 /// <summary>
@@ -27,9 +31,9 @@ public interface IZQueueFactory<T>
 /// on this type, since C# requires it on either the source or the target
 /// type), so <c>ReceiveQueueFactory = new BoundedChannelOptions(16)</c> works.
 /// </summary>
-public abstract class ZQueueFactory : IZQueueFactory<ZMessage>
+public abstract class ZQueueFactory
 {
-    /// <inheritdoc />
+    /// <summary>Creates a fresh channel; see <see cref="IZQueueFactory{TOptions}.Create"/>.</summary>
     public abstract Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 
     public static implicit operator ZQueueFactory(BoundedChannelOptions options) => new ZBoundedQueueFactory(options);
@@ -38,23 +42,22 @@ public abstract class ZQueueFactory : IZQueueFactory<ZMessage>
 }
 
 /// <summary>
-/// Bounded channel factory: capacity is the HWM, so a full queue drops or
-/// backpressures per the configured mode. Constructed from
-/// <see cref="BoundedChannelOptions"/> (or the convenience arguments), which
-/// are copied at construction and fixed: later mutation of the original
-/// options instance does not affect this factory.
+/// Bounded channel factory (configured by <see cref="BoundedChannelOptions"/>):
+/// capacity is the HWM, so a full queue drops or backpressures per the
+/// configured mode. Constructed from <see cref="BoundedChannelOptions"/> (or
+/// the convenience arguments), which are copied at construction and fixed:
+/// later mutation of the original options instance does not affect this
+/// factory.
 /// </summary>
-public sealed class ZBoundedQueueFactory : ZQueueFactory
+public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<BoundedChannelOptions>
 {
-    private readonly BoundedChannelOptions copy;
-
     public ZBoundedQueueFactory(
         int capacity,
         ZQueueFullMode fullMode = ZQueueFullMode.Wait,
         bool singleWriter = true,
         bool allowSynchronousContinuations = false)
     {
-        copy = Build(new BoundedChannelOptions(capacity)
+        Options = Build(new BoundedChannelOptions(capacity)
         {
             FullMode = ToBoundedFullMode(fullMode),
             SingleWriter = singleWriter,
@@ -65,14 +68,15 @@ public sealed class ZBoundedQueueFactory : ZQueueFactory
     public ZBoundedQueueFactory(BoundedChannelOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        copy = Build(options);
+        Options = Build(options);
     }
 
     /// <summary>The fixed options snapshot applied to every created channel.</summary>
-    internal BoundedChannelOptions Options => copy;
+    internal BoundedChannelOptions Options { get; }
 
+    /// <inheritdoc />
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
-        => Channel.CreateBounded<ZMessage>(copy, itemDropped);
+        => Channel.CreateBounded(Options, itemDropped);
 
     /// <summary>Maps the convenience full-mode enum to the BCL channel mode.</summary>
     internal static BoundedChannelFullMode ToBoundedFullMode(ZQueueFullMode mode) => mode switch
@@ -101,11 +105,13 @@ public sealed class ZBoundedQueueFactory : ZQueueFactory
 }
 
 /// <summary>
-/// Unbounded channel factory: no HWM, no full mode, never blocks a writer,
-/// and no drop concept. Opt-in only: an unbounded receive queue gives up the
-/// per-peer peak-memory bound (0004 constraint 3, revised by 0009).
+/// Unbounded channel factory (configured by
+/// <see cref="UnboundedChannelOptions"/>): no HWM, no full mode, never
+/// blocks a writer, and no drop concept. Opt-in only: an unbounded receive
+/// queue gives up the per-peer peak-memory bound (0004 constraint 3, revised
+/// by 0009).
 /// </summary>
-public sealed class ZUnboundedQueueFactory : ZQueueFactory
+public sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory<UnboundedChannelOptions>
 {
     private readonly UnboundedChannelOptions copy;
 
@@ -127,6 +133,7 @@ public sealed class ZUnboundedQueueFactory : ZQueueFactory
     /// <summary>The fixed options snapshot applied to every created channel.</summary>
     internal UnboundedChannelOptions Options => copy;
 
+    /// <inheritdoc />
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
         => Channel.CreateUnbounded<ZMessage>(copy);
 

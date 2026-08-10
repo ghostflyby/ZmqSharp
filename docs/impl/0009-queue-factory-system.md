@@ -27,12 +27,13 @@ the mandatory drop-reclamation hook (0006 section 2.2) out of user hands.
 ## 2. Public Surface
 
 ```csharp
-public interface IZQueueFactory<T>
+public interface IZQueueFactory<TOptions>
+    where TOptions : ChannelOptions
 {
-    Channel<T> Create(Action<T> itemDropped);
+    Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 }
 
-public abstract class ZQueueFactory : IZQueueFactory<ZMessage>
+public abstract class ZQueueFactory
 {
     public abstract Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 
@@ -40,7 +41,7 @@ public abstract class ZQueueFactory : IZQueueFactory<ZMessage>
     public static implicit operator ZQueueFactory(UnboundedChannelOptions options);
 }
 
-public sealed class ZBoundedQueueFactory : ZQueueFactory
+public sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory<BoundedChannelOptions>
 {
     public ZBoundedQueueFactory(int capacity,
         ZQueueFullMode fullMode = ZQueueFullMode.Wait,
@@ -49,12 +50,17 @@ public sealed class ZBoundedQueueFactory : ZQueueFactory
     public ZBoundedQueueFactory(BoundedChannelOptions options);
 }
 
-public sealed class ZUnboundedQueueFactory : ZQueueFactory
+public sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory<UnboundedChannelOptions>
 {
     public ZUnboundedQueueFactory(bool singleWriter = true, bool allowSynchronousContinuations = false);
     public ZUnboundedQueueFactory(UnboundedChannelOptions options);
 }
 ```
+
+The channel element type is fixed to `ZMessage`; the generic type parameter
+names the channel-option type the factory is configured by
+(`BoundedChannelOptions` or `UnboundedChannelOptions`), so the factory
+strategy is typed by its configuration source rather than by the message type.
 
 `ZQueueSocketOptions`:
 
@@ -71,9 +77,9 @@ The four former scalar fields (`ReceiveCapacity`, `ReceiveFullMode`,
 C# requires a user-defined conversion operator to be declared on the source
 or the target type, and BCL options cannot carry one. A target type that is a
 generic interface is also invisible to operator lookup, so a purely generic
-`IZQueueFactory<T>` property could never accept `new BoundedChannelOptions(16)`
-implicitly. The non-generic `ZQueueFactory` base (implementing
-`IZQueueFactory<ZMessage>`) hosts both conversion operators, so this compiles:
+`IZQueueFactory<TOptions>` property could never accept
+`new BoundedChannelOptions(16)` implicitly. The non-generic `ZQueueFactory`
+base hosts both conversion operators, so this compiles:
 
 ```csharp
 var options = new ZQueueSocketOptions
@@ -115,7 +121,7 @@ trades that bound for never blocking.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D1 | `ZQueueFactory` non-generic base hosts the implicit conversions | C# requires the operator on source or target; a generic-interface target is invisible to operator lookup |
+| D1 | `ZQueueFactory` non-generic base hosts the implicit conversions; `IZQueueFactory&lt;TOptions&gt;` is typed by the option type and produces `Channel&lt;ZMessage&gt;` | C# requires the operator on source or target; a generic-interface target is invisible to operator lookup; the element type is fixed and only the configuration type varies |
 | D2 | `Create(Action<T> itemDropped)` takes the reclamation hook as an argument | Mandatory drop disposal stays a library responsibility (0006 2.2); a user factory cannot bypass it |
 | D3 | `SingleReader` forced true; `SingleWriter` preserved | The library is the sole reader; the outbound channel is a shared producer surface, so single-writer is a per-use decision |
 | D4 | Options copied at construction | `BoundedChannelOptions` is a mutable class without a clone; the snapshot keeps factories consistent and immune to later mutation |
