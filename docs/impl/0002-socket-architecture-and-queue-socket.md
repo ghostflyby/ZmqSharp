@@ -83,8 +83,8 @@ public sealed class ZQueueSocket<TSocket> : IZSocket
 
 public sealed class ZQueueSocketOptions
 {
-    public int ReceiveCapacity { get; init; }               // per-peer RCVHWM
-    public int? SendCapacity { get; init; }                 // per-peer SNDHWM, optional
+    public ZQueueFactory ReceiveQueueFactory { get; init; } = new ZBoundedQueueFactory(16); // per-peer queue (0009)
+    public ZQueueFactory? SendQueueFactory { get; init; }     // optional outbound (0009)
     public ZReceiveOptions? ReceivePolicy { get; init; }    // materialization, see 0003
 }
 ```
@@ -97,7 +97,7 @@ public sealed class ZQueueSocketOptions
 - Capacity is per peer (each peer gets its own bounded queue with the
   configured HWM), following 0004. `Messages` exposes the socket-level
   aggregated view selected by the socket type (fair-queue, direct, ...).
-- When `SendCapacity` is set, producers write to `Outbound`; the socket
+- When `SendQueueFactory` is set, producers write to `Outbound`; the socket
   routes each message to the selected peers (direct write today; per-peer
   send queues are 0004/D2).
 
@@ -135,9 +135,9 @@ As implemented:
   receive queue (zero extra copy, 0004 constraint 1), applying the receive
   policy (0003). The socket type aggregates the peer queues (fair-queue,
   direct, ...) onto `Messages`.
-- Full mode: each peer's queue is a bounded channel whose full mode is
-  `ZQueueSocketOptions.ReceiveFullMode` (`Wait`, `DropWrite`, `DropNewest`,
-  `DropOldest`). Wait blocks on `WriteAsync` of the affected peer queue,
+- Full mode: each peer's queue is built by `ReceiveQueueFactory` (0009); a
+  bounded factory's full mode is `Wait`, `DropWrite`, `DropNewest`, or
+  `DropOldest`. Wait blocks on `WriteAsync` of the affected peer queue,
   pausing only that peer's parser; drop modes never block the pump and the
   dropped message is disposed by the library. Peer end and socket disposal
   explicitly drain every buffered message through the same dispose path (0006
@@ -148,12 +148,12 @@ As implemented:
 - Direct send on `IZSocket`: the socket type's `RouteOutbound` selects the
   connection(s), writes each selected connection, disposes the message after
   the last peer send.
-- Queue tier: `Outbound` is bounded; the socket routes each message to the
+- Queue tier: `Outbound` is bounded when `SendQueueFactory` builds a bounded
+  channel; the socket routes each message to the
   selected peers (direct write today; per-peer send queues with one pump per
-  peer are 0004/D2). The outbound channel's full mode is
-  `ZQueueSocketOptions.SendFullMode` (`Wait`, `DropWrite`, `DropNewest`,
-  `DropOldest`); a drop mode never blocks a producer and the dropped message
-  is disposed by the library. When the send pump fails, the channel completes
+  peer are 0004/D2). The outbound channel's full mode comes from the factory
+  (0009); a drop mode never blocks a producer and the dropped message is
+  disposed by the library. When the send pump fails, the channel completes
   with that failure so producers discover it through a failing `WriteAsync`
   immediately rather than at socket disposal (0006 section 3.5).
 - A message is written atomically per connection (single writer, never

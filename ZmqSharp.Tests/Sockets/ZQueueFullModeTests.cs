@@ -18,12 +18,12 @@ public sealed class ZQueueFullModeTests
     [InlineData(ZQueueFullMode.DropNewest, BoundedChannelFullMode.DropNewest)]
     [InlineData(ZQueueFullMode.DropOldest, BoundedChannelFullMode.DropOldest)]
     public void FullMode_MapsToBoundedChannelFullMode(ZQueueFullMode mode, BoundedChannelFullMode expected)
-        => ZQueueSocket<ZPairSocket>.ToBoundedFullMode(mode).Should().Be(expected);
+        => ZBoundedQueueFactory.ToBoundedFullMode(mode).Should().Be(expected);
 
     [Fact]
     public void FullMode_InvalidValue_Throws()
     {
-        var act = () => ZQueueSocket<ZPairSocket>.ToBoundedFullMode((ZQueueFullMode)99);
+        var act = () => ZBoundedQueueFactory.ToBoundedFullMode((ZQueueFullMode)99);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 

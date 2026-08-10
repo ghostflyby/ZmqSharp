@@ -233,8 +233,8 @@ which decides allocation only:
 ```csharp
 public sealed class ZQueueSocketOptions
 {
-    public int ReceiveCapacity { get; init; } = 16;
-    public int? SendCapacity { get; init; }
+    public ZQueueFactory ReceiveQueueFactory { get; init; } = new ZBoundedQueueFactory(16); // per-peer queue (0009)
+    public ZQueueFactory? SendQueueFactory { get; init; }   // optional outbound (0009)
     public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions();
 
     public long MaxFrameLength { get; init; }     // D2: long.MaxValue = unlimited

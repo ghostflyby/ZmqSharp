@@ -54,10 +54,11 @@ design review first.
    queue is a BCL bounded channel configured with the socket's full mode;
    drop modes dispose the dropped message through the channel's
    `itemDropped` callback, and explicit drains reuse the same disposal path.
-3. Queue capacity equals the per-peer HWM; queues are always bounded. Peak
-   memory is controlled by the queue limits, never by arrival rate alone.
-   Drop modes keep peak memory bounded at the capacity instead of blocking
-   the pump.
+3. Queue capacity equals the per-peer HWM; queues are bounded by default
+   (0009). Peak memory is controlled by the queue limits, never by arrival
+   rate alone. Drop modes keep peak memory bounded at the capacity instead
+   of blocking the pump. An explicit `ZUnboundedQueueFactory` (0009) opts
+   out of the per-peer bound for a queue.
 4. Hot paths allocate at most one object per message (`ZMessage` /
    `ZMultiMessage`); frame tables are struct arrays; no LINQ, closures, or
    per-frame heap objects on the receive/send fast path.

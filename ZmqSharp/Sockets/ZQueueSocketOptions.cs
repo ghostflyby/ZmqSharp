@@ -1,4 +1,5 @@
 using System.Buffers;
+using ZmqSharp.Messages;
 
 namespace ZmqSharp.Sockets;
 
@@ -30,19 +31,17 @@ public enum ZQueueFullMode
 /// <summary>Queue socket configuration.</summary>
 public sealed class ZQueueSocketOptions
 {
-    /// <summary>Receive queue capacity (per-peer HWM).</summary>
-    public int ReceiveCapacity { get; init; } = 16;
-
-    /// <summary>When set, enables the optional outbound channel with this capacity.</summary>
-    public int? SendCapacity { get; init; }
-
     /// <summary>
-    /// How a full outbound channel is handled. Wait (default) blocks producers
-    /// until the send pump frees a slot; a drop mode never blocks producers
-    /// and every message it drops is disposed by the library - the consumer
-    /// never sees it.
+    /// Per-peer receive queue factory (0009); the library forces
+    /// SingleReader and the factory's SingleWriter per connection. Defaults
+    /// to a bounded SPSC queue with capacity 16. BCL channel options convert
+    /// implicitly into a factory, so <c>new BoundedChannelOptions(16)</c> is
+    /// assignable here.
     /// </summary>
-    public ZQueueFullMode SendFullMode { get; init; } = ZQueueFullMode.Wait;
+    public ZQueueFactory ReceiveQueueFactory { get; init; } = new ZBoundedQueueFactory(16);
+
+    /// <summary>When set, enables the optional outbound channel built by this factory (0009).</summary>
+    public ZQueueFactory? SendQueueFactory { get; init; }
 
     /// <summary>
     /// Receive materialization policy; defaults to the numeric
@@ -52,14 +51,6 @@ public sealed class ZQueueSocketOptions
     /// below are enforced outside it.
     /// </summary>
     public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions();
-
-    /// <summary>
-    /// How a full per-peer receive queue is handled. Wait (default) keeps the
-    /// existing backpressure behavior; a drop mode never blocks the peer's
-    /// pump, and every message it drops is disposed by the library - the
-    /// consumer never sees it.
-    /// </summary>
-    public ZQueueFullMode ReceiveFullMode { get; init; } = ZQueueFullMode.Wait;
 
     /// <summary>
     /// Maximum accepted frame length; a longer frame rejects the connection

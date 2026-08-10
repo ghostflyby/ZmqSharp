@@ -73,9 +73,8 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Channel<ZMessage>? sendChannel;
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
-    private readonly int receiveCapacity;
-    private readonly BoundedChannelFullMode receiveFullMode;
-    private readonly BoundedChannelFullMode sendFullMode;
+    private readonly ZQueueFactory receiveQueueFactory;
+    private readonly ZQueueFactory? sendQueueFactory;
     private readonly IZReceivePolicy receivePolicy;
     private readonly long maxFrameLength;
     private readonly long maxMessageLength;
@@ -91,26 +90,18 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         ArgumentNullException.ThrowIfNull(socket);
         this.socket = socket;
         options ??= new ZQueueSocketOptions();
-        receiveCapacity = options.ReceiveCapacity;
-        receiveFullMode = ToBoundedFullMode(options.ReceiveFullMode);
-        sendFullMode = ToBoundedFullMode(options.SendFullMode);
+        receiveQueueFactory = options.ReceiveQueueFactory;
+        ArgumentNullException.ThrowIfNull(receiveQueueFactory);
+        sendQueueFactory = options.SendQueueFactory;
         receivePolicy = options.ReceivePolicy;
         maxFrameLength = options.MaxFrameLength;
         maxMessageLength = options.MaxMessageLength;
         maxFramesPerMessage = options.MaxFramesPerMessage;
         Messages = new AggregateReader(this);
 
-        if (options.SendCapacity is { } sendCapacity)
+        if (sendQueueFactory is { } outboundFactory)
         {
-            sendChannel = Channel.CreateBounded<ZMessage>(
-                new BoundedChannelOptions(sendCapacity)
-                {
-                    SingleReader = true,
-                    FullMode = sendFullMode,
-                },
-                // Every message dropped by a drop mode is reclaimed here; a
-                // producer never observes it (0006 section 2.2).
-                static message => message.Dispose());
+            sendChannel = outboundFactory.Create(static message => message.Dispose());
             sendPump = SendPumpAsync(Cts.Token);
         }
 
@@ -125,7 +116,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     public long ReceiveRejections => Volatile.Read(ref rejections);
 
     /// <summary>
-    /// Optional outbound channel; its full mode is <c>SendFullMode</c>. When
+    /// Optional outbound channel built by <c>SendQueueFactory</c>. When
     /// the send pump fails, the channel completes with that failure so
     /// producers discover it through a failing <c>WriteAsync</c> instead of
     /// waiting for socket disposal (0006 3.5).
@@ -224,16 +215,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     {
         var state = new PeerState
         {
-            Queue = Channel.CreateBounded<ZMessage>(
-                new BoundedChannelOptions(receiveCapacity)
-                {
-                    SingleReader = true,
-                    SingleWriter = true,
-                    FullMode = receiveFullMode,
-                },
-                // Every message dropped by a drop mode is reclaimed here; a
-                // consumer can never observe it (0006 section 2.2).
-                static message => message.Dispose()),
+            Queue = receiveQueueFactory.Create(static message => message.Dispose()),
         };
         lock (StateLock)
         {
@@ -539,13 +521,4 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             // failure); the pump exits cleanly.
         }
     }
-
-    internal static BoundedChannelFullMode ToBoundedFullMode(ZQueueFullMode mode) => mode switch
-    {
-        ZQueueFullMode.Wait => BoundedChannelFullMode.Wait,
-        ZQueueFullMode.DropWrite => BoundedChannelFullMode.DropWrite,
-        ZQueueFullMode.DropNewest => BoundedChannelFullMode.DropNewest,
-        ZQueueFullMode.DropOldest => BoundedChannelFullMode.DropOldest,
-        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "unknown receive full mode"),
-    };
 }

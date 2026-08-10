@@ -250,8 +250,8 @@ Implemented:
   that peer's pump (0007 section 6 step 2). The owning queue tier no longer
   depends on `ResumePaused`; the low-level borrowed callback API retains its
   own synchronous pause model.
-- Receive full modes are configurable via `ZQueueSocketOptions.ReceiveFullMode`
-  (`Wait`, `DropWrite`, `DropNewest`, `DropOldest`). Drop modes create the
+- Receive full modes are configurable via `ZQueueSocketOptions.ReceiveQueueFactory`
+  (`Wait`, `DropWrite`, `DropNewest`, `DropOldest`, 0009). Drop modes create the
   per-peer bounded channel with the BCL `itemDropped` callback wired to the
   library's mandatory `ZMessage.Dispose`, so the item selected by each mode is
   disposed exactly once and is never observed by the consumer.
@@ -264,8 +264,8 @@ Implemented:
   per-peer single writer), so a continuously readable queue does not produce a
   notification busy loop.
 - Send-side (outbound) full modes are configurable via
-  `ZQueueSocketOptions.SendFullMode` (`Wait`, `DropWrite`, `DropNewest`,
-  `DropOldest`). The outbound channel is a BCL bounded channel with the same
+  `ZQueueSocketOptions.SendQueueFactory` (`Wait`, `DropWrite`, `DropNewest`,
+  `DropOldest`, 0009). The outbound channel is a BCL bounded channel with the same
   mandatory `itemDropped` disposal, so a drop mode never blocks a producer and
   every dropped message is reclaimed.
 - A send-pump failure (peer failure, protocol error, closed socket) reclaims
