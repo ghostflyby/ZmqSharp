@@ -6,10 +6,8 @@ namespace ZmqSharp.Sockets;
 /// <summary>Single peer, no routing (PAIR semantics).</summary>
 public sealed class ZPairSocket(ZSocketOptions options) : ZSocketBase(options)
 {
-    protected override IReadOnlyList<IZConnection> RouteOutbound(
-        ZMessage message,
-        IReadOnlyList<IZConnection> peers)
-        => peers.Count == 0 ? [] : [peers[0]];
+    protected override IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
+        => peers.IsEmpty ? null : peers[0];
 
     protected override string SocketTypeName => "PAIR";
 }

@@ -8,17 +8,15 @@ public sealed class ZDealerSocket(ZSocketOptions options) : ZSocketBase(options)
 {
     private int next;
 
-    protected override IReadOnlyList<IZConnection> RouteOutbound(
-        ZMessage message,
-        IReadOnlyList<IZConnection> peers)
+    protected override IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
     {
-        if (peers.Count == 0)
+        if (peers.IsEmpty)
         {
-            return [];
+            return null;
         }
 
-        int index = (Interlocked.Increment(ref next) - 1) % peers.Count;
-        return [peers[index]];
+        int index = (Interlocked.Increment(ref next) - 1) % peers.Length;
+        return peers[index];
     }
 
     protected override string SocketTypeName => "DEALER";

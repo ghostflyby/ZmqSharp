@@ -62,7 +62,10 @@ design review first.
    out of the per-peer bound for a queue.
 4. Hot paths allocate at most one object per message (`ZMessage` /
    `ZMultiMessage`); frame tables are struct arrays; no LINQ, closures, or
-   per-frame heap objects on the receive/send fast path.
+   per-frame heap objects on the receive/send fast path. Peer snapshots are
+   copy-on-write immutable arrays (0006 3.6): a hot-path snapshot read is a
+   single volatile load, so the send and aggregate-read paths do not allocate
+   a peer list per operation.
 5. Each peer queue has a single writer and a single reader (SPSC). Multiple
    producers must never write the same peer queue.
 6. Avoid fine-grained awaits: coalesce reads and writes into fewer system

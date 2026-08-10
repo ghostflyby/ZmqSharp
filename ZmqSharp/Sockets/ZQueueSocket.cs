@@ -17,15 +17,32 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 {
     private const int SegmentBlockSize = 8192;
 
+    /// <summary>Peer receive-queue lifecycle (0006 3.6): Active while parsing,
+    /// Draining while reclaimed on disconnect, Closed afterwards.</summary>
+    private enum PeerPhase
+    {
+        Active,
+        Draining,
+        Closed,
+    }
+
     private sealed class PeerState
     {
         public required Channel<ZMessage> Queue { get; init; }
+
+        /// <summary>
+        /// Serializes queue access between the single reader and the reclaim
+        /// drain (SingleReader is a promise, not an enforced exclusion).
+        /// </summary>
+        public Lock ReadLock { get; } = new();
 
         public List<ZFrame> Accumulator { get; } = [];
 
         public int FrameIndex { get; set; }
 
         public long AccumulatedLength { get; set; }
+
+        public PeerPhase Phase { get; set; }
     }
 
     /// <summary>Reads from every peer queue; the peer queues are the only physical queues.</summary>
@@ -35,11 +52,21 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
         public override bool TryRead(out ZMessage item)
         {
-            foreach (var state in owner.SnapshotPeers())
+            // Copy-on-write snapshot: a single volatile load, no per-read
+            // allocation (0006 3.6). Reclaim drains under the peer's ReadLock,
+            // so a message never leaks out of a concurrent drain.
+            foreach (var state in owner.peerSnapshot)
             {
-                if (!state.Queue.Reader.TryRead(out var candidate)) continue;
-                item = candidate;
-                return true;
+                lock (state.ReadLock)
+                {
+                    if (!state.Queue.Reader.TryRead(out var candidate))
+                    {
+                        continue;
+                    }
+
+                    item = candidate;
+                    return true;
+                }
             }
 
             item = default;
@@ -73,6 +100,13 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Channel<ZMessage>? sendChannel;
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
+
+    /// <summary>
+    /// Copy-on-write active-peer snapshot for the aggregate reader: rebuilt
+    /// on peer add/remove, read as a single volatile load per read attempt,
+    /// so the receive hot path allocates nothing (0006 3.6).
+    /// </summary>
+    private volatile PeerState[] peerSnapshot = [];
     private readonly ZQueueFactory receiveQueueFactory;
     private readonly ZQueueFactory? sendQueueFactory;
     private readonly IZReceivePolicy receivePolicy;
@@ -194,7 +228,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         // unsubscribe above means OnPeerEnded no longer runs during disposal,
         // so reclaiming here is the only path for messages that lose their
         // consumer on socket disposal (0006 3.5).
-        foreach (var state in SnapshotPeers())
+        foreach (var state in peerSnapshot)
         {
             Reclaim(state);
         }
@@ -216,10 +250,12 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         var state = new PeerState
         {
             Queue = receiveQueueFactory.Create(static message => message.Dispose()),
+            Phase = PeerPhase.Active,
         };
         lock (StateLock)
         {
             peers.Add(connection, state);
+            PublishAdd(state);
         }
 
         return (frame, ct) => OnPeerFrameAsync(state, frame, ct);
@@ -397,14 +433,11 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
     private bool AnyPeerHasItems()
     {
-        lock (StateLock)
+        foreach (var state in peerSnapshot)
         {
-            foreach (var state in peers.Values)
+            if (state.Queue.Reader.Count > 0)
             {
-                if (state.Queue.Reader.Count > 0)
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
@@ -420,11 +453,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             {
                 return;
             }
+
+            // Removed from the routing snapshot first, so the aggregate reader
+            // can never hand out a message that is about to be drained; no
+            // double dispose (0006 3.6).
+            state.Phase = PeerPhase.Draining;
+            PublishRemove(state);
         }
 
-        // Removed from the dictionary first, so the aggregate reader can never
-        // hand out a message that is about to be drained; no double dispose.
         Reclaim(state);
+        state.Phase = PeerPhase.Closed;
 
         Action<IZConnection, Exception?>? handler;
         lock (StateLock)
@@ -439,20 +477,25 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     /// Reclaims every message that loses its consumer: the owning frames of an
     /// incomplete message plus the buffered queue items. Channel completion
     /// alone is not reclamation (0006 section 2.2) - the buffered items are
-    /// drained through the same Dispose path a drop mode uses.
+    /// drained through the same Dispose path a drop mode uses. The peer's
+    /// ReadLock serializes the drain against a concurrent consumer read
+    /// (SingleReader is a promise, not an exclusion).
     /// </summary>
     private static void Reclaim(PeerState state)
     {
-        foreach (var frame in state.Accumulator)
+        lock (state.ReadLock)
         {
-            frame.Dispose();
-        }
+            foreach (var frame in state.Accumulator)
+            {
+                frame.Dispose();
+            }
 
-        state.Accumulator.Clear();
-        state.Queue.Writer.TryComplete();
-        while (state.Queue.Reader.TryRead(out var message))
-        {
-            message.Dispose();
+            state.Accumulator.Clear();
+            state.Queue.Writer.TryComplete();
+            while (state.Queue.Reader.TryRead(out var message))
+            {
+                message.Dispose();
+            }
         }
     }
 
@@ -473,12 +516,32 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
     }
 
-    private List<PeerState> SnapshotPeers()
+    /// <summary>
+    /// Publishes a peer into the aggregate-reader snapshot; must be called
+    /// while holding <see cref="ZAsyncState.StateLock"/>. Copy-on-write: the
+    /// read path is a single volatile load (0006 3.6).
+    /// </summary>
+    private void PublishAdd(PeerState state)
     {
-        lock (StateLock)
+        var updated = new PeerState[peerSnapshot.Length + 1];
+        peerSnapshot.CopyTo(updated, 0);
+        updated[^1] = state;
+        peerSnapshot = updated;
+    }
+
+    private void PublishRemove(PeerState state)
+    {
+        var current = peerSnapshot;
+        var index = Array.IndexOf(current, state);
+        if (index < 0)
         {
-            return [.. peers.Values];
+            return;
         }
+
+        var updated = new PeerState[current.Length - 1];
+        current.AsSpan(0, index).CopyTo(updated);
+        current.AsSpan(index + 1).CopyTo(updated.AsSpan(index));
+        peerSnapshot = updated;
     }
 
     private static TaskCompletionSource CreateGate()

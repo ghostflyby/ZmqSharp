@@ -301,39 +301,47 @@ Completion gate:
 
 ### 3.6 Peer snapshots and retirement
 
-There are two current snapshot concerns:
+Implemented:
 
-- The send path copies all routable `IZConnection` values into a new list for
-  each send and socket routing may allocate a second result collection.
-- The aggregate receive path copies all `PeerState` values into a new list for
-  each read attempt. Removing a peer before its queue is drained can make
-  queued owning messages unreachable.
+- Both hot paths read a copy-on-write snapshot as a single volatile load
+  instead of allocating a list per operation: `ZSocketBase.peerSnapshot`
+  (routable connections) and `ZQueueSocket.peerSnapshot` (active peer states)
+  are rebuilt only when a peer is added or removed. `RouteOutbound` takes the
+  snapshot as a `ReadOnlySpan<IZConnection>` and returns a single target
+  (`IZConnection?`; null = drop), so the send path allocates no peer list and
+  no result collection. Steady-state sends are allocation-free in an
+  optimized build (0004 constraint 4; the absolute allocation gate is
+  asserted under Release because Debug boxes async state machines).
+- The send path routes to establishing peers and awaits their establishment
+  gate (the failure still surfaces from `SendAsync`, per the decided
+  semantics); the gate fast path skips the wait when the peer is already
+  established. A peer that retires before or during its write is dropped
+  (decided), not a fault, and never aborts the send.
+- Peer receive-queue lifetime is modeled as `Active`, `Draining`, and
+  `Closed` (`ZQueueSocket.PeerPhase`). On disconnect the peer is moved to
+  `Draining`, removed from the aggregate snapshot, and reclaimed immediately
+  (accumulated frames plus buffered messages disposed through the 0006 2.2
+  path), then marked `Closed`; this satisfies the completion-gate
+  counting-pool expectation that peer failure returns outstanding rentals to
+  zero.
+- The reclaim drain and the aggregate reader are serialized per peer by a
+  `ReadLock`, because BCL `SingleReader` is a promise, not an enforced
+  exclusion: a concurrent consumer read during the drain would otherwise be
+  undefined behavior.
+- Tests: `SendPath_NoPerMessageHeapAllocation` (Release gate, fake transport
+  with an established peer), `ReceivePath_TryRead_NoPerMessageHeapAllocation`
+  (Release gate, 1000 buffered messages drained through `Messages.TryRead`),
+  and `PeerChurn_ConcurrentSendReadDispose_NoLeaksOrFaults` (concurrent send,
+  drain, and connect/disconnect churn; failures asserted empty and the
+  counting pool returns to zero after disposal).
 
-Required work:
+Remaining required work:
 
-- Publish stable copy-on-write or equivalent peer snapshots when peers are
-  added, established, retired, or removed, rather than allocate a list for
-  each hot-path operation.
-- Keep establishing peers out of routable snapshots.
-- Model queue peer lifetime as at least `Active`, `Draining`, and `Closed`, or
-  an equivalent state machine.
-- Remove a failed peer from new routing immediately while retaining ownership
-  of its receive and send queues until they are drained or disposed.
-- Define send behavior when a snapshotted connection retires before its send
-  starts; do not silently report establishment or delivery success.
-
-Decided (send-to-retired-peer):
-
-- A send whose snapshotted connection retires before or during the write is a
-  drop: the send completes, the message is disposed by the send path, and the
-  retirement is reported through `PeerEnded`. A retired connection never
-  aborts the remaining targets of the same send.
-- A peer that fails before establishment still surfaces its failure from
-  `SendAsync` (via the establishment gate); only an already-established peer
-  that retires mid-send is dropped.
-- Defer pattern-specific fairness and routing rules until the corresponding
-  pattern API is designed, while keeping the generic snapshot primitive free
-  of starvation and per-operation allocations.
+- Pattern-specific fairness and routing rules (deferred until each pattern's
+  API is designed); the generic snapshot primitive is free of starvation and
+  per-operation allocations.
+- Per-peer send queues (0004 D2), which the snapshot primitive already
+  supports.
 
 Completion gate:
 

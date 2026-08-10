@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Net;
 using System.Text;
 using ZmqSharp.Messages;
 using ZmqSharp.Transports;
@@ -330,4 +331,93 @@ internal static class ZmtpTestData
 
         return result;
     }
+}
+
+/// <summary>
+/// Transport whose connection answers the complete ZMTP handshake (greeting +
+/// PAIR READY) and then parks on the read, so the pump stays alive with the
+/// peer established - used for allocation measurements of the send path.
+/// </summary>
+internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTransport, EndPoint>
+{
+    public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+    {
+        add { }
+        remove { }
+    }
+
+    public static ValueTask<IZConnection> ConnectAsync(
+        EndPoint endpoint,
+        ZTransportOptions options,
+        CancellationToken token = default)
+        => ValueTask.FromResult<IZConnection>(new EstablishedFakeConnection());
+
+    public static ValueTask<EstablishedFakeTransport> BindAsync(
+        EndPoint endpoint,
+        ZTransportOptions options,
+        CancellationToken token = default)
+        => ValueTask.FromResult(new EstablishedFakeTransport());
+
+    public ValueTask StartAsync(CancellationToken token = default) => ValueTask.CompletedTask;
+
+    public void Dispose()
+    {
+    }
+}
+
+internal sealed class EstablishedFakeConnection : IZConnection
+{
+    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+    private int position;
+    private int disposed;
+
+    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
+        if (position < handshake.Length)
+        {
+            var count = Math.Min(buffer.Length, handshake.Length - position);
+            handshake.AsSpan(position, count).CopyTo(buffer.Span);
+            position += count;
+            return ValueTask.FromResult(count);
+        }
+
+        // Park the pump on a read that only cancellation completes, so the
+        // peer stays established and routable for the duration of the test.
+        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        token.Register(static state => ((TaskCompletionSource<int>)state!).TrySetCanceled(), tcs);
+        return new ValueTask<int>(tcs.Task);
+    }
+
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
+        => WriteAsync(frame, token);
+
+    public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
+        => WriteAsync(body, token);
+
+    public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
+        => WriteAsync(ReadOnlyMemory<byte>.Empty, token);
+
+    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
+        => ValueTask.FromResult(true);
+
+    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
+    {
+    }
+
+    public void SetConnectionEndedHandler(Action onConnectionEnded)
+    {
+    }
+
+    public void OnConnectionEnded()
+    {
+    }
+
+    public void Dispose() => Interlocked.Exchange(ref disposed, 1);
 }

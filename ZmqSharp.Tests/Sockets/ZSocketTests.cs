@@ -1352,6 +1352,190 @@ public sealed class ZSocketTests
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
     }
 
+    [Fact]
+    public async Task SendPath_NoPerMessageHeapAllocation()
+    {
+        // The send hot path must not allocate per message: a copy-on-write
+        // snapshot read (0006 3.6), a span-based single-target route, the
+        // established gate fast path, and a no-op fake write.
+        await using var socket = ZSocket.CreatePairCallback();
+        await socket.ConnectAsync<EndPoint, EstablishedFakeTransport>(
+            new IPEndPoint(IPAddress.Loopback, 0));
+
+        var messages = new ZMessage[1000];
+        for (var i = 0; i < messages.Length; i++)
+        {
+            messages[i] = ZMessage.FromOwned([(byte)i]);
+        }
+
+        // Warm up: the first sends may trigger one-time costs (delegate
+        // caches, tiered JIT), which would pollute the measurement.
+        for (var i = 0; i < 16; i++)
+        {
+            await socket.SendAsync(messages[i]);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 16; i < messages.Length; i++)
+        {
+            await socket.SendAsync(messages[i]);
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+#if !DEBUG
+        // In an optimized build the send path is allocation-free: the COW
+        // snapshot is a single volatile load, routing is span-based, the
+        // established gate takes its fast path, and the fake write is a
+        // no-op. Debug boxes async state machines per call (a bare
+        // synchronous-completing async ValueTask measures ~48 bytes/call
+        // there), so the absolute gate only holds in Release (0006 3.6).
+        allocated.Should().BeLessThan(4096);
+#else
+        _ = allocated;
+#endif
+
+        foreach (var message in messages)
+        {
+            message.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ReceivePath_TryRead_NoPerMessageHeapAllocation()
+    {
+        // The aggregate read hot path must not allocate per message: the
+        // peer snapshot is a single volatile load, so TryRead does not build
+        // a peer list on each call (0006 3.6).
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(1024) { SingleWriter = true },
+            Pool = pool,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(1024) { SingleWriter = true },
+        });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        const int count = 1000;
+        for (var i = 0; i < count; i++)
+        {
+            await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        }
+
+        // Capacity comfortably exceeds the send count, so the pump never
+        // blocks; wait until every message plus the parser greeting scratch
+        // is materialized.
+        await WaitUntilSettledAsync(() => pool.Outstanding, count + 1, TimeSpan.FromMilliseconds(300));
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var received = 0;
+        while (server.Messages.TryRead(out var message))
+        {
+            message.Dispose();
+            received++;
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        allocated.Should().BeLessThan(4096);
+        received.Should().Be(count);
+    }
+
+    [Fact]
+    public async Task PeerChurn_ConcurrentSendReadDispose_NoLeaksOrFaults()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
+            Pool = pool,
+        });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        var failures = new ConcurrentQueue<Exception>();
+
+        var sender = Task.Run(async () =>
+        {
+            try
+            {
+                for (var i = 0; i < 300; i++)
+                {
+                    await server.SendAsync(ZMessage.FromOwned([1]), cts.Token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                failures.Enqueue(ex);
+            }
+        });
+
+        var drainer = Task.Run(async () =>
+        {
+            try
+            {
+                var messages = server.Messages;
+                await foreach (var message in messages.ReadAllAsync(cts.Token))
+                {
+                    message.Dispose();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                failures.Enqueue(ex);
+            }
+        });
+
+        // Churn: repeatedly connect a short-lived client, exchange messages,
+        // and disconnect - each teardown reclaims that peer's buffers and
+        // retires it out of the routing snapshot.
+        for (var round = 0; round < 4; round++)
+        {
+            await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+            {
+                ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
+            });
+            await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+            for (var i = 0; i < 20; i++)
+            {
+                await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+            }
+        }
+
+        await sender;
+        await cts.CancelAsync();
+        try
+        {
+            await drainer;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        failures.Should().BeEmpty();
+
+        await server.DisposeAsync();
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+    }
+
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))

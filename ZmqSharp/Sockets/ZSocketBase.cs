@@ -14,9 +14,15 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 {
-    private readonly record struct Peer(IZConnection Connection, object? Endpoint);
+    /// <summary>
+    /// Copy-on-write routable-peer snapshot: rebuilt only when a peer is
+    /// added or removed, read as a single volatile load on the hot path, so
+    /// a send never allocates a peer list (0006 3.6).
+    /// </summary>
+    private volatile IZConnection[] peerSnapshot = [];
 
-    private readonly List<Peer> peers = [];
+    /// <summary>Per-connection endpoint, used only by the rare DisconnectAsync lookup.</summary>
+    private readonly Dictionary<IZConnection, object?> endpoints = [];
     private readonly List<(IZTransport Listener, object? Endpoint)> listeners = [];
     private readonly Dictionary<IZConnection, TaskCompletionSource> establishedGates = [];
     private readonly Dictionary<IZConnection, CancellationTokenSource> attemptTokens = [];
@@ -32,10 +38,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ArgumentNullException.ThrowIfNull(options);
     }
 
-    /// <summary>Selects the outbound connection(s) for a message; empty = drop.</summary>
-    protected abstract IReadOnlyList<IZConnection> RouteOutbound(
-        ZMessage message,
-        IReadOnlyList<IZConnection> peers);
+    /// <summary>Selects the outbound connection for a message; null = drop.</summary>
+    protected abstract IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers);
 
     /// <summary>ZMTP Socket-Type metadata advertised in the READY handshake.</summary>
     protected abstract string SocketTypeName { get; }
@@ -95,7 +99,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ArgumentNullException.ThrowIfNull(factory);
         lock (StateLock)
         {
-            if (peers.Count > 0)
+            if (peerSnapshot.Length > 0)
             {
                 throw new InvalidOperationException("frame sink must be set before connections are established");
             }
@@ -115,7 +119,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ArgumentNullException.ThrowIfNull(factory);
         lock (StateLock)
         {
-            if (peers.Count > 0)
+            if (peerSnapshot.Length > 0)
             {
                 throw new InvalidOperationException("frame allocator must be set before connections are established");
             }
@@ -172,7 +176,15 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         List<IZConnection> matches;
         lock (StateLock)
         {
-            matches = [.. peers.Where(peer => Equals(peer.Endpoint, endpoint)).Select(peer => peer.Connection)];
+            matches = [];
+            foreach (var connection in peerSnapshot)
+            {
+                if (endpoints.TryGetValue(connection, out var peerEndpoint) && Equals(peerEndpoint, endpoint))
+                {
+                    matches.Add(connection);
+                }
+            }
+
             foreach (var match in matches)
             {
                 // Cancel the in-flight attempt first: disposing the transport
@@ -204,29 +216,38 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ThrowIfClosed();
         try
         {
-            var targets = RouteOutbound(message, SnapshotPeers());
-            foreach (var target in targets)
-            {
-                await WaitUntilEstablishedAsync(target, token);
-                try
-                {
-                    await target.SendAsync(message, token);
-                }
-                catch (Exception ex) when (ex is ObjectDisposedException or IOException or SocketException)
-                {
-                    // The peer's connection retired between routing and the
-                    // write (or mid-write); a send to a dying peer is dropped,
-                    // never a fault. The retirement is already surfaced through
-                    // PeerEnded (0006 3.6), and the other targets still get the
-                    // message.
-                }
-            }
+            await SendToTargetAsync(message, token);
         }
         finally
         {
             message.Dispose();
         }
     }
+
+    private async ValueTask SendToTargetAsync(ZMessage message, CancellationToken token)
+    {
+        var connection = SelectTarget(message);
+        if (connection is null)
+        {
+            return;
+        }
+
+        await WaitUntilEstablishedAsync(connection, token);
+        try
+        {
+            await connection.SendAsync(message, token);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or IOException or SocketException)
+        {
+            // The peer's connection retired between routing and the write
+            // (or mid-write); a send to a dying peer is dropped, never a
+            // fault. The retirement is already surfaced through PeerEnded
+            // (0006 3.6).
+        }
+    }
+
+    private IZConnection? SelectTarget(ZMessage message)
+        => RouteOutbound(message, peerSnapshot.AsSpan());
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
@@ -265,7 +286,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             // Register before the pump starts. Sends block on the establishment
             // gate until the handshake completes, and DisconnectAsync must
             // always be able to find the peer to cancel the in-flight attempt.
-            peers.Add(new Peer(connection, endpoint));
+            PublishAdd(connection, endpoint);
         }
 
         var parser = new ZmtpParser(connection, allocator, Pool);
@@ -353,7 +374,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             // Internal state first: a failing callback must not leave the peer routable.
             lock (StateLock)
             {
-                peers.RemoveAll(peer => peer.Connection == connection);
+                PublishRemove(connection);
                 establishedGates.Remove(connection);
                 attemptTokens.Remove(connection);
             }
@@ -387,10 +408,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             establishedGates.TryGetValue(connection, out gate);
         }
 
-        if (gate is not null)
+        // An established peer's gate completed successfully; skipping the
+        // WaitAsync keeps the steady-state send path allocation-free (0006 3.6).
+        if (gate is null || gate.Task.IsCompletedSuccessfully)
         {
-            await gate.Task.WaitAsync(token);
+            return;
         }
+
+        await gate.Task.WaitAsync(token);
     }
 
     /// <summary>
@@ -465,11 +490,33 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         Cts.Dispose();
     }
 
-    private List<IZConnection> SnapshotPeers()
+    /// <summary>
+    /// Publishes a peer into the routable snapshot; must be called while
+    /// holding <see cref="ZAsyncState.StateLock"/>. Copy-on-write: the read
+    /// path is a single volatile load (0006 3.6).
+    /// </summary>
+    private void PublishAdd(IZConnection connection, object? endpoint)
     {
-        lock (StateLock)
+        var updated = new IZConnection[peerSnapshot.Length + 1];
+        peerSnapshot.CopyTo(updated, 0);
+        updated[^1] = connection;
+        peerSnapshot = updated;
+        endpoints[connection] = endpoint;
+    }
+
+    private void PublishRemove(IZConnection connection)
+    {
+        var current = peerSnapshot;
+        var index = Array.IndexOf(current, connection);
+        if (index < 0)
         {
-            return [.. peers.Select(peer => peer.Connection)];
+            return;
         }
+
+        var updated = new IZConnection[current.Length - 1];
+        current.AsSpan(0, index).CopyTo(updated);
+        current.AsSpan(index + 1).CopyTo(updated.AsSpan(index));
+        peerSnapshot = updated;
+        endpoints.Remove(connection);
     }
 }
