@@ -436,15 +436,19 @@ public sealed class ZSocketTests
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
         var received = new ConcurrentQueue<byte[][]>();
+        var allReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delivered = 0;
         var current = new List<byte[]>();
         server.OnFrame += (frame, ct) =>
         {
             frame.TryGetValue(out ZSegment segment);
             current.Add(segment.Memory.ToArray());
-            if (!frame.More)
+            if (frame.More) return true;
+            received.Enqueue([.. current]);
+            current.Clear();
+            if (++delivered == 100)
             {
-                received.Enqueue([.. current]);
-                current.Clear();
+                allReceived.TrySetResult();
             }
 
             return true;
@@ -454,7 +458,13 @@ public sealed class ZSocketTests
         var senderB = SendLoopAsync(client, 0x62, cts.Token);
         await Task.WhenAll(senderA, senderB);
 
-        received.Should().NotBeEmpty();
+        // SendAsync completes once the frames are handed to the socket, not
+        // when the peer's parser has delivered them; await the delivery
+        // signal from OnFrame instead of polling, so the assert runs after
+        // every message actually arrived.
+        await allReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        received.Should().HaveCount(100);
         foreach (var message in received)
         {
             message.Should().HaveCount(3);
