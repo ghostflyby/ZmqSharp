@@ -1024,6 +1024,222 @@ public sealed class ZSocketTests
         }
     }
 
+    [Fact]
+    public async Task DropWriteMode_KeepsFirstMessages_AndReturnsPoolOnDispose()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 2,
+            Pool = pool,
+            ReceiveFullMode = ZQueueFullMode.DropWrite,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        // Ten messages against a capacity-2 queue: the first two stay, the
+        // rest are dropped and reclaimed by the channel's item-dropped hook.
+        for (var i = 0; i < 10; i++)
+        {
+            await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        }
+
+        // Wait until the pump has drained: the pool settles at 3 (two buffered
+        // messages plus the parser greeting scratch) once every drop has been
+        // processed. Reading earlier would race the pump and refill the queue.
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        received.Should().Equal([0, 1]);
+
+        // The eight dropped messages were disposed by the library, never seen
+        // by the consumer (0006 section 2.2). Only the parser scratch remains
+        // until disposal.
+        pool.Outstanding.Should().Be(1);
+
+        await server.DisposeAsync();
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DropNewestMode_KeepsOldestAndIncoming()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 2,
+            Pool = pool,
+            ReceiveFullMode = ZQueueFullMode.DropNewest,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        // Drain the queue so each later step starts from empty.
+        await SendAndReadBackAsync(client, server.Messages, [0, 1], cts.Token);
+
+        // Fill it, wait for both items to be materialized, then overflow it.
+        // The parser greeting scratch adds one outstanding rental.
+        await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        // A full queue in DropNewest mode discards the newest buffered item
+        // (3) and keeps the incoming one (4) (0006 section 3.5). Settling back
+        // at 3 proves the drop ran before any read frees a slot.
+        await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        received.Should().Equal([2, 4]);
+
+        await server.DisposeAsync();
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DropOldestMode_KeepsNewestMessages()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 2,
+            Pool = pool,
+            ReceiveFullMode = ZQueueFullMode.DropOldest,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await SendAndReadBackAsync(client, server.Messages, [0, 1], cts.Token);
+
+        await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        // A full queue in DropOldest mode discards the oldest buffered item
+        // (2) and keeps the incoming one (4).
+        await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        received.Should().Equal([3, 4]);
+
+        await server.DisposeAsync();
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PeerEnd_DrainsBufferedMessages_ReturnsPool()
+    {
+        using var pool = new CountingMemoryPool();
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 2,
+            Pool = pool,
+            ReceiveFullMode = ZQueueFullMode.DropWrite,
+        });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        for (var i = 0; i < 4; i++)
+        {
+            await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        }
+
+        // The two buffered items plus the parser greeting scratch are rented.
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        await client.DisposeAsync();
+        await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // OnPeerEnded drained the buffered messages through the same Dispose
+        // path a drop uses, and the peer's teardown released the parser
+        // scratch; nothing leaks (0006 section 2.2).
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+
+        await server.DisposeAsync();
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SocketDispose_WithUnreadBufferedMessages_ReturnsPool()
+    {
+        using var pool = new CountingMemoryPool();
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveCapacity = 2,
+            Pool = pool,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveCapacity = 2 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await client.SendAsync(ZMessage.FromOwned("a"u8.ToArray()), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned("b"u8.ToArray()), cts.Token);
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+
+        // Disposing with unread buffered messages reclaims them; PeerEnded is
+        // unsubscribed during disposal, so this is the only reclaim path.
+        await server.DisposeAsync();
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Dispose_DrainsBufferedOutboundMessages()
+    {
+        using var pool = new CountingMemoryPool();
+        using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+
+        var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            SendCapacity = 2,
+            Pool = pool,
+        });
+
+        // The raw peer never answers READY, so the send pump blocks on the
+        // establishment gate and the outbound channel backs up.
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var stream = raw.GetStream();
+        await stream.ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
+        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, "a"u8.ToArray()));
+        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, "b"u8.ToArray()));
+
+        // Two outbound messages plus the parser greeting scratch are rented;
+        // the pump is blocked on the establishment gate and has dequeued nothing.
+        pool.Outstanding.Should().Be(3);
+
+        await client.DisposeAsync();
+
+        // The pump reclaimed the dequeued message on cancellation and disposal
+        // drained the buffered one; both buffers are returned.
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+    }
+
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
@@ -1040,6 +1256,90 @@ public sealed class ZSocketTests
         {
             onMessage();
             message.Dispose();
+        }
+    }
+
+    private static async Task WaitUntilAsync<T>(Func<T> state, Func<T, bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            var current = state();
+            if (condition(current))
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException($"condition not met within timeout; last value: {current}");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
+    private static Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+        => WaitUntilAsync(condition, value => value, timeout);
+
+    /// <summary>
+    /// Waits until the observed value is stable at <paramref name="expected"/>
+    /// for the whole settle interval. Lets the receiving pump finish draining
+    /// (drops processed, drops reclaimed) before the queue is read, so tests
+    /// do not race the pump.
+    /// </summary>
+    private static async Task WaitUntilSettledAsync<T>(Func<T> state, T expected, TimeSpan interval)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (state()!.Equals(expected))
+            {
+                await Task.Delay(interval);
+                if (state()!.Equals(expected))
+                {
+                    return;
+                }
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException($"value never settled at {expected}; last value: {state()}");
+    }
+
+    private static async Task SendAndReadBackAsync(
+        ZQueueSocket<ZPairSocket> client,
+        ChannelReader<ZMessage> messages,
+        byte[] payloads,
+        CancellationToken token)
+    {
+        foreach (var payload in payloads)
+        {
+            await client.SendAsync(ZMessage.FromOwned([payload]), token);
+            var message = await TryReadAsync(messages, TimeSpan.FromSeconds(1), token);
+            message.Should().NotBeNull();
+            message.Value[0].ToSequence().ToArray()[0].Should().Be(payload);
+            message.Value.Dispose();
+        }
+    }
+
+    private static async Task<List<byte>> ReadAllAsync(
+        ChannelReader<ZMessage> reader,
+        TimeSpan idleTimeout,
+        CancellationToken token)
+    {
+        var result = new List<byte>();
+        while (true)
+        {
+            var message = await TryReadAsync(reader, idleTimeout, token);
+            if (message is null)
+            {
+                return result;
+            }
+
+            result.Add(message.Value[0].ToSequence().ToArray()[0]);
+            message.Value.Dispose();
         }
     }
 

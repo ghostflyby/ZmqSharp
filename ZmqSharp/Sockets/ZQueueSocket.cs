@@ -54,7 +54,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
                 return false;
             }
 
+            // Capture the gate before the level check: an item arriving
+            // between the check and the await completes the captured gate, so
+            // no wake is lost; the 0->1 edge wake means a continuously
+            // readable queue does not spin (0006 3.5).
             var wake = owner.GetWakeTask();
+            if (owner.AnyPeerHasItems())
+            {
+                return true;
+            }
+
             var done = await Task.WhenAny(wake, completed).WaitAsync(cancellationToken);
             return done == wake;
         }
@@ -65,6 +74,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
+    private readonly BoundedChannelFullMode receiveFullMode;
     private readonly IZReceivePolicy receivePolicy;
     private readonly long maxFrameLength;
     private readonly long maxMessageLength;
@@ -81,6 +91,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         this.socket = socket;
         options ??= new ZQueueSocketOptions();
         receiveCapacity = options.ReceiveCapacity;
+        receiveFullMode = ToBoundedFullMode(options.ReceiveFullMode);
         receivePolicy = options.ReceivePolicy;
         maxFrameLength = options.MaxFrameLength;
         maxMessageLength = options.MaxMessageLength;
@@ -168,10 +179,34 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             catch (OperationCanceledException)
             {
             }
+            catch (ObjectDisposedException)
+            {
+                // The pump may have dequeued a message just before the socket
+                // closed and failed its send on the closed socket; the pump
+                // disposed it before rethrowing.
+            }
+        }
+
+        await AwaitBackgroundAsync();
+
+        // All pumps have exited and no writer can enqueue. The PeerEnded
+        // unsubscribe above means OnPeerEnded no longer runs during disposal,
+        // so reclaiming here is the only path for messages that lose their
+        // consumer on socket disposal (0006 3.5).
+        foreach (var state in SnapshotPeers())
+        {
+            Reclaim(state);
+        }
+
+        if (sendChannel is { } outbound)
+        {
+            while (outbound.Reader.TryRead(out var message))
+            {
+                message.Dispose();
+            }
         }
 
         completion.TrySetResult();
-        await AwaitBackgroundAsync();
         Cts.Dispose();
     }
 
@@ -184,14 +219,17 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
                 {
                     SingleReader = true,
                     SingleWriter = true,
-                }),
+                    FullMode = receiveFullMode,
+                },
+                // Every message dropped by a drop mode is reclaimed here; a
+                // consumer can never observe it (0006 section 2.2).
+                static message => message.Dispose()),
         };
         lock (StateLock)
         {
             peers.Add(connection, state);
         }
 
-        TrackBackground(WakeOnReadableAsync(state));
         return (frame, ct) => OnPeerFrameAsync(state, frame, ct);
     }
 
@@ -238,6 +276,15 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             // the buffer must not leak.
             message.Dispose();
             throw;
+        }
+
+        // Edge wake: a single writer means Count == 1 is exactly the 0->1
+        // transition, so waiting readers wake once per message batch instead
+        // of spinning on a continuously readable queue. A drop-mode write to
+        // a full queue leaves Count unchanged and wakes nobody (0006 3.5).
+        if (state.Queue.Reader.Count == 1)
+        {
+            Wake();
         }
 
         return true;
@@ -356,12 +403,20 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         return new ZFrame(new ZSegment(singleOwner, singleMemory), more);
     }
 
-    private async Task WakeOnReadableAsync(PeerState state)
+    private bool AnyPeerHasItems()
     {
-        while (await state.Queue.Reader.WaitToReadAsync(Cts.Token))
+        lock (StateLock)
         {
-            Wake();
+            foreach (var state in peers.Values)
+            {
+                if (state.Queue.Reader.Count > 0)
+                {
+                    return true;
+                }
+            }
         }
+
+        return false;
     }
 
     private void OnPeerEnded(IZConnection connection, Exception? failure)
@@ -375,13 +430,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             }
         }
 
-        foreach (var frame in state.Accumulator)
-        {
-            frame.Dispose();
-        }
-
-        state.Accumulator.Clear();
-        state.Queue.Writer.TryComplete();
+        // Removed from the dictionary first, so the aggregate reader can never
+        // hand out a message that is about to be drained; no double dispose.
+        Reclaim(state);
 
         Action<IZConnection, Exception?>? handler;
         lock (StateLock)
@@ -390,6 +441,27 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
 
         handler?.Invoke(connection, failure);
+    }
+
+    /// <summary>
+    /// Reclaims every message that loses its consumer: the owning frames of an
+    /// incomplete message plus the buffered queue items. Channel completion
+    /// alone is not reclamation (0006 section 2.2) - the buffered items are
+    /// drained through the same Dispose path a drop mode uses.
+    /// </summary>
+    private static void Reclaim(PeerState state)
+    {
+        foreach (var frame in state.Accumulator)
+        {
+            frame.Dispose();
+        }
+
+        state.Accumulator.Clear();
+        state.Queue.Writer.TryComplete();
+        while (state.Queue.Reader.TryRead(out var message))
+        {
+            message.Dispose();
+        }
     }
 
     private Task GetWakeTask()
@@ -425,7 +497,26 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         var channel = sendChannel ?? throw new InvalidOperationException("send channel is not configured");
         await foreach (var message in channel.Reader.ReadAllAsync(token))
         {
-            await socket.SendAsync(message, token);
+            try
+            {
+                await socket.SendAsync(message, token);
+            }
+            catch
+            {
+                // The pump's consumer is gone (the socket failed or closed);
+                // the dequeued message must not leak.
+                message.Dispose();
+                throw;
+            }
         }
     }
+
+    internal static BoundedChannelFullMode ToBoundedFullMode(ZQueueFullMode mode) => mode switch
+    {
+        ZQueueFullMode.Wait => BoundedChannelFullMode.Wait,
+        ZQueueFullMode.DropWrite => BoundedChannelFullMode.DropWrite,
+        ZQueueFullMode.DropNewest => BoundedChannelFullMode.DropNewest,
+        ZQueueFullMode.DropOldest => BoundedChannelFullMode.DropOldest,
+        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "unknown receive full mode"),
+    };
 }

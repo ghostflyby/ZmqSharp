@@ -135,9 +135,13 @@ As implemented:
   receive queue (zero extra copy, 0004 constraint 1), applying the receive
   policy (0003). The socket type aggregates the peer queues (fair-queue,
   direct, ...) onto `Messages`.
-- Backpressure: wait mode blocks on `WriteAsync` of the affected peer queue,
-  pausing only that peer's parser; the socket type handles per-peer isolation
-  (0004).
+- Full mode: each peer's queue is a bounded channel whose full mode is
+  `ZQueueSocketOptions.ReceiveFullMode` (`Wait`, `DropWrite`, `DropNewest`,
+  `DropOldest`). Wait blocks on `WriteAsync` of the affected peer queue,
+  pausing only that peer's parser; drop modes never block the pump and the
+  dropped message is disposed by the library. Peer end and socket disposal
+  explicitly drain every buffered message through the same dispose path (0006
+  section 2.2/3.5).
 
 ## 7. Send Path
 

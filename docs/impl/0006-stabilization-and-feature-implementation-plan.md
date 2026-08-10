@@ -250,21 +250,32 @@ Implemented:
   that peer's pump (0007 section 6 step 2). The owning queue tier no longer
   depends on `ResumePaused`; the low-level borrowed callback API retains its
   own synchronous pause model.
-- Tests: wait mode loses no message under a full queue, and a saturated peer
-  does not pause another peer's delivery.
+- Receive full modes are configurable via `ZQueueSocketOptions.ReceiveFullMode`
+  (`Wait`, `DropWrite`, `DropNewest`, `DropOldest`). Drop modes create the
+  per-peer bounded channel with the BCL `itemDropped` callback wired to the
+  library's mandatory `ZMessage.Dispose`, so the item selected by each mode is
+  disposed exactly once and is never observed by the consumer.
+- Explicit queue drains use the same dispose path, because channel completion
+  does not invoke the dropped-item callback for buffered items: `OnPeerEnded`
+  and socket disposal drain every peer's buffered receive messages, and socket
+  disposal drains the outbound channel's buffered messages. A send-pump
+  exception disposes the dequeued message before propagating.
+- Waiting readers are woken on the 0->1 edge (`Reader.Count == 1` under the
+  per-peer single writer), so a continuously readable queue does not produce a
+  notification busy loop.
+- Tests: wait mode loses no message under a full queue; a saturated peer does
+  not pause another peer's delivery; each drop mode reports and reclaims the
+  item selected by that mode; peer end and socket disposal return every
+  buffered message to a counting pool; the outbound channel is drained on
+  disposal.
 
 Remaining required work:
 
-- Drop modes create their bounded channels with a mandatory custom
-  dropped-item callback. The callback invokes the library drop operation for
-  the item removed or rejected by `DropWrite`, `DropNewest`, or `DropOldest`.
-- Explicit queue drains invoke the same drop operation because channel
-  completion does not invoke the dropped-item callback for buffered items.
-- Receive and send policies are independently configurable.
-- Queue completion, peer failure, send-pump failure, cancellation, and socket
-  disposal drain or dispose every message that loses its consumer.
+- Send-side (outbound) full modes: the outbound channel stays Wait-only; a
+  send-side `DropWrite`/`DropNewest`/`DropOldest` policy is not implemented.
 - A send-pump exception completes its producer surface with failure and does
-  not defer discovery until socket disposal.
+  not defer discovery until socket disposal (today the failure is only
+  observable through socket disposal).
 
 Completion gate:
 

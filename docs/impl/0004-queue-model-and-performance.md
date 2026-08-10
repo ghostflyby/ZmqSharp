@@ -12,7 +12,9 @@ socket types are selection policies over the per-peer queues.
 
 Each peer connection owns two bounded queues:
 
-- Receive queue: `Channel<IZMessage>` with capacity = RCVHWM. The peer's
+- Receive queue: `Channel<ZMessage>` with capacity = RCVHWM (BCL bounded
+  channel with a library-owned `itemDropped` callback, so every message a
+  drop mode discards is disposed). The peer's
   parser materializes messages directly into it. A slow peer fills only its
   own queue and pauses only its own parser.
 - Send queue: `Channel<IZMessage>` with capacity = SNDHWM, drained by one
@@ -48,9 +50,14 @@ design review first.
    "borrowed scratch then rent + copy" shape is never the final materialization
    path for the channel tier.
 2. Per-peer bounded queues are the default for both send and receive;
-   direct write is an optimization, never the primary model.
+   direct write is an optimization, never the primary model. The receive
+   queue is a BCL bounded channel configured with the socket's full mode;
+   drop modes dispose the dropped message through the channel's
+   `itemDropped` callback, and explicit drains reuse the same disposal path.
 3. Queue capacity equals the per-peer HWM; queues are always bounded. Peak
    memory is controlled by the queue limits, never by arrival rate alone.
+   Drop modes keep peak memory bounded at the capacity instead of blocking
+   the pump.
 4. Hot paths allocate at most one object per message (`ZMessage` /
    `ZMultiMessage`); frame tables are struct arrays; no LINQ, closures, or
    per-frame heap objects on the receive/send fast path.
