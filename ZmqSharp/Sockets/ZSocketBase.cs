@@ -208,7 +208,18 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             foreach (var target in targets)
             {
                 await WaitUntilEstablishedAsync(target, token);
-                await target.SendAsync(message, token);
+                try
+                {
+                    await target.SendAsync(message, token);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or IOException or SocketException)
+                {
+                    // The peer's connection retired between routing and the
+                    // write (or mid-write); a send to a dying peer is dropped,
+                    // never a fault. The retirement is already surfaced through
+                    // PeerEnded (0006 3.6), and the other targets still get the
+                    // message.
+                }
             }
         }
         finally

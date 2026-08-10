@@ -312,6 +312,16 @@ Required work:
   of its receive and send queues until they are drained or disposed.
 - Define send behavior when a snapshotted connection retires before its send
   starts; do not silently report establishment or delivery success.
+
+Decided (send-to-retired-peer):
+
+- A send whose snapshotted connection retires before or during the write is a
+  drop: the send completes, the message is disposed by the send path, and the
+  retirement is reported through `PeerEnded`. A retired connection never
+  aborts the remaining targets of the same send.
+- A peer that fails before establishment still surfaces its failure from
+  `SendAsync` (via the establishment gate); only an already-established peer
+  that retires mid-send is dropped.
 - Defer pattern-specific fairness and routing rules until the corresponding
   pattern API is designed, while keeping the generic snapshot primitive free
   of starvation and per-operation allocations.
