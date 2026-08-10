@@ -150,7 +150,12 @@ As implemented:
   the last peer send.
 - Queue tier: `Outbound` is bounded; the socket routes each message to the
   selected peers (direct write today; per-peer send queues with one pump per
-  peer are 0004/D2).
+  peer are 0004/D2). The outbound channel's full mode is
+  `ZQueueSocketOptions.SendFullMode` (`Wait`, `DropWrite`, `DropNewest`,
+  `DropOldest`); a drop mode never blocks a producer and the dropped message
+  is disposed by the library. When the send pump fails, the channel completes
+  with that failure so producers discover it through a failing `WriteAsync`
+  immediately rather than at socket disposal (0006 section 3.5).
 - A message is written atomically per connection (single writer, never
   interleaved).
 

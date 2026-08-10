@@ -263,19 +263,28 @@ Implemented:
 - Waiting readers are woken on the 0->1 edge (`Reader.Count == 1` under the
   per-peer single writer), so a continuously readable queue does not produce a
   notification busy loop.
+- Send-side (outbound) full modes are configurable via
+  `ZQueueSocketOptions.SendFullMode` (`Wait`, `DropWrite`, `DropNewest`,
+  `DropOldest`). The outbound channel is a BCL bounded channel with the same
+  mandatory `itemDropped` disposal, so a drop mode never blocks a producer and
+  every dropped message is reclaimed.
+- A send-pump failure (peer failure, protocol error, closed socket) reclaims
+  the dequeued message and completes the outbound channel with that failure,
+  so producers discover it through a failing `WriteAsync` immediately instead
+  of waiting for socket disposal. Cancellation and a producer-initiated
+  channel completion exit the pump cleanly.
 - Tests: wait mode loses no message under a full queue; a saturated peer does
   not pause another peer's delivery; each drop mode reports and reclaims the
   item selected by that mode; peer end and socket disposal return every
   buffered message to a counting pool; the outbound channel is drained on
-  disposal.
+  disposal; drop-mode outbound channels never block producers and reclaim
+  every dropped message; a send-pump failure surfaces through the outbound
+  channel before disposal.
 
 Remaining required work:
 
-- Send-side (outbound) full modes: the outbound channel stays Wait-only; a
-  send-side `DropWrite`/`DropNewest`/`DropOldest` policy is not implemented.
-- A send-pump exception completes its producer surface with failure and does
-  not defer discovery until socket disposal (today the failure is only
-  observable through socket disposal).
+- None under this section. Send-side full modes and send-pump failure
+  propagation are implemented.
 
 Completion gate:
 

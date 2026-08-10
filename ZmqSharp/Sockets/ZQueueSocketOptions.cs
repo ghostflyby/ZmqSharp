@@ -37,6 +37,14 @@ public sealed class ZQueueSocketOptions
     public int? SendCapacity { get; init; }
 
     /// <summary>
+    /// How a full outbound channel is handled. Wait (default) blocks producers
+    /// until the send pump frees a slot; a drop mode never blocks producers
+    /// and every message it drops is disposed by the library - the consumer
+    /// never sees it.
+    /// </summary>
+    public ZQueueFullMode SendFullMode { get; init; } = ZQueueFullMode.Wait;
+
+    /// <summary>
     /// Receive materialization policy; defaults to the numeric
     /// <see cref="ZReceiveOptions"/> configuration, which accepts every frame
     /// pooled, contiguous up to <c>ContiguousFrameLimit</c> and segmented

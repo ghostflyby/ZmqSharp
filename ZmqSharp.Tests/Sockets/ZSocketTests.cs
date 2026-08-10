@@ -1250,6 +1250,113 @@ public sealed class ZSocketTests
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
     }
 
+    [Theory]
+    [InlineData(ZQueueFullMode.DropWrite)]
+    [InlineData(ZQueueFullMode.DropNewest)]
+    [InlineData(ZQueueFullMode.DropOldest)]
+    public async Task SendDropMode_ProducersNeverBlock_AndAllReclaimed(ZQueueFullMode mode)
+    {
+        using var pool = new CountingMemoryPool();
+        using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+
+        var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            SendCapacity = 2,
+            SendFullMode = mode,
+            Pool = pool,
+        });
+
+        // The raw peer never answers READY, so the send pump dequeues the
+        // first message and blocks on the establishment gate.
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var stream = raw.GetStream();
+        await stream.ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
+
+        // Ten producers against a capacity-2 channel: the first three stay
+        // (pump-held + 2 buffered), the rest are dropped and reclaimed. The
+        // per-write timeout proves a drop mode never blocks a producer.
+        for (var i = 0; i < 10; i++)
+        {
+            await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [(byte)i]))
+                .AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(2));
+        }
+
+        // The pump holds one message (blocked on the establishment gate), the
+        // channel buffers up to capacity, and the parser greeting scratch adds
+        // one rental; the dropped messages are already disposed via the
+        // item-dropped hook. The pump's take timing varies with scheduling, so
+        // only the bounded range is asserted - never above 4, and the per-write
+        // timeout above proves a drop mode never blocks a producer (0006 3.5).
+        await WaitUntilAsync(() => pool.Outstanding is >= 3 and <= 4, TimeSpan.FromSeconds(5));
+
+        await client.DisposeAsync();
+
+        // Disposal drained the buffered and pump-held messages; the parser
+        // scratch is released with the connection.
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task SendPumpFailure_CompletesOutboundWithFailure()
+    {
+        using var pool = new CountingMemoryPool();
+        using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+
+        var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            SendCapacity = 2,
+            Pool = pool,
+        });
+
+        // The peer completes the handshake as a DEALER, which is incompatible
+        // with a PAIR: the establishment gate faults deterministically, so the
+        // pump's first send fails with a protocol error - no TCP timing races.
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var stream = raw.GetStream();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")));
+        await stream.FlushAsync();
+
+        var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
+        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, "a"u8.ToArray()));
+        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, "b"u8.ToArray()));
+
+        // The pump's first send faults the establishment gate and completes
+        // the producer surface with the failure. The establishment failure is
+        // deterministic (the gate faults when the READY exchange rejects the
+        // socket type), so wait for it first, then prove a later producer sees
+        // the channel close with the failure as its cause.
+        var connectFailure = await Record.ExceptionAsync(
+            () => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        connectFailure.Should().BeOfType<ZeroMqProtocolException>();
+
+        await WaitUntilAsync(async () =>
+        {
+            var probe = MessageFactory.PooledSingleFrame(pool, "probe"u8.ToArray());
+            var failure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
+            if (failure is not null)
+            {
+                // The channel is closed, so the probe was never accepted; it
+                // must not leak. On the accepted path the pump or the disposal
+                // drain reclaims it, so it is only disposed here on failure.
+                probe.Dispose();
+            }
+
+            return failure is ChannelClosedException { InnerException: ZeroMqProtocolException };
+        }, TimeSpan.FromSeconds(5));
+
+        await client.DisposeAsync();
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+    }
+
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages, CancellationToken token)
     {
         await foreach (var message in messages.ReadAllAsync(token))
@@ -1291,6 +1398,25 @@ public sealed class ZSocketTests
 
     private static Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
         => WaitUntilAsync(condition, value => value, timeout);
+
+    private static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            if (await condition())
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException("condition not met within timeout");
+            }
+
+            await Task.Delay(20);
+        }
+    }
 
     /// <summary>
     /// Waits until the observed value is stable at <paramref name="expected"/>

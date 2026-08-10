@@ -75,6 +75,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private readonly Dictionary<IZConnection, PeerState> peers = [];
     private readonly int receiveCapacity;
     private readonly BoundedChannelFullMode receiveFullMode;
+    private readonly BoundedChannelFullMode sendFullMode;
     private readonly IZReceivePolicy receivePolicy;
     private readonly long maxFrameLength;
     private readonly long maxMessageLength;
@@ -92,6 +93,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         options ??= new ZQueueSocketOptions();
         receiveCapacity = options.ReceiveCapacity;
         receiveFullMode = ToBoundedFullMode(options.ReceiveFullMode);
+        sendFullMode = ToBoundedFullMode(options.SendFullMode);
         receivePolicy = options.ReceivePolicy;
         maxFrameLength = options.MaxFrameLength;
         maxMessageLength = options.MaxMessageLength;
@@ -100,7 +102,15 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
         if (options.SendCapacity is { } sendCapacity)
         {
-            sendChannel = Channel.CreateBounded<ZMessage>(new BoundedChannelOptions(sendCapacity));
+            sendChannel = Channel.CreateBounded<ZMessage>(
+                new BoundedChannelOptions(sendCapacity)
+                {
+                    SingleReader = true,
+                    FullMode = sendFullMode,
+                },
+                // Every message dropped by a drop mode is reclaimed here; a
+                // producer never observes it (0006 section 2.2).
+                static message => message.Dispose());
             sendPump = SendPumpAsync(Cts.Token);
         }
 
@@ -114,6 +124,12 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     /// <summary>Total frames rejected by the receive policy since construction.</summary>
     public long ReceiveRejections => Volatile.Read(ref rejections);
 
+    /// <summary>
+    /// Optional outbound channel; its full mode is <c>SendFullMode</c>. When
+    /// the send pump fails, the channel completes with that failure so
+    /// producers discover it through a failing <c>WriteAsync</c> instead of
+    /// waiting for socket disposal (0006 3.5).
+    /// </summary>
     public ChannelWriter<ZMessage>? Outbound => sendChannel?.Writer;
 
     /// <summary>Raised when a peer connection ends; null = clean EOF, otherwise the failure.</summary>
@@ -178,12 +194,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             }
             catch (OperationCanceledException)
             {
-            }
-            catch (ObjectDisposedException)
-            {
-                // The pump may have dequeued a message just before the socket
-                // closed and failed its send on the closed socket; the pump
-                // disposed it before rethrowing.
             }
         }
 
@@ -495,19 +505,38 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private async Task SendPumpAsync(CancellationToken token)
     {
         var channel = sendChannel ?? throw new InvalidOperationException("send channel is not configured");
-        await foreach (var message in channel.Reader.ReadAllAsync(token))
+        try
         {
-            try
+            await foreach (var message in channel.Reader.ReadAllAsync(token))
             {
-                await socket.SendAsync(message, token);
+                try
+                {
+                    await socket.SendAsync(message, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Cancellation is not a failure: the producer completed
+                    // the channel or the socket is closing; the dequeued
+                    // message must still not leak.
+                    message.Dispose();
+                    throw;
+                }
+                catch (Exception failure)
+                {
+                    // The send consumer is gone (peer failure, protocol error,
+                    // closed socket). Reclaim the dequeued message and complete
+                    // the producer surface with the failure so producers learn
+                    // immediately instead of at socket disposal (0006 3.5).
+                    message.Dispose();
+                    channel.Writer.TryComplete(failure);
+                    return;
+                }
             }
-            catch
-            {
-                // The pump's consumer is gone (the socket failed or closed);
-                // the dequeued message must not leak.
-                message.Dispose();
-                throw;
-            }
+        }
+        catch (ChannelClosedException)
+        {
+            // The producer completed the channel first (with or without a
+            // failure); the pump exits cleanly.
         }
     }
 
