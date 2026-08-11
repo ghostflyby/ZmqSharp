@@ -1481,8 +1481,23 @@ public sealed class ZSocketTests
         await stream.FlushAsync();
 
         var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
-        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, "a"u8.ToArray()));
-        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, "b"u8.ToArray()));
+
+        // The pump may fault the establishment gate and complete the channel
+        // before these writes land (the gate faults deterministically once the
+        // READY exchange rejects the socket type), so a write racing that
+        // completion throws ChannelClosedException with the protocol failure -
+        // which is exactly the behavior under test.
+        foreach (var payload in new[] { "a"u8.ToArray(), "b"u8.ToArray() })
+        {
+            var message = MessageFactory.PooledSingleFrame(pool, payload);
+            var writeFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(message).AsTask());
+            if (writeFailure is not null)
+            {
+                writeFailure.Should().BeOfType<ChannelClosedException>();
+                writeFailure.InnerException.Should().BeOfType<ZeroMqProtocolException>();
+                message.Dispose();
+            }
+        }
 
         // The pump's first send faults the establishment gate and completes
         // the producer surface with the failure. The establishment failure is
