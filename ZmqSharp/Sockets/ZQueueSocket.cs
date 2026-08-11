@@ -464,6 +464,17 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         Reclaim(state);
         state.Phase = PeerPhase.Closed;
 
+        // A peer that ends with a failure while no other peer remains leaves
+        // the send pump with nothing to deliver to. Its sends would otherwise
+        // drop silently (retired-peer semantics), so the outbound channel is
+        // completed with the failure to surface it to producers deterministically
+        // - independent of whether the pump routed before or after the peer's
+        // teardown (0006 3.5/3.6).
+        if (failure is not null && sendChannel is { } outbound && peerSnapshot.Length == 0)
+        {
+            outbound.Writer.TryComplete(failure);
+        }
+
         Action<IZConnection, Exception?>? handler;
         lock (StateLock)
         {

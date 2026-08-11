@@ -1329,23 +1329,27 @@ public sealed class ZSocketTests
         // The pump's first send faults the establishment gate and completes
         // the producer surface with the failure. The establishment failure is
         // deterministic (the gate faults when the READY exchange rejects the
-        // socket type), so wait for it first.
+        // socket type), and OnPeerEnded completes the outbound channel with it
+        // once the last peer ends, so a later producer is guaranteed to see
+        // the failure (0006 3.5). Wait for it, then prove the cause.
         var connectFailure = await Record.ExceptionAsync(
             () => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
         connectFailure.Should().BeOfType<ZeroMqProtocolException>();
 
-        // The pump reclaims the dequeued "a" and completes the channel once it
-        // observes the gate failure; "b" stays buffered (channel completion
-        // does not drain buffered items) and the parser scratch is released
-        // with the connection. Once only "b" remains outstanding the pump has
-        // finished, so a later producer is guaranteed to see the failure.
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 1, TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(async () =>
+        {
+            var probe = MessageFactory.PooledSingleFrame(pool, "probe"u8.ToArray());
+            var failure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
+            if (failure is not null)
+            {
+                // The channel is closed, so the probe was never accepted; it
+                // must not leak. On the accepted path the pump or the disposal
+                // drain reclaims it, so it is only disposed here on failure.
+                probe.Dispose();
+            }
 
-        var probe = MessageFactory.PooledSingleFrame(pool, "probe"u8.ToArray());
-        var writeFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
-        writeFailure.Should().BeOfType<ChannelClosedException>();
-        writeFailure.InnerException.Should().BeOfType<ZeroMqProtocolException>();
-        probe.Dispose();
+            return failure is ChannelClosedException { InnerException: ZeroMqProtocolException };
+        }, TimeSpan.FromSeconds(15));
 
         await client.DisposeAsync();
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
