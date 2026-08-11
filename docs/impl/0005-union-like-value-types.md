@@ -23,8 +23,8 @@ was too large, mixed concerns, and allocated per message.
 The goal is one value-type shape per concept: split storage per case, infer
 the case from field state (no real tag), expose every case through a
 `TryGetValue` overload, and keep the message/frame surface minimal. Borrowed
-frames are just segments with a no-op owner - no special frame shape for
-callbacks.
+frames are just segments over the parser's scratch source - no special frame
+shape for callbacks.
 
 ## 2. Principles
 
@@ -76,16 +76,21 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 }
 ```
 
-- `ZSegment` is the contiguous case: one buffer plus its ownership token. The
-  owner is `byte[]` (owned), `IMemoryOwner<byte>` (pooled), or an internal
-  no-op owner (borrowed). `GetOwnedArray(out byte[])` returns the backing array
-  only for the owned case. It is itself `IReadOnlyList<ZSegment>` with a single
-  element (itself), mirroring `ZSingleMessage`.
+- `ZSegment` is the contiguous case: an ownership token plus a relative offset
+  and length into it. The owner is `byte[]` (owned) or `IMemoryOwner<byte>`
+  (pooled); a borrowed segment refers to the parser's scratch owner without
+  taking ownership and `Dispose` is a no-op for it. Content access reacquires
+  the concrete memory from the owner and slices it on every call; the segment
+  stores no `Memory<byte>` field (0006 3.4). `GetOwnedArray(out byte[])`
+  returns the backing array only for the owned case. It is itself
+  `IReadOnlyList<ZSegment>` with a single element (itself), mirroring
+  `ZSingleMessage`.
 - `ZSegments` is the non-contiguous case: a table of segments, each with its
   own owner. It is `IReadOnlyList<ZSegment>`; `Dispose` releases every pooled
   segment.
-- Borrowed frames carry a no-op owner, so the callback surface uses exactly the
-  same type as materialized frames; there is no borrowed-specific frame shape.
+- Borrowed frames carry the parser's scratch source as the owner with
+  `IsBorrowed` set, so the callback surface uses exactly the same type as
+  materialized frames; there is no borrowed-specific frame shape.
 - Contiguity is per frame, not per message: a multipart message may mix
   contiguous and non-contiguous frames freely.
 
@@ -133,7 +138,7 @@ Every frame is one of:
 | --- | --- | --- |
 | Contiguous (`ZSegment`) | `byte[]` | owned, single segment |
 | Contiguous (`ZSegment`) | `IMemoryOwner<byte>` | pooled, single segment |
-| Contiguous (`ZSegment`) | no-op owner | borrowed view (callback) |
+| Contiguous (`ZSegment`) | scratch owner + `IsBorrowed` | borrowed view (callback; Dispose no-op) |
 | NonContiguous (`ZSegments`) | per-segment owners | segmented frame |
 
 Messages combine these freely: a `ZSingleMessage` may hold a contiguous or a
@@ -154,9 +159,9 @@ its `byte[]` only when it is actually a `byte[]`.
 
 - `Channel<ZMessage>` stores structs inline; no per-item heap allocation.
 - Parser and encoder branch on `TryGetValue(out ZSegment/ZSegments)`; the
-  borrowed path keeps zero-copy semantics through the no-op owner.
+  borrowed path keeps zero-copy semantics by referring to the scratch source.
 - Parser reads segment content through the `ZSegments` indexer; encoder reads
-  each segment's `Memory`.
+  each segment's `Memory` (reacquired and sliced per access).
 - Each union root provides an implicit conversion from its case types
   (`ZSegment`/`ZSegments` to `ZFrame`; `ZSingleMessage`/`ZMultiMessage` to
   `ZMessage`), so a case value can be used directly where its root is

@@ -255,7 +255,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         var owner = Pool.Rent(bytes.Length);
         bytes.CopyTo(owner.Memory);
         var message = new ZMessage(new ZSingleMessage(
-            new ZFrame(new ZSegment(owner, owner.Memory[..bytes.Length]))));
+            new ZFrame(new ZSegment(owner, 0, bytes.Length))));
         await SendAsync(message, token);
     }
 

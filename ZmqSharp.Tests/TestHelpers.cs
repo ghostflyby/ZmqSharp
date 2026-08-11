@@ -141,14 +141,14 @@ internal sealed class ProbingMemoryPool : MemoryPool<byte>
 internal static class MessageFactory
 {
     public static ZMessage SingleFrame(byte[] payload)
-        => new(new ZSingleMessage(new ZFrame(new ZSegment(payload, payload))));
+        => new(new ZSingleMessage(new ZFrame(new ZSegment(payload, 0, payload.Length))));
 
     public static ZMessage PooledSingleFrame(MemoryPool<byte> pool, byte[] payload)
     {
         var owner = pool.Rent(payload.Length);
         payload.CopyTo(owner.Memory);
         return new ZMessage(new ZSingleMessage(
-            new ZFrame(new ZSegment(owner, owner.Memory[..payload.Length]))));
+            new ZFrame(new ZSegment(owner, 0, payload.Length))));
     }
 
     public static ZMessage SegmentedFrame(params byte[][] segments)
@@ -160,12 +160,12 @@ internal static class MessageFactory
 
         return new ZMessage(new ZSingleMessage(
             new ZFrame(new ZSegments(
-                [.. segments.Select(segment => new ZSegment(segment, segment))]))));
+                [.. segments.Select(segment => new ZSegment(segment, 0, segment.Length))]))));
     }
 
     public static ZMessage Multipart(params byte[][] frames)
         => new(new ZMultiMessage(
-            [.. frames.Select(frame => new ZFrame(new ZSegment(frame, frame)))]));
+            [.. frames.Select(frame => new ZFrame(new ZSegment(frame, 0, frame.Length)))]));
 
     public static ZMessage PooledMultipart(MemoryPool<byte> pool, params byte[][] frames)
     {
@@ -174,7 +174,7 @@ internal static class MessageFactory
         {
             var owner = pool.Rent(frame.Length);
             frame.CopyTo(owner.Memory);
-            refs.Add(new ZFrame(new ZSegment(owner, owner.Memory[..frame.Length])));
+            refs.Add(new ZFrame(new ZSegment(owner, 0, frame.Length)));
         }
 
         return new ZMessage(new ZMultiMessage([.. refs]));

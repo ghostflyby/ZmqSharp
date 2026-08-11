@@ -415,11 +415,15 @@ public sealed class ZmtpParser : IDisposable
                 return;
             }
 
-            var frame = new ZFrame(
-                new ZSegment(
-                    ZSegment.NoopOwner,
-                    scratch[scratchUsed..(scratchUsed + length)]),
-                more);
+            // The borrowed segment refers to the scratch owner without taking
+            // ownership; EnsureScratchCapacity guarantees the owner is live for
+            // the duration of this frame's delivery (0006 3.4).
+            if (scratchOwner is not { } source)
+            {
+                throw new InvalidOperationException("borrowed frame without scratch owner");
+            }
+
+            var frame = new ZFrame(ZSegment.Borrowed(source, scratchUsed, length), more);
             var keepGoing = await connection.OnFrameAsync(frame, token);
             if (!keepGoing)
             {

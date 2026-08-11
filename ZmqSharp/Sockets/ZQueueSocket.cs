@@ -277,7 +277,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             var poolOwner = Pool.Rent(borrowed.Memory.Length);
             borrowed.Memory.CopyTo(poolOwner.Memory);
             state.Accumulator.Add(new ZFrame(
-                new ZSegment(poolOwner, poolOwner.Memory[..borrowed.Memory.Length]),
+                new ZSegment(poolOwner, 0, borrowed.Memory.Length),
                 frame.More));
         }
 
@@ -394,16 +394,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private void Reject(ZReceiveRejectionReason reason, long? limit, long? actual)
         => Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
 
-    private (object Owner, Memory<byte> Memory) Allocate(ZReceiveMode mode, int length)
+    private (object Owner, int Length) Allocate(ZReceiveMode mode, int length)
     {
         if (mode == ZReceiveMode.Owned)
         {
             var buffer = GC.AllocateUninitializedArray<byte>(length);
-            return (buffer, buffer);
+            return (buffer, length);
         }
 
         var owner = Pool.Rent(length);
-        return (owner, owner.Memory[..length]);
+        return (owner, length);
     }
 
     private ZFrame AllocateSegments(
@@ -419,16 +419,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             for (var i = 0; i < count; i++)
             {
                 var blockLength = Math.Min(SegmentBlockSize, length - offset);
-                var (owner, memory) = Allocate(allocation.Mode, blockLength);
-                segments[i] = new ZSegment(owner, memory);
+                var (owner, _) = Allocate(allocation.Mode, blockLength);
+                segments[i] = new ZSegment(owner, 0, blockLength);
                 offset += blockLength;
             }
 
             return new ZFrame(new ZSegments(segments), more);
         }
 
-        var (singleOwner, singleMemory) = Allocate(allocation.Mode, length);
-        return new ZFrame(new ZSegment(singleOwner, singleMemory), more);
+        var (singleOwner, _) = Allocate(allocation.Mode, length);
+        return new ZFrame(new ZSegment(singleOwner, 0, length), more);
     }
 
     private bool AnyPeerHasItems()

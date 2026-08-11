@@ -93,7 +93,7 @@ public sealed class ZMessageTests
     {
         using var pool = new CountingMemoryPool();
         var owner = pool.Rent(4);
-        var single = new ZSingleMessage(new ZFrame(new ZSegment(owner, owner.Memory[..4])));
+        var single = new ZSingleMessage(new ZFrame(new ZSegment(owner, 0, 4)));
 
         single.Dispose();
         single.Dispose();
@@ -108,8 +108,8 @@ public sealed class ZMessageTests
         var firstOwner = pool.Rent(4);
         var secondOwner = pool.Rent(4);
         ZFrame[] frames = [
-            new ZFrame(new ZSegment(firstOwner, firstOwner.Memory[..4])),
-            new ZFrame(new ZSegment(secondOwner, secondOwner.Memory[..4])),
+            new ZFrame(new ZSegment(firstOwner, 0, 4)),
+            new ZFrame(new ZSegment(secondOwner, 0, 4)),
         ];
         var multi = new ZMultiMessage(frames);
 
@@ -147,6 +147,30 @@ public sealed class ZMessageTests
         segment.GetOwnedArray(out var array).Should().BeTrue();
         array.Should().BeSameAs(source);
         message.Dispose();
+    }
+
+    [Fact]
+    public void Segment_SlicedOwned_RetainsOffsetView()
+    {
+        // An owned segment with a nonzero offset views a slice of the backing
+        // array: content is the window, the owner is the same array (0006 3.4).
+        byte[] source = [0, 1, 2, 3, 4, 5];
+        var segment = new ZSegment(source, 2, 3);
+
+        segment.Memory.ToArray().Should().Equal([2, 3, 4]);
+        segment.GetOwnedArray(out var array).Should().BeTrue();
+        array.Should().BeSameAs(source);
+
+        // The view aliases the array: mutating the source is visible.
+        source[2] = 9;
+        segment.Memory.Span[0].Should().Be(9);
+    }
+
+    [Fact]
+    public void Segment_Empty_LengthZero()
+    {
+        var segment = new ZSegment(new byte[8], 4, 0);
+        segment.Memory.IsEmpty.Should().BeTrue();
     }
 
     [Fact]
@@ -235,7 +259,7 @@ public sealed class ZMessageTests
     public void ImplicitConversion_SegmentToFrame()
     {
         byte[] data = [1, 2, 3];
-        ZFrame frame = new ZSegment(data, data);
+        ZFrame frame = new ZSegment(data, 0, data.Length);
 
         frame.TryGetValue(out ZSegment segment).Should().BeTrue();
         segment.Memory.ToArray().Should().Equal(data);

@@ -212,22 +212,27 @@ Completion gate:
 
 ### 3.4 Segment location storage
 
-Refactor `ZSegment` without adding a reference-type lifetime abstraction:
+Implemented:
 
-- Owned storage retains the `byte[]` owner, a relative offset, and a length.
-- Pooled storage retains the existing `IMemoryOwner<byte>`, a relative offset,
-  and a length.
-- Borrowed storage refers to the parser's existing scratch source without
-  taking ownership of it, plus a relative offset and length.
-- `Memory` and writable internal access reacquire the concrete memory from the
-  array or owner and then slice it.
-- `Dispose` continues to dispose only a pooled owner owned by that segment.
-- Owner-specific behavior after disposal is neither caught nor normalized.
-
-Tests must cover multiple underlying owner behaviors rather than asserting a
-single universal post-disposal exception. Existing design document 0005 must
-be amended or superseded where it specifies a no-op borrowed owner or universal
-idempotence beyond the underlying owner contract.
+- `ZSegment` stores the owner/source (`byte[]` or `IMemoryOwner<byte>`), a
+  relative offset, and a length - no `Memory<byte>` field. `Memory` and the
+  internal writable view reacquire the concrete memory from the owner on
+  every call and slice it (`byte[]` returns the array; a pooled owner returns
+  its `Memory`).
+- Borrowed segments refer to the parser's existing scratch owner
+  (`IMemoryOwner<byte>`) with an `IsBorrowed` flag and `Dispose` skips them;
+  the no-op sentinel owner was removed. `Dispose` releases only a pooled
+  owner actually owned by the segment; owner-specific behavior after disposal
+  is neither caught nor normalized (0005 section 2.1).
+- No new per-message or per-segment reference object was introduced; the
+  layout stays four value fields.
+- 0005 was amended: the contiguous-case bullet, the ownership matrix borrowed
+  row, and the impact/parser-encoder bullets now describe the scratch-source
+  + `IsBorrowed` model instead of the no-op owner.
+- Tests: the existing owned/pooled/borrowed/segmented assertions (including
+  the parser borrowed-offset path) pass unchanged, and new tests cover a
+  sliced owned segment retaining its offset view with array identity and
+  aliasing, and an empty zero-length segment.
 
 Completion gate:
 

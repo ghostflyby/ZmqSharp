@@ -26,7 +26,7 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
     public static ZMessage FromOwned(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        return new ZMessage(new ZSingleMessage(new ZFrame(new ZSegment(data, data))));
+        return new ZMessage(new ZSingleMessage(new ZFrame(new ZSegment(data, 0, data.Length))));
     }
 
     public bool TryGetValue(out ZSingleMessage singleMessage)
