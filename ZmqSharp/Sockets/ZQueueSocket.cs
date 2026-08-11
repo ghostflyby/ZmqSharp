@@ -220,6 +220,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             catch (OperationCanceledException)
             {
             }
+            catch (Exception failure)
+            {
+                // The pump's failure is surfaced to producers through the
+                // outbound channel's completion (0006 3.5); disposal must not
+                // fault on that propagation. TryComplete is idempotent - when
+                // the pump already completed the channel with this failure it
+                // is a no-op, and when the failure came from elsewhere it is
+                // surfaced here.
+                sendChannel?.Writer.TryComplete(failure);
+            }
         }
 
         await AwaitBackgroundAsync();
