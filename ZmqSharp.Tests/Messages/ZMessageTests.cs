@@ -294,6 +294,89 @@ public sealed class ZMessageTests
     }
 
     [Fact]
+    public void PerCaseEnumerators_IterateAndGuard()
+    {
+        // The case enumerators (ZSingleMessage.Enumerator / ZMultiMessage.Enumerator)
+        // are the structs behind the wrapper; exercise them directly.
+        var single = MessageFactory.SingleFrame([1, 2, 3]);
+        single.TryGetValue(out ZSingleMessage singleMsg).Should().BeTrue();
+        var singleEnum = singleMsg.GetEnumerator();
+        FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
+        singleEnum.MoveNext().Should().BeTrue();
+        singleEnum.Current.ToSequence().ToArray().Should().Equal([1, 2, 3]);
+        singleEnum.MoveNext().Should().BeFalse();
+        FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
+        singleEnum.Reset();
+        singleEnum.MoveNext().Should().BeTrue();
+        single.Dispose();
+
+        var multi = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        multi.TryGetValue(out ZMultiMessage multiMsg).Should().BeTrue();
+        var multiEnum = multiMsg.GetEnumerator();
+        FluentActions.Invoking(() => multiEnum.Current).Should().Throw<InvalidOperationException>();
+        var frames = new List<byte[]>();
+        while (multiEnum.MoveNext())
+        {
+            frames.Add(multiEnum.Current.ToSequence().ToArray());
+        }
+
+        frames.Should().HaveCount(2);
+        FluentActions.Invoking(() => multiEnum.Current).Should().Throw<InvalidOperationException>();
+        multiEnum.Reset();
+        multiEnum.MoveNext().Should().BeTrue();
+
+        // IReadOnlyList<T>.GetEnumerator routes to the case enumerators.
+        var explicitSingle = ((IEnumerable<ZFrame>)singleMsg).GetEnumerator();
+        explicitSingle.MoveNext().Should().BeTrue();
+        explicitSingle.Dispose();
+        var explicitMulti = ((IEnumerable<ZFrame>)multiMsg).GetEnumerator();
+        explicitMulti.MoveNext().Should().BeTrue();
+        explicitMulti.Dispose();
+
+        single.Dispose();
+        multi.Dispose();
+    }
+
+    [Fact]
+    public void Enumerators_ResetAndBoundaryBehavior()
+    {
+        // Single-message enumerator: exactly one element, then exhaustion;
+        // Current before start or after end throws.
+        var single = MessageFactory.SingleFrame([1, 2, 3]);
+        var singleEnum = single.GetEnumerator();
+        FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
+        singleEnum.MoveNext().Should().BeTrue();
+        singleEnum.Current.ToSequence().ToArray().Should().Equal([1, 2, 3]);
+        singleEnum.MoveNext().Should().BeFalse();
+        FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
+        singleEnum.Reset();
+        singleEnum.MoveNext().Should().BeTrue();
+        single.Dispose();
+
+        // Multi-message enumerator: Reset restarts iteration.
+        var multi = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        var multiEnum = multi.GetEnumerator();
+        multiEnum.MoveNext().Should().BeTrue();
+        multiEnum.MoveNext().Should().BeTrue();
+        multiEnum.MoveNext().Should().BeFalse();
+        multiEnum.Reset();
+        var frames = new List<byte[]>();
+        while (multiEnum.MoveNext())
+        {
+            frames.Add(multiEnum.Current.ToSequence().ToArray());
+        }
+
+        frames.Should().HaveCount(2);
+        frames[0].Should().Equal("a"u8.ToArray());
+        frames[1].Should().Equal("b"u8.ToArray());
+        multi.Dispose();
+
+        // Index out of range throws on both cases.
+        FluentActions.Invoking(() => single[1]).Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => multi[2]).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public void ImplicitConversion_MultiToMessage()
     {
         var message = MessageFactory.Multipart("ab"u8.ToArray(), "cde"u8.ToArray());
