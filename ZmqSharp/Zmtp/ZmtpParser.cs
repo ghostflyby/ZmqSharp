@@ -127,7 +127,16 @@ public sealed class ZmtpParser : IDisposable
 
         if (span[10] < 3)
         {
-            throw new ZeroMqProtocolException("unsupported ZMTP version");
+            // Greeting revision 0 = ZMTP 1.0, revision 1 = ZMTP 2.0. The whole
+            // maintained ZeroMQ ecosystem is on ZMTP 3.0/3.1, so legacy peers
+            // are rejected explicitly rather than negotiated down (libzmq
+            // itself only keeps the legacy paths for backward compatibility).
+            throw new ZeroMqProtocolException(span[10] switch
+            {
+                0 => "ZMTP 1.0 peers are not supported; only ZMTP 3.0 is implemented",
+                1 => "ZMTP 2.0 peers are not supported; only ZMTP 3.0 is implemented",
+                _ => "unsupported ZMTP version",
+            });
         }
 
         if (!IsNullMechanism(span[12..32]))

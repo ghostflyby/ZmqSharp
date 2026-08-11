@@ -179,9 +179,13 @@ protocol-limit error is appropriate.
 
 The receive-side limits (maximum frame size, maximum accumulated message size,
 maximum frames per message) are implemented per 0008 Slice A with checked
-accounting and terminal rejection. The remaining explicit options - maximum
-command size (0008 Slice B), greeting and handshake timeout, and maximum
-concurrent incomplete handshakes - are not yet implemented.
+accounting and terminal rejection. The remaining explicit options are
+implemented: maximum command size (0008 Slice B), the greeting/handshake
+timeout (`ZSocketOptions.HandshakeTimeoutMs`, default 30 s, enforced around
+`EstablishAsync`), and the maximum concurrent incomplete handshakes on the
+inbound surface (`ZSocketOptions.MaxIncompleteHandshakes`, default 1024,
+dropping excess slow-connecting accepted peers with cancellation; outbound
+ConnectAsync is caller-initiated and not gated).
 
 Completion gate:
 

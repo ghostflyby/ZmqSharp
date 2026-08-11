@@ -12,6 +12,8 @@ public sealed class ZSocketOptions
     public const int MinMaxCommandSize = 256;
 
     private int maxCommandSize = Zmtp.ZmtpParser.DefaultMaxCommandSize;
+    private int handshakeTimeoutMs = 30_000;
+    private int maxIncompleteHandshakes = 1024;
 
     /// <summary>
     /// Memory pool used for the send copy path; defaults to the shared pool.
@@ -33,6 +35,37 @@ public sealed class ZSocketOptions
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(value, MinMaxCommandSize);
             maxCommandSize = value;
+        }
+    }
+
+    /// <summary>
+    /// ZMTP handshake timeout in milliseconds (0006 3.2); a peer that does not
+    /// complete the greeting/READY exchange within this window faults its
+    /// establishment. Default 30 s. Zero disables the timeout.
+    /// </summary>
+    public int HandshakeTimeoutMs
+    {
+        get => handshakeTimeoutMs;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            handshakeTimeoutMs = value;
+        }
+    }
+
+    /// <summary>
+    /// Maximum concurrently incomplete handshakes on the inbound (accepted)
+    /// surface (0006 3.2). A slow-connecting flood beyond this is dropped with
+    /// cancellation. Default 1024; zero disables the limit. Outbound
+    /// ConnectAsync is caller-initiated and not gated.
+    /// </summary>
+    public int MaxIncompleteHandshakes
+    {
+        get => maxIncompleteHandshakes;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            maxIncompleteHandshakes = value;
         }
     }
 }

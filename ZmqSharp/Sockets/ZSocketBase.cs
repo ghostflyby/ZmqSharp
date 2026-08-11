@@ -34,6 +34,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly Dictionary<IZConnection, PeerAccumulator> accumulators = [];
     private readonly int maxCommandSize;
     private readonly IPatternCore core;
+    private readonly int handshakeTimeoutMs;
+    private readonly int maxIncompleteHandshakes;
+    private int incompleteHandshakes;
     private ZFrameHandler? onFrame;
     private IPatternSink? messageSink;
     private Action<IZConnection>? peerConnected;
@@ -54,6 +57,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ArgumentNullException.ThrowIfNull(core);
         this.core = core;
         maxCommandSize = options.MaxCommandSize;
+        handshakeTimeoutMs = options.HandshakeTimeoutMs;
+        maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
     }
 
     /// <summary>The composed pattern core (composition roots access it for pattern operations).</summary>
@@ -313,6 +318,22 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         => core.RouteOutbound(message, peerSnapshot.AsSpan());
 
     /// <summary>
+    /// Establishes the ZMTP handshake within <c>HandshakeTimeoutMs</c> (0006
+    /// 3.2); a timed-out handshake faults the establishment with a
+    /// <see cref="TimeoutException"/>.
+    /// </summary>
+    private async Task<bool> EstablishWithTimeoutAsync(ZmtpParser parser, CancellationToken token)
+    {
+        if (handshakeTimeoutMs > 0)
+        {
+            return await parser.EstablishAsync(token).AsTask().WaitAsync(
+                TimeSpan.FromMilliseconds(handshakeTimeoutMs), token);
+        }
+
+        return await parser.EstablishAsync(token);
+    }
+
+    /// <summary>
     /// Directed send to a specific connection (0007 section 2.1 primitive,
     /// used by REP reply routing and ROUTER identity addressing). The message
     /// is disposed after the send, exactly once.
@@ -386,6 +407,18 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 allocator = materializer.CreateAllocator();
             }
 
+            // Inbound (accepted) connections are the uncontrolled surface: cap
+            // the number of incomplete handshakes so a slow-connecting flood
+            // cannot exhaust resources (0006 3.2). Outbound ConnectAsync is
+            // caller-initiated and not gated.
+            if (endpoint is null && maxIncompleteHandshakes > 0 && incompleteHandshakes >= maxIncompleteHandshakes)
+            {
+                connection.Dispose();
+                established.TrySetCanceled();
+                return established;
+            }
+
+            incompleteHandshakes++;
             establishedGates[connection] = established;
             // Register before the pump starts. Sends block on the establishment
             // gate until the handshake completes, and DisconnectAsync must
@@ -422,7 +455,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             await connection.WriteAsync(
                 ZmtpFrameEncoder.BuildHandshake(ZmtpCommands.BuildReady(core.SocketTypeName)),
                 attemptToken);
-            if (await parser.EstablishAsync(attemptToken))
+            if (await EstablishWithTimeoutAsync(parser, attemptToken))
             {
                 var peerType = parser.PeerSocketType;
                 if (peerType is null || !IsCompatibleSocketType(core.SocketTypeName, peerType))
@@ -483,6 +516,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 PublishRemove(connection);
                 establishedGates.Remove(connection);
                 attemptTokens.Remove(connection);
+                incompleteHandshakes--;
                 if (accumulators.Remove(connection, out accumulator))
                 {
                     // The peer ended mid-message: owning frames accumulated for

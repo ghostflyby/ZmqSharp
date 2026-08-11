@@ -454,6 +454,78 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task HandshakeTimeout_FaultsEstablishment()
+    {
+        // A peer that never answers the greeting/READY exchange exceeds the
+        // configured handshake timeout and faults its establishment (0006 3.2).
+        using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+
+        await using var client = ZSocket.CreatePairCallback(new ZSocketOptions { HandshakeTimeoutMs = 200 });
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
+
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        // Read the client's greeting but never respond.
+        await raw.GetStream().ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        var failure = await Record.ExceptionAsync(() => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        failure.Should().NotBeNull();
+        (failure is TimeoutException or OperationCanceledException).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MaxIncompleteHandshakes_DropsExcessInboundPeers()
+    {
+        // The inbound surface caps concurrent incomplete handshakes; a second
+        // slow-connecting peer is dropped with cancellation (0006 3.2).
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { MaxIncompleteHandshakes = 1 });
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}");
+
+        using var first = new TcpClient();
+        await first.ConnectAsync(IPAddress.Loopback, port);
+        var firstStream = first.GetStream();
+        await firstStream.WriteAsync(ZmtpTestData.Greeting());
+        await firstStream.FlushAsync();
+
+        // The second accepted connection exceeds the cap and is dropped.
+        using var second = new TcpClient();
+        await second.ConnectAsync(IPAddress.Loopback, port);
+        var secondStream = second.GetStream();
+        // Give the server time to accept and reject the second peer.
+        await Task.Delay(300);
+        // The second peer's greeting never receives a READY back; the socket
+        // read eventually returns 0 (EOF) once the server closes it.
+        var probe = await secondStream.ReadAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        probe.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task LegacyZmtp2_Greeting_RejectedWithClearError()
+    {
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback();
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}");
+
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, port);
+        var stream = raw.GetStream();
+
+        // ZMTP 2.0 greeting: signature plus revision byte 0x01.
+        var v2Greeting = ZmtpTestData.Greeting();
+        v2Greeting[10] = 1;
+        await stream.WriteAsync(v2Greeting);
+        await stream.FlushAsync();
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        failure.Should().BeOfType<ZeroMqProtocolException>();
+        failure.Message.Should().Contain("ZMTP 2.0 peers are not supported");
+    }
+
+    [Fact]
     public async Task OversizedCommand_WithSmallMaxCommandSize_RejectsPeer()
     {
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
