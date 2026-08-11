@@ -1607,11 +1607,15 @@ public sealed class ZSocketTests
     }
 
     [Fact]
-    public async Task ReceivePath_TryRead_NoPerMessageHeapAllocation()
+    public async Task ReceivePath_AggregateDrain_DoesNotAllocatePerMessage()
     {
-        // The aggregate read hot path must not allocate per message: the
-        // peer snapshot is a single volatile load, so TryRead does not build
-        // a peer list on each call (0006 3.6).
+        // The aggregate drain hot path must not allocate per message: the
+        // peer snapshot is a single volatile load and TryRead returns an
+        // already-materialized message, so draining the reader allocates
+        // nothing (0006 3.6). This measures the caller's drain side only:
+        // the receiving pump thread's own allocations (parse + materialize)
+        // are sampled inside the pump in ZmqSharp.AllocationTests, because a
+        // counter read on this test thread never sees that thread.
         using var pool = new CountingMemoryPool();
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
