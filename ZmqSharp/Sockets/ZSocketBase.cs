@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using ZmqSharp.Messages;
@@ -35,9 +36,16 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly IPatternCore core;
     private ZFrameHandler? onFrame;
     private IPatternSink? messageSink;
-    private Func<IZConnection, ZFrameAllocator>? allocatorFactory;
     private Action<IZConnection>? peerConnected;
     private Action<IZConnection, Exception?>? peerEnded;
+
+    // Receive materialization (0007 2.1): allocation policy and the 0008 guard
+    // limits, applied per connection by a ReceiveMaterializer.
+    private IZReceivePolicy? receivePolicy;
+    private long maxFrameLength = long.MaxValue;
+    private long maxMessageLength = long.MaxValue;
+    private int maxFramesPerMessage = int.MaxValue;
+    private long receiveRejections;
 
     internal ZSocketBase(ZSocketOptions options, IPatternCore core)
         : base(options.Pool)
@@ -141,24 +149,36 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     }
 
     /// <summary>
-    /// Registers a per-peer frame allocator factory; must be called before any
-    /// connection is established.
-    /// When set, the parser materializes each frame
-    /// directly into the allocated buffer instead of the borrowed scratch.
+    /// Configures receive materialization for the transport core (0007 2.1):
+    /// the allocation policy and the connection-level limits (0008 D1) applied
+    /// per connection by a <see cref="ReceiveMaterializer"/>. Must be called
+    /// before any connection is established.
     /// </summary>
-    internal void SetFrameAllocator(Func<IZConnection, ZFrameAllocator> factory)
+    internal void SetReceiveMaterialization(
+        IZReceivePolicy policy,
+        long maxFrameLength,
+        long maxMessageLength,
+        int maxFramesPerMessage)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(policy);
         lock (StateLock)
         {
             if (peerSnapshot.Length > 0)
             {
-                throw new InvalidOperationException("frame allocator must be set before connections are established");
+                throw new InvalidOperationException("receive materialization must be set before connections are established");
             }
 
-            allocatorFactory = factory;
+            receivePolicy = policy;
+            this.maxFrameLength = maxFrameLength;
+            this.maxMessageLength = maxMessageLength;
+            this.maxFramesPerMessage = maxFramesPerMessage;
         }
     }
+
+    /// <summary>Total frames rejected by the receive materialization since construction.</summary>
+    internal long ReceiveRejectionsCount => Volatile.Read(ref receiveRejections);
+
+    private void OnMaterializerRejected() => Interlocked.Increment(ref receiveRejections);
 
     public async Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
@@ -299,7 +319,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint, CancellationToken token = default)
     {
-        ZFrameAllocator? allocator;
+        ReceiveMaterializer? materializer = null;
+        ZFrameAllocator? allocator = null;
         var established = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (StateLock)
         {
@@ -313,7 +334,13 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 return established;
             }
 
-            allocator = allocatorFactory?.Invoke(connection);
+            if (receivePolicy is { } policy)
+            {
+                materializer = new ReceiveMaterializer(
+                    Pool, policy, maxFrameLength, maxMessageLength, maxFramesPerMessage, OnMaterializerRejected);
+                allocator = materializer.CreateAllocator();
+            }
+
             establishedGates[connection] = established;
             // Register before the pump starts. Sends block on the establishment
             // gate until the handshake completes, and DisconnectAsync must
@@ -323,7 +350,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
 
         var parser = new ZmtpParser(connection, allocator, Pool, maxCommandSize);
-        var handler = messageSink is null ? BorrowedSink(parser) : MessageSinkHandler(connection, parser);
+        var handler = messageSink is null ? BorrowedSink(parser) : MessageSinkHandler(connection, parser, materializer);
         connection.SetFrameHandler((frame, _) => handler(frame, Cts.Token));
 
         var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(Cts.Token, token);
@@ -503,16 +530,19 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// Aggregates a peer's frames into complete messages for the message sink
     /// (0007 section 2.3). A borrowed frame is copied into a pooled buffer
     /// before it is retained, mirroring the queue surface's previous
-    /// accumulation path.
+    /// accumulation path. The receive materializer's guard counters reset at
+    /// each message boundary.
     /// </summary>
     private sealed class PeerAccumulator
     {
         public List<ZFrame> Frames { get; } = [];
+
+        public ReceiveMaterializer? Materializer { get; init; }
     }
 
-    private ZFrameHandlerAsync MessageSinkHandler(IZConnection connection, ZmtpParser parser)
+    private ZFrameHandlerAsync MessageSinkHandler(IZConnection connection, ZmtpParser parser, ReceiveMaterializer? materializer)
     {
-        var accumulator = new PeerAccumulator();
+        var accumulator = new PeerAccumulator { Materializer = materializer };
         lock (StateLock)
         {
             accumulators[connection] = accumulator;
@@ -552,6 +582,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
         var message = BuildMessage(accumulator.Frames);
         accumulator.Frames.Clear();
+        accumulator.Materializer?.Reset();
         await messageSink!.OnMessageAsync(connection, message, token);
         return true;
     }
@@ -564,6 +595,116 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
 
         return new ZMessage(new ZMultiMessage([.. frames]));
+    }
+
+    /// <summary>
+    /// Per-connection receive materialization (0007 2.1): allocation decisions
+    /// via the receive policy plus the connection-level limits (0008 D1),
+    /// enforced before any allocation. Frame/message guard counters advance per
+    /// frame and reset at each message boundary (a message in excess is
+    /// rejected, never leaked into the next message).
+    /// </summary>
+    private sealed class ReceiveMaterializer(
+        MemoryPool<byte> pool,
+        IZReceivePolicy policy,
+        long maxFrameLength,
+        long maxMessageLength,
+        int maxFramesPerMessage,
+        Action onRejected)
+    {
+        private const int SegmentBlockSize = 8192;
+
+        private int frameIndex;
+        private long accumulatedLength;
+
+        public ZFrameAllocator CreateAllocator() => (length, more) =>
+        {
+            var frameIndex = this.frameIndex;
+            if (!ZReceiveGuard.TryAccumulate(accumulatedLength, length, out var accumulated))
+            {
+                // An unrepresentable message total is a rejection, never an
+                // arithmetic exception (0008 D3/D6).
+                Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
+            }
+
+            this.frameIndex = frameIndex + 1;
+            accumulatedLength = accumulated;
+
+            // Connection-level limits are enforced here, before any allocation,
+            // so a custom policy can never bypass them (0008 D1).
+            if (ZReceiveGuard.CheckLimits(
+                    length,
+                    accumulated,
+                    frameIndex,
+                    maxFrameLength,
+                    maxMessageLength,
+                    maxFramesPerMessage) is { } rejection)
+            {
+                Reject(rejection);
+            }
+
+            var allocation = policy.Decide(new ZReceiveContext
+            {
+                FrameLength = length,
+                HasMore = more,
+                FrameIndex = frameIndex,
+                AccumulatedLength = accumulated,
+            });
+            return AllocateSegments(allocation, length, more);
+        };
+
+        /// <summary>Resets the guard counters at a message boundary.</summary>
+        public void Reset()
+        {
+            frameIndex = 0;
+            accumulatedLength = 0;
+        }
+
+        private void Reject(ZReceiveRejection rejection)
+        {
+            onRejected();
+            throw new ZReceiveRejectedException(rejection);
+        }
+
+        private void Reject(ZReceiveRejectionReason reason, long? limit, long? actual)
+            => Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
+
+        private (object Owner, int Length) Allocate(ZReceiveMode mode, int length)
+        {
+            if (mode == ZReceiveMode.Owned)
+            {
+                var buffer = GC.AllocateUninitializedArray<byte>(length);
+                return (buffer, length);
+            }
+
+            var owner = pool.Rent(length);
+            return (owner, length);
+        }
+
+        private ZFrame AllocateSegments(
+            ZReceiveAllocation allocation,
+            int length,
+            bool more)
+        {
+            if (allocation.Segmented && length > SegmentBlockSize)
+            {
+                var count = (length + SegmentBlockSize - 1) / SegmentBlockSize;
+                var segments = new ZSegment[count];
+                var offset = 0;
+                for (var i = 0; i < count; i++)
+                {
+                    var blockLength = Math.Min(SegmentBlockSize, length - offset);
+                    var (owner, _) = Allocate(allocation.Mode, blockLength);
+                    segments[i] = new ZSegment(owner, 0, blockLength);
+                    offset += blockLength;
+                }
+
+                return new ZFrame(new ZSegments(segments), more);
+            }
+
+            var (singleOwner, _) = Allocate(allocation.Mode, length);
+            return new ZFrame(new ZSegment(singleOwner, 0, length), more);
+        }
     }
 
     private void RaisePeerEnded(IZConnection connection, Exception? failure)

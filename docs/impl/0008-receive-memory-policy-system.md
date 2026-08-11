@@ -35,12 +35,12 @@ implemented yet.
 
 ## 1. Context
 
-The queue tier materializes each message through a per-frame decision hook
-(0003):
+The transport core materializes each message through a per-frame decision
+hook (0003), held in its per-connection `ReceiveMaterializer`:
 
 ```text
-ZQueueSocket.CreateAllocator
-  -> DecideAllocation (builds ZReceiveContext, calls IZReceivePolicy.Decide)
+ZSocketBase.ReceiveMaterializer.CreateAllocator
+  -> policy.Decide (builds ZReceiveContext, calls IZReceivePolicy.Decide)
   -> AllocateSegments (Pool.Rent or GC.AllocateUninitializedArray)
 ```
 
@@ -272,9 +272,11 @@ Required work:
   `ZDelegateReceivePolicy`.
 - Add `MaxFrameLength`, `MaxMessageLength`, `MaxFramesPerMessage` to
   `ZQueueSocketOptions` with the fixed-order evaluation (D1/§4) and enforce
-  them with a connection-level guard in `CreateAllocator`.
-- Add checked accumulation (`checked(AccumulatedLength + length)`) in
-  `CreateAllocator`; overflow maps to `MessageTooLarge`.
+  them with a connection-level guard in the transport core's
+  `ReceiveMaterializer.CreateAllocator`.
+- Add checked accumulation (`checked(AccumulatedLength + length)`) in the
+  materializer's allocator; overflow maps to `MessageTooLarge`. The guard
+  counters reset at each message boundary.
 - Plumb rejection out of the allocator so the parser skips the body read:
   the allocator throws an internal `ZReceiveRejectedException(rejection)`,
   which propagates as the connection failure. No ERROR frame is sent for

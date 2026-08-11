@@ -517,6 +517,49 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task MessageLimit_ResetsPerMessage_AcrossManyMessages()
+    {
+        // The 0008 guard counters must reset at each message boundary: sending
+        // many small messages under a tight MaxMessageLength must not
+        // accumulate a total across messages and falsely reject (the counters
+        // live in the transport core's per-peer materializer).
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            MaxMessageLength = 10,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+        });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        const int count = 20;
+        for (var i = 0; i < count; i++)
+        {
+            await client.SendAsync(ZMessage.FromOwned("ab"u8.ToArray()), cts.Token);
+        }
+
+        var received = 0;
+        for (var attempt = 0; attempt < 50 && received < count; attempt++)
+        {
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            if (message is not null)
+            {
+                message.Value.Dispose();
+                received++;
+            }
+        }
+
+        received.Should().Be(count);
+        server.ReceiveRejections.Should().Be(0);
+    }
+
+    [Fact]
     public async Task OnFrameSubscription_AfterMessageSinkBinding_Throws()
     {
         // The raw frame surface and the message sink are mutually exclusive
