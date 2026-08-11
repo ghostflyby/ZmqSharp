@@ -27,9 +27,13 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly Dictionary<IZConnection, TaskCompletionSource> establishedGates = [];
     private readonly Dictionary<IZConnection, CancellationTokenSource> attemptTokens = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
+
+    /// <summary>Per-peer frame accumulators for message aggregation (0007 2.3).</summary>
+    private readonly Dictionary<IZConnection, PeerAccumulator> accumulators = [];
     private ZFrameHandler? onFrame;
-    private Func<IZConnection, ZFrameHandlerAsync>? frameSinkFactory;
+    private IPatternSink? messageSink;
     private Func<IZConnection, ZFrameAllocator>? allocatorFactory;
+    private Action<IZConnection>? peerConnected;
     private Action<IZConnection, Exception?>? peerEnded;
 
     protected ZSocketBase(ZSocketOptions options)
@@ -50,6 +54,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         {
             lock (StateLock)
             {
+                // Exactly one consumer of the delivery stream (0007 section 1):
+                // a message sink is mutually exclusive with the raw frame
+                // surface on the same instance.
+                if (messageSink is not null)
+                {
+                    throw new InvalidOperationException("cannot subscribe to OnFrame after a message sink is bound");
+                }
+
                 onFrame += value;
             }
         }
@@ -90,21 +102,41 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     }
 
     /// <summary>
-    /// Replaces the shared OnFrame delivery with a per-peer async sink factory.
-    /// Must be called before any connection is established; each peer then
-    /// gets its own frame handler.
+    /// Registers a per-peer connection callback for the message-sink surface
+    /// (creates the surface's per-connection state, e.g. the queue surface's
+    /// PeerState); must be called before any connection is established.
     /// </summary>
-    public void SetFrameSink(Func<IZConnection, ZFrameHandlerAsync> factory)
+    internal void SetPeerConnectedHandler(Action<IZConnection> handler)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(handler);
         lock (StateLock)
         {
             if (peerSnapshot.Length > 0)
             {
-                throw new InvalidOperationException("frame sink must be set before connections are established");
+                throw new InvalidOperationException("peer connected handler must be set before connections are established");
             }
 
-            frameSinkFactory = factory;
+            peerConnected = handler;
+        }
+    }
+
+    /// <summary>
+    /// Binds the semantic delivery seam (0007 section 2.3): the transport core
+    /// aggregates complete messages and delivers them to the sink, per peer and
+    /// serialized. Must be called before any connection is established. A bound
+    /// sink is mutually exclusive with the raw <see cref="OnFrame"/> surface.
+    /// </summary>
+    public void BindMessageSink(IPatternSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        lock (StateLock)
+        {
+            if (peerSnapshot.Length > 0)
+            {
+                throw new InvalidOperationException("message sink must be bound before connections are established");
+            }
+
+            messageSink = sink;
         }
     }
 
@@ -287,11 +319,12 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             // gate until the handshake completes, and DisconnectAsync must
             // always be able to find the peer to cancel the in-flight attempt.
             PublishAdd(connection, endpoint);
+            peerConnected?.Invoke(connection);
         }
 
         var parser = new ZmtpParser(connection, allocator, Pool);
-        var sink = frameSinkFactory?.Invoke(connection) ?? BorrowedSink(parser);
-        connection.SetFrameHandler((frame, _) => sink(frame, Cts.Token));
+        var handler = messageSink is null ? BorrowedSink(parser) : MessageSinkHandler(connection, parser);
+        connection.SetFrameHandler((frame, _) => handler(frame, Cts.Token));
 
         var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(Cts.Token, token);
         lock (StateLock)
@@ -372,11 +405,21 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         finally
         {
             // Internal state first: a failing callback must not leave the peer routable.
+            PeerAccumulator? accumulator = null;
             lock (StateLock)
             {
                 PublishRemove(connection);
                 establishedGates.Remove(connection);
                 attemptTokens.Remove(connection);
+                if (accumulators.Remove(connection, out accumulator))
+                {
+                    // The peer ended mid-message: owning frames accumulated for
+                    // the incomplete message have no consumer and must not leak.
+                    foreach (var frame in accumulator.Frames)
+                    {
+                        frame.Dispose();
+                    }
+                }
             }
 
             try
@@ -454,6 +497,73 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
 
         return keepGoing;
+    }
+
+    /// <summary>
+    /// Aggregates a peer's frames into complete messages for the message sink
+    /// (0007 section 2.3). A borrowed frame is copied into a pooled buffer
+    /// before it is retained, mirroring the queue surface's previous
+    /// accumulation path.
+    /// </summary>
+    private sealed class PeerAccumulator
+    {
+        public List<ZFrame> Frames { get; } = [];
+    }
+
+    private ZFrameHandlerAsync MessageSinkHandler(IZConnection connection, ZmtpParser parser)
+    {
+        var accumulator = new PeerAccumulator();
+        lock (StateLock)
+        {
+            accumulators[connection] = accumulator;
+        }
+
+        return (frame, _) => OnMessageSinkFrameAsync(connection, accumulator, frame, Cts.Token);
+    }
+
+    private async ValueTask<bool> OnMessageSinkFrameAsync(
+        IZConnection connection,
+        PeerAccumulator accumulator,
+        ZFrame frame,
+        CancellationToken token)
+    {
+        if (frame.TryGetValue(out ZSegments segments))
+        {
+            accumulator.Frames.Add(new ZFrame(segments, frame.More));
+        }
+        else if (frame.TryGetValue(out ZSegment segment) && !segment.IsBorrowed)
+        {
+            accumulator.Frames.Add(new ZFrame(segment, frame.More));
+        }
+        else
+        {
+            frame.TryGetValue(out ZSegment borrowed);
+            var poolOwner = Pool.Rent(borrowed.Memory.Length);
+            borrowed.Memory.CopyTo(poolOwner.Memory);
+            accumulator.Frames.Add(new ZFrame(
+                new ZSegment(poolOwner, 0, borrowed.Memory.Length),
+                frame.More));
+        }
+
+        if (frame.More)
+        {
+            return true;
+        }
+
+        var message = BuildMessage(accumulator.Frames);
+        accumulator.Frames.Clear();
+        await messageSink!.OnMessageAsync(connection, message, token);
+        return true;
+    }
+
+    private static ZMessage BuildMessage(List<ZFrame> frames)
+    {
+        if (frames.Count == 1)
+        {
+            return new ZMessage(new ZSingleMessage(frames[0]));
+        }
+
+        return new ZMessage(new ZMultiMessage([.. frames]));
     }
 
     private void RaisePeerEnded(IZConnection connection, Exception? failure)

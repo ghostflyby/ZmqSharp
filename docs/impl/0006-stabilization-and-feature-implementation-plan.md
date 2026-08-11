@@ -111,7 +111,9 @@ slice in this plan.
   receive values. These are design candidates, not accepted signatures; the
   shared architecture that fixes them (transport core, pattern core, semantic
   seam, composition roots, ownership/move rules) is designed in 0007, and its
-  acceptance supersedes this candidate list.
+  acceptance supersedes this candidate list. The semantic seam
+  (`IPatternSink`, with message aggregation in the transport core) has landed
+  as 0007 section 6 step 1+4.
 - Queue types may remain internal implementation machinery even when a
   pattern exposes an async stream or operation-oriented API.
 

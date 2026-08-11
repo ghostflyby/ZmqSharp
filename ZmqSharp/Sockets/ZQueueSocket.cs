@@ -36,8 +36,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         /// </summary>
         public Lock ReadLock { get; } = new();
 
-        public List<ZFrame> Accumulator { get; } = [];
-
         public int FrameIndex { get; set; }
 
         public long AccumulatedLength { get; set; }
@@ -139,8 +137,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             sendPump = SendPumpAsync(Cts.Token);
         }
 
-        socket.SetFrameSink(OnPeerConnected);
+        socket.BindMessageSink(new QueueSurface(this));
         socket.SetFrameAllocator(CreateAllocator);
+        socket.SetPeerConnectedHandler(OnPeerConnected);
         socket.PeerEnded += OnPeerEnded;
     }
 
@@ -255,7 +254,18 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         Cts.Dispose();
     }
 
-    private ZFrameHandlerAsync OnPeerConnected(IZConnection connection)
+    /// <summary>
+    /// The channel surface bound to the semantic seam (0007 section 2.4): the
+    /// transport core aggregates complete messages and delivers them here, per
+    /// peer and serialized; backpressure is the peer queue's full state.
+    /// </summary>
+    private sealed class QueueSurface(ZQueueSocket<TSocket> owner) : IPatternSink
+    {
+        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
+            => owner.OnPeerMessageAsync(peer, message, token);
+    }
+
+    private void OnPeerConnected(IZConnection connection)
     {
         var state = new PeerState
         {
@@ -267,39 +277,23 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             peers.Add(connection, state);
             PublishAdd(state);
         }
-
-        return (frame, ct) => OnPeerFrameAsync(state, frame, ct);
     }
 
-    private async ValueTask<bool> OnPeerFrameAsync(PeerState state, ZFrame frame, CancellationToken token)
+    private async ValueTask OnPeerMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
     {
-        if (frame.TryGetValue(out ZSegments segments))
+        PeerState? state;
+        lock (StateLock)
         {
-            state.Accumulator.Add(new ZFrame(segments, frame.More));
-        }
-        else if (frame.TryGetValue(out ZSegment segment) && !segment.IsBorrowed)
-        {
-            state.Accumulator.Add(new ZFrame(segment, frame.More));
-        }
-        else
-        {
-            frame.TryGetValue(out ZSegment borrowed);
-            var poolOwner = Pool.Rent(borrowed.Memory.Length);
-            borrowed.Memory.CopyTo(poolOwner.Memory);
-            state.Accumulator.Add(new ZFrame(
-                new ZSegment(poolOwner, 0, borrowed.Memory.Length),
-                frame.More));
+            peers.TryGetValue(peer, out state);
         }
 
-        if (frame.More)
+        if (state is null)
         {
-            return true;
+            // The peer ended between message aggregation and delivery; its
+            // surface has no consumer, so the message must not leak.
+            message.Dispose();
+            return;
         }
-
-        var message = BuildMessage(state.Accumulator);
-        state.Accumulator.Clear();
-        state.FrameIndex = 0;
-        state.AccumulatedLength = 0;
 
         // Wait-mode backpressure: a full per-peer queue pauses only this
         // peer's pump on the WriteAsync; the parser awaits the sink, so no
@@ -324,18 +318,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         {
             Wake();
         }
-
-        return true;
-    }
-
-    private static ZMessage BuildMessage(List<ZFrame> frames)
-    {
-        if (frames.Count == 1)
-        {
-            return new ZMessage(new ZSingleMessage(frames[0]));
-        }
-
-        return new ZMessage(new ZMultiMessage([.. frames]));
     }
 
     private ZFrameAllocator CreateAllocator(IZConnection connection)
@@ -495,23 +477,16 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     }
 
     /// <summary>
-    /// Reclaims every message that loses its consumer: the owning frames of an
-    /// incomplete message plus the buffered queue items. Channel completion
-    /// alone is not reclamation (0006 section 2.2) - the buffered items are
-    /// drained through the same Dispose path a drop mode uses. The peer's
-    /// ReadLock serializes the drain against a concurrent consumer read
-    /// (SingleReader is a promise, not an exclusion).
+    /// Reclaims every message that loses its consumer: the buffered queue
+    /// items. Channel completion alone is not reclamation (0006 section 2.2) -
+    /// the buffered items are drained through the same Dispose path a drop
+    /// mode uses. The peer's ReadLock serializes the drain against a
+    /// concurrent consumer read (SingleReader is a promise, not an exclusion).
     /// </summary>
     private static void Reclaim(PeerState state)
     {
         lock (state.ReadLock)
         {
-            foreach (var frame in state.Accumulator)
-            {
-                frame.Dispose();
-            }
-
-            state.Accumulator.Clear();
             state.Queue.Writer.TryComplete();
             while (state.Queue.Reader.TryRead(out var message))
             {

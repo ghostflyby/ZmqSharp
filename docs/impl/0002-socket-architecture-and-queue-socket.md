@@ -91,9 +91,11 @@ public sealed class ZQueueSocketOptions
 
 - `ZQueueSocket<TSocket>` wraps a concrete socket type (`ZPairSocket`,
   `ZDealerSocket`, ...); the generic parameter carries the socket type and the
-  wrapped socket is never exposed. Construction takes over the wrapped
-  socket's per-peer frame delivery (SetFrameSink), so the two tiers are
-  mutually exclusive by construction.
+  wrapped socket is never exposed. Construction binds the channel surface to
+  the transport core's semantic seam (`IPatternSink`, 0007 section 2.3): the
+  core aggregates complete messages and the surface writes them to the peer
+  queues, so the two tiers are mutually exclusive by construction (a bound
+  seam also rejects raw `OnFrame` subscription).
 - Capacity is per peer (each peer gets its own bounded queue with the
   configured HWM), following 0004. `Messages` exposes the socket-level
   aggregated view selected by the socket type (fair-queue, direct, ...).
@@ -131,10 +133,14 @@ As implemented:
 - Delivery chain: the parser awaits an async sink (`IZMessageSink.OnFrameAsync`
   returning `ValueTask<bool>`); a pending task pauses that peer's pump until it
   completes (0007 section 6 step 2).
-- Queue tier: each peer's parser materializes messages directly into its
-  receive queue (zero extra copy, 0004 constraint 1), applying the receive
-  policy (0003). The socket type aggregates the peer queues (fair-queue,
-  direct, ...) onto `Messages`.
+- Semantic seam: the transport core aggregates each peer's frames into
+  complete messages and delivers them through `IPatternSink.OnMessageAsync`
+  (per peer, serialized); the queue surface is one such sink (0007 section
+  2.3/6 step 1+4).
+- Queue tier: the surface materializes each message into its peer's receive
+  queue (zero extra copy, 0004 constraint 1), applying the receive policy
+  (0003). The socket type aggregates the peer queues (fair-queue, direct, ...)
+  onto `Messages`.
 - Full mode: each peer's queue is built by `ReceiveQueueFactory` (0009); a
   bounded factory's full mode is `Wait`, `DropWrite`, `DropNewest`, or
   `DropOldest`. Wait blocks on `WriteAsync` of the affected peer queue,

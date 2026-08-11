@@ -297,6 +297,12 @@ invalid after the reply is sent or the peer ends.
    per-peer receive state (frame index, accumulator, materialization policy
    wiring) into the transport core. `OnFrame` survives only as the raw
    low-level surface.
+   Implemented: the transport core now aggregates complete messages per peer
+   and delivers them through the public semantic seam `IPatternSink`
+   (`BindMessageSink`); a bound sink is mutually exclusive with `OnFrame` on
+   the same instance. Per-frame materialization wiring (the receive policy
+   allocator and the 0008 guard counters) remains in `ZQueueSocket` for now
+   and moves into the transport core in a later slice.
 2. Make the delivery chain async. Implemented: `IZMessageSink.OnFrameAsync`
    and `ZFrameHandlerAsync` return `ValueTask<bool>`, the parser awaits the
    sink, `SetFrameHandler` is the async seam, and the queue tier expresses
@@ -314,6 +320,10 @@ invalid after the reply is sent or the peer ends.
 4. Evolve `ZQueueSocket<TSocket>` into the channel surface bound to the
    semantic seam instead of `SetFrameSink`; keep per-peer queues, aggregate
    reading, and materialization.
+   Implemented: `ZQueueSocket` binds an internal `QueueSurface`
+   (`IPatternSink`) and writes each delivered message to the peer queue;
+   aggregation, borrowed-frame pooling, and per-peer serialization live in
+   the transport core.
 5. Typed callback surfaces per pattern, in the 0006 section 6 exploration
    order (PAIR, PUSH/PULL, PUB/SUB, REQ/REP, DEALER/ROUTER).
 6. Directed send lands with REP; the REQ operation surface lands with REQ;
@@ -327,6 +337,8 @@ documents fix exact signatures.
 
 - Seam naming, and whether `IPatternSink` (message level) should be renamed to
   avoid confusion with the existing frame-level `IZMessageSink`.
+  Note: the seam landed as `IPatternSink` in `ZmqSharp.Sockets`; renaming is
+  still possible before the surface set stabilizes.
 - Typed callback semantics: handler exceptions, serialization guarantees, and
   whether awaiting the handler pauses the peer pump for the whole pattern
   (natural for strict-alternation REP, unnecessary for flow surfaces).

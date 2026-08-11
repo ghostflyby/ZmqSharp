@@ -454,6 +454,58 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task MessageSink_AggregatesMultipart_AndDeliversCompleteMessage()
+    {
+        using var pool = new CountingMemoryPool();
+        var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
+        var sink = new TestMessageSink((message) => received.TrySetResult(message));
+        server.BindMessageSink(sink);
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        await client.SendAsync(MessageFactory.Multipart("ping"u8.ToArray(), "pong"u8.ToArray()), cts.Token);
+
+        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        message.Count.Should().Be(2);
+        message[0].ToSequence().ToArray().Should().Equal("ping"u8.ToArray());
+        message[1].ToSequence().ToArray().Should().Equal("pong"u8.ToArray());
+
+        // The surface owns the message and disposes it; the only remaining
+        // rental is the server parser's greeting scratch, released on dispose.
+        message.Dispose();
+        pool.Outstanding.Should().Be(1);
+
+        await server.DisposeAsync();
+        pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OnFrameSubscription_AfterMessageSinkBinding_Throws()
+    {
+        // The raw frame surface and the message sink are mutually exclusive
+        // (0007 section 1): exactly one consumer of the delivery stream.
+        var socket = ZSocket.CreatePairCallback();
+        socket.BindMessageSink(new TestMessageSink(_ => { }));
+        var act = () => socket.OnFrame += (_, _) => true;
+        act.Should().Throw<InvalidOperationException>();
+        await socket.DisposeAsync();
+    }
+
+    private sealed class TestMessageSink(Action<ZMessage> onMessage) : IPatternSink
+    {
+        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        {
+            onMessage(message);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentSends_DoNotInterleaveMultipartFrames()
     {
         var port = GetFreePort();
