@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
@@ -70,17 +71,45 @@ public sealed class ZSocketTests
 
         var countA = 0;
         var countB = 0;
-        var drainA = DrainAsync(serverA, () => Interlocked.Increment(ref countA), cts.Token);
-        var drainB = DrainAsync(serverB, () => Interlocked.Increment(ref countB), cts.Token);
+        var bothReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var drainA = DrainAsync(serverA, () => OnPeerMessage(true), cts.Token);
+        var drainB = DrainAsync(serverB, () => OnPeerMessage(false), cts.Token);
 
-        for (var attempt = 0; attempt < 100 && (countA < 1 || countB < 1); attempt++)
+        // The dealer drops sends to peers that have not finished the handshake,
+        // so keep sending until both drains report a message. The drains signal
+        // completion directly; the short pause only paces the retries and the
+        // loop stops as soon as both peers are reached instead of polling a
+        // fixed window.
+        for (var attempt = 0; attempt < 100 && !bothReached.Task.IsCompleted; attempt++)
         {
             await dealer.SendAsync(ZMessage.FromOwned([1]), cts.Token);
-            await Task.Delay(50, cts.Token);
+            if (await Task.WhenAny(bothReached.Task, Task.Delay(25, cts.Token)) == bothReached.Task)
+            {
+                break;
+            }
         }
+
+        await bothReached.Task.WaitAsync(cts.Token);
 
         countA.Should().BeGreaterThanOrEqualTo(1);
         countB.Should().BeGreaterThanOrEqualTo(1);
+
+        void OnPeerMessage(bool peerA)
+        {
+            if (peerA)
+            {
+                Interlocked.Increment(ref countA);
+            }
+            else
+            {
+                Interlocked.Increment(ref countB);
+            }
+
+            if (Volatile.Read(ref countA) >= 1 && Volatile.Read(ref countB) >= 1)
+            {
+                bothReached.TrySetResult();
+            }
+        }
 
         await cts.CancelAsync();
         try
@@ -919,10 +948,12 @@ public sealed class ZSocketTests
         message.Value.Dispose();
         pool.Rentals.Should().BeGreaterThan(0);
 
-        // The over-limit frame is rejected before any allocation.
+        // The over-limit frame is rejected before any allocation; wait for the
+        // deterministic rejection signal instead of sleeping, then prove the
+        // pool was never touched.
         pool.Reset();
         await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
-        await Task.Delay(200, cts.Token);
+        await WaitUntilAsync(() => server.ReceiveRejections, value => value >= 1, TimeSpan.FromSeconds(5));
         pool.Rentals.Should().Be(0);
     }
 
@@ -1560,7 +1591,7 @@ public sealed class ZSocketTests
 
     private static async Task WaitUntilAsync<T>(Func<T> state, Func<T, bool> condition, TimeSpan timeout)
     {
-        var deadline = DateTime.UtcNow + timeout;
+        var stopwatch = Stopwatch.StartNew();
         while (true)
         {
             var current = state();
@@ -1569,7 +1600,7 @@ public sealed class ZSocketTests
                 return;
             }
 
-            if (DateTime.UtcNow >= deadline)
+            if (stopwatch.Elapsed >= timeout)
             {
                 throw new TimeoutException($"condition not met within timeout; last value: {current}");
             }
@@ -1583,7 +1614,7 @@ public sealed class ZSocketTests
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan timeout)
     {
-        var deadline = DateTime.UtcNow + timeout;
+        var stopwatch = Stopwatch.StartNew();
         while (true)
         {
             if (await condition())
@@ -1591,7 +1622,7 @@ public sealed class ZSocketTests
                 return;
             }
 
-            if (DateTime.UtcNow >= deadline)
+            if (stopwatch.Elapsed >= timeout)
             {
                 throw new TimeoutException("condition not met within timeout");
             }
@@ -1608,8 +1639,8 @@ public sealed class ZSocketTests
     /// </summary>
     private static async Task WaitUntilSettledAsync<T>(Func<T> state, T expected, TimeSpan interval)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTime.UtcNow < deadline)
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
         {
             if (state()!.Equals(expected))
             {
