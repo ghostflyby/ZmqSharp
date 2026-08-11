@@ -17,6 +17,8 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 {
     private readonly long[] samples = new long[capacity];
     private readonly int[] threadIds = new int[capacity];
+    private readonly Lock gate = new();
+    private readonly List<(int Threshold, TaskCompletionSource Tcs)> pending = [];
     private int index;
     private long received;
 
@@ -26,15 +28,52 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
     /// <summary>Thread id observed at each delivery, for diagnosing pump thread stability.</summary>
     public int[] ThreadIds => threadIds;
 
-    /// <summary>Messages delivered so far; read by the test thread while polling.</summary>
+    /// <summary>Messages delivered so far.</summary>
     public int Count => (int)Volatile.Read(ref received);
+
+    /// <summary>
+    /// Real completion notification: completes when at least <paramref name="count"/>
+    /// messages have been delivered, so tests await a task instead of polling.
+    /// Completes synchronously when the count is already reached.
+    /// </summary>
+    public Task WaitForAsync(int count)
+    {
+        lock (gate)
+        {
+            if (Volatile.Read(ref received) >= count) return Task.CompletedTask;
+
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            pending.Add((count, tcs));
+            return tcs.Task;
+        }
+    }
 
     public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
     {
         samples[index] = GC.GetAllocatedBytesForCurrentThread();
         threadIds[index] = Environment.CurrentManagedThreadId;
         index++;
-        Volatile.Write(ref received, index); message.Dispose();
+        Volatile.Write(ref received, index);
+        NotifyWaiters();
+        message.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    private void NotifyWaiters()
+    {
+        lock (gate)
+        {
+            if (pending.Count == 0) return;
+
+            var delivered = Volatile.Read(ref received);
+            for (var i = pending.Count - 1; i >= 0; i--)
+            {
+                if (delivered >= pending[i].Threshold)
+                {
+                    pending[i].Tcs.TrySetResult();
+                    pending.RemoveAt(i);
+                }
+            }
+        }
     }
 }

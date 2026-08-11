@@ -31,7 +31,7 @@ public class ReceiveAllocationTests
     private const int MessageCount = 2000;
     private const int WarmupCount = 64;
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Receive_SteadyState_PerMessageCostIsBoundedOnPumpThread()
     {
         var sink = new MeasuringSink(MessageCount);
@@ -45,7 +45,7 @@ public class ReceiveAllocationTests
         // caches, delegate caches, tiered JIT, scratch growth).
         for (var i = 0; i < WarmupCount; i++)
             peer.Enqueue(AllocationFrameData.Frame([(byte)i]));
-        await WaitForDeliveriesAsync(sink, WarmupCount);
+        await sink.WaitForAsync(WarmupCount);
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -53,7 +53,7 @@ public class ReceiveAllocationTests
 
         for (var i = WarmupCount; i < MessageCount; i++)
             peer.Enqueue(AllocationFrameData.Frame([(byte)i]));
-        await WaitForDeliveriesAsync(sink, MessageCount);
+        await sink.WaitForAsync(MessageCount);
 
         // Drop warm-up and any cross-thread boundary samples: the GC counter
         // is thread-local, so a delta between two different threads is
@@ -76,7 +76,7 @@ public class ReceiveAllocationTests
 #endif
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Receive_EachMessage_RentsExactlyOnePooledBuffer()
     {
         using var pool = new CountingRentPool();
@@ -90,14 +90,14 @@ public class ReceiveAllocationTests
         const int count = 1000;
         for (var i = 0; i < count; i++)
             peer.Enqueue(AllocationFrameData.Frame([(byte)i]));
-        await WaitForDeliveriesAsync(sink, count);
+        await sink.WaitForAsync(count);
 
         // One rent per single-frame message (0008 Pooled materialization);
         // the +2 covers the parser's initial scratch rent and the handshake.
         pool.Rentals.Should().Be(count + 2);
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Receive_FirstDelivery_AllocatesThenSteadies()
     {
         var sink = new MeasuringSink(WarmupCount);
@@ -108,7 +108,7 @@ public class ReceiveAllocationTests
         var peer = AllocationFakeTransport.Current!;
 
         peer.Enqueue(AllocationFrameData.Frame([.. "first"u8]));
-        await WaitForDeliveriesAsync(sink, 1);
+        await sink.WaitForAsync(1);
 
         // The very first delivery allocates (scratch rent + pool warm-up); the
         // ceiling is only a sanity bound. Steady-state cost is asserted above.
@@ -116,7 +116,7 @@ public class ReceiveAllocationTests
         sink.Samples[0].Should().BeLessThan(1 << 20);
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Receive_MultiFrameMessage_PerMessageCostIsBoundedOnPumpThread()
     {
         var sink = new MeasuringSink(MessageCount);
@@ -133,7 +133,7 @@ public class ReceiveAllocationTests
             peer.Enqueue(AllocationFrameData.Frame(firstFrame, more: true));
             peer.Enqueue(AllocationFrameData.Frame(secondFrame));
         }
-        await WaitForDeliveriesAsync(sink, WarmupCount);
+        await sink.WaitForAsync(WarmupCount);
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -144,7 +144,7 @@ public class ReceiveAllocationTests
             peer.Enqueue(AllocationFrameData.Frame(firstFrame, more: true));
             peer.Enqueue(AllocationFrameData.Frame(secondFrame));
         }
-        await WaitForDeliveriesAsync(sink, MessageCount);
+        await sink.WaitForAsync(MessageCount);
 
         var deltas = SameThreadDeltas(sink);
         deltas.Min().Should().BeGreaterThanOrEqualTo(0);
@@ -174,17 +174,6 @@ public class ReceiveAllocationTests
     {
         Array.Sort(values);
         return values.Length == 0 ? 0 : values[values.Length / 2];
-    }
-
-    private static async Task WaitForDeliveriesAsync(MeasuringSink sink, int count)
-    {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
-        while (sink.Count < count)
-        {
-            if (DateTime.UtcNow >= deadline)
-                throw new TimeoutException($"timed out waiting for {count} deliveries (got {sink.Count})");
-            await Task.Delay(10);
-        }
     }
 }
 
