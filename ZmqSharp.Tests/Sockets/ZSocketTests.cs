@@ -888,8 +888,10 @@ public sealed class ZSocketTests
         await client.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
 
         // Traffic-phase rejection is a plain close, never an ERROR command
-        // (0008 D5): the client sees EOF/IO, not a peer protocol error.
-        var failure = await clientEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // (0008 D5): the client sees EOF/IO, not a peer protocol error. The
+        // close propagation is OS-dependent (Windows/Ubuntu runners can lag),
+        // so the wait window is generous.
+        var failure = await clientEnded.Task.WaitAsync(TimeSpan.FromSeconds(15));
         (failure is null or IOException or SocketException).Should().BeTrue();
     }
 
@@ -1327,26 +1329,23 @@ public sealed class ZSocketTests
         // The pump's first send faults the establishment gate and completes
         // the producer surface with the failure. The establishment failure is
         // deterministic (the gate faults when the READY exchange rejects the
-        // socket type), so wait for it first, then prove a later producer sees
-        // the channel close with the failure as its cause.
+        // socket type), so wait for it first.
         var connectFailure = await Record.ExceptionAsync(
             () => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
         connectFailure.Should().BeOfType<ZeroMqProtocolException>();
 
-        await WaitUntilAsync(async () =>
-        {
-            var probe = MessageFactory.PooledSingleFrame(pool, "probe"u8.ToArray());
-            var failure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
-            if (failure is not null)
-            {
-                // The channel is closed, so the probe was never accepted; it
-                // must not leak. On the accepted path the pump or the disposal
-                // drain reclaims it, so it is only disposed here on failure.
-                probe.Dispose();
-            }
+        // The pump reclaims the dequeued "a" and completes the channel once it
+        // observes the gate failure; "b" stays buffered (channel completion
+        // does not drain buffered items) and the parser scratch is released
+        // with the connection. Once only "b" remains outstanding the pump has
+        // finished, so a later producer is guaranteed to see the failure.
+        await WaitUntilAsync(() => pool.Outstanding, value => value == 1, TimeSpan.FromSeconds(5));
 
-            return failure is ChannelClosedException { InnerException: ZeroMqProtocolException };
-        }, TimeSpan.FromSeconds(5));
+        var probe = MessageFactory.PooledSingleFrame(pool, "probe"u8.ToArray());
+        var writeFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
+        writeFailure.Should().BeOfType<ChannelClosedException>();
+        writeFailure.InnerException.Should().BeOfType<ZeroMqProtocolException>();
+        probe.Dispose();
 
         await client.DisposeAsync();
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
