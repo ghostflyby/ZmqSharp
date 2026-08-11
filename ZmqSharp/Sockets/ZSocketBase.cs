@@ -529,6 +529,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         "PULL" => peerType == "PUSH",
         "PUB" => peerType == "SUB",
         "SUB" => peerType == "PUB",
+        "XPUB" => peerType is "SUB" or "XSUB" or "XPUB",
+        "XSUB" => peerType is "PUB" or "XPUB" or "XSUB",
         _ => true,
     };
 

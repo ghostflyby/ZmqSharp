@@ -43,4 +43,10 @@ public static class ZSocket
 
     public static ZSubSocket CreateSubCallback(ZSocketOptions? options = null)
         => new(options ?? new ZSocketOptions());
+
+    public static ZXSubSocket CreateXSubCallback(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
+
+    public static ZXPubSocket CreateXPub(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
 }

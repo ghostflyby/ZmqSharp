@@ -90,21 +90,33 @@ internal sealed class ZRouterCore : IPatternCore
 }
 
 /// <summary>PUB semantics (libzmq, 0013): send-only broadcast; the message's first frame is the topic.</summary>
-internal sealed class ZPubCore : IPatternCore
+internal class ZPubCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
         => throw new InvalidOperationException("PUB broadcasts through SendAsync(message)");
 
-    public string SocketTypeName => "PUB";
+    public virtual string SocketTypeName => "PUB";
 }
 
 /// <summary>SUB semantics (libzmq, 0013): receive-only with a topic-prefix subscription filter.</summary>
-internal sealed class ZSubCore : IPatternCore
+internal class ZSubCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
         => throw new InvalidOperationException("SUB is receive-only");
 
-    public string SocketTypeName => "SUB";
+    public virtual string SocketTypeName => "SUB";
+}
+
+/// <summary>XSUB semantics (libzmq, 0014): manual subscription frames, no inbound filter.</summary>
+internal sealed class ZXSubCore : ZSubCore
+{
+    public override string SocketTypeName => "XSUB";
+}
+
+/// <summary>XPUB semantics (libzmq, 0014): broadcast plus subscription observation.</summary>
+internal sealed class ZXPubCore : ZPubCore
+{
+    public override string SocketTypeName => "XPUB";
 }
 
 /// <summary>

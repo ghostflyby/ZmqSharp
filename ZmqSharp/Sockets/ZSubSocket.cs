@@ -12,7 +12,7 @@ namespace ZmqSharp.Sockets;
 /// message whose first frame is <c>0x01</c> + topic subscribes, <c>0x00</c> +
 /// topic unsubscribes (so a NetMQ/libzmq publisher starts sending).
 /// </summary>
-public sealed class ZSubSocket : ZSocketBase
+public class ZSubSocket : ZSocketBase
 {
     private readonly List<byte[]> subscriptions = [];
 
@@ -21,7 +21,7 @@ public sealed class ZSubSocket : ZSocketBase
     {
     }
 
-    private ZSubSocket(ZSocketOptions options, ZSubCore core)
+    internal ZSubSocket(ZSocketOptions options, ZSubCore core)
         : base(options, core)
     {
         SetPeerConnectedHandler(SendSubscriptionsTo);
