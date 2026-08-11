@@ -27,17 +27,20 @@ implemented yet.
   `ZQueueSocket` (decision on open question 3: counter only, for now).
   Rejection is signaled by an internal `ZReceiveRejectedException`; the public
   exception hierarchy stays open per 0006 §2.3.
-- Slice B (configurable command size) and Slice C (segmented materialization)
-  are not implemented.
+- Slice B is implemented: `MaxCommandSize` is an explicit option on
+  `ZSocketOptions` (default 1 MiB, floor `MinMaxCommandSize` = 256 so the
+  limit cannot be disabled entirely), threaded into the parser and enforced
+  before the command body is read into scratch.
+- Slice C (segmented materialization) is not implemented.
 
 ## 1. Context
 
-The queue tier materializes each message through a per-frame decision hook
-(0003):
+The transport core materializes each message through a per-frame decision
+hook (0003), held in its per-connection `ReceiveMaterializer`:
 
 ```text
-ZQueueSocket.CreateAllocator
-  -> DecideAllocation (builds ZReceiveContext, calls IZReceivePolicy.Decide)
+ZSocketBase.ReceiveMaterializer.CreateAllocator
+  -> policy.Decide (builds ZReceiveContext, calls IZReceivePolicy.Decide)
   -> AllocateSegments (Pool.Rent or GC.AllocateUninitializedArray)
 ```
 
@@ -269,9 +272,11 @@ Required work:
   `ZDelegateReceivePolicy`.
 - Add `MaxFrameLength`, `MaxMessageLength`, `MaxFramesPerMessage` to
   `ZQueueSocketOptions` with the fixed-order evaluation (D1/§4) and enforce
-  them with a connection-level guard in `CreateAllocator`.
-- Add checked accumulation (`checked(AccumulatedLength + length)`) in
-  `CreateAllocator`; overflow maps to `MessageTooLarge`.
+  them with a connection-level guard in the transport core's
+  `ReceiveMaterializer.CreateAllocator`.
+- Add checked accumulation (`checked(AccumulatedLength + length)`) in the
+  materializer's allocator; overflow maps to `MessageTooLarge`. The guard
+  counters reset at each message boundary.
 - Plumb rejection out of the allocator so the parser skips the body read:
   the allocator throws an internal `ZReceiveRejectedException(rejection)`,
   which propagates as the connection failure. No ERROR frame is sent for
@@ -298,12 +303,18 @@ Completion gate:
 - Default unlimited: without limit configuration, existing behavior is
   unchanged and all tests pass.
 
-### Slice B - Configurable command size (optional, small)
+### Slice B - Configurable command size (implemented)
 
 Move `MaxCommandSize` from a parser constant into an explicit option with a
 mandatory default of 1 MiB (0006 §3.2 lists "maximum command size" as an
 explicit option). Enforcement stays in the parser and remains non-opt-out
 beyond the configured value.
+
+Implemented: `ZSocketOptions.MaxCommandSize` (default 1 MiB) with the
+construction-time floor `ZSocketOptions.MinMaxCommandSize` (256); the parser
+takes the limit via the transport core and rejects an oversized command
+before reading its body into scratch. Tests cover an oversized command frame
+rejecting the peer and the below-floor validation throwing.
 
 Completion gate:
 

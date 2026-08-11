@@ -454,6 +454,38 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task OversizedCommand_WithSmallMaxCommandSize_RejectsPeer()
+    {
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { MaxCommandSize = 256 });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}");
+
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, port);
+        var stream = raw.GetStream();
+
+        // An oversized command frame during the handshake exceeds the
+        // configured command-size limit and rejects the peer (0008 Slice B).
+        var oversizedCommand = ZmtpTestData.Frame(new byte[300], command: true);
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), oversizedCommand));
+        await stream.FlushAsync();
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        failure.Should().BeOfType<ZeroMqProtocolException>();
+    }
+
+    [Fact]
+    public void MaxCommandSize_BelowFloor_Throws()
+    {
+        // The command-size limit is mandatory and cannot be disabled entirely
+        // (0008 Slice B completion gate).
+        var act = () => new ZSocketOptions { MaxCommandSize = ZSocketOptions.MinMaxCommandSize - 1 };
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public async Task MessageSink_AggregatesMultipart_AndDeliversCompleteMessage()
     {
         using var pool = new CountingMemoryPool();
@@ -482,6 +514,49 @@ public sealed class ZSocketTests
 
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task MessageLimit_ResetsPerMessage_AcrossManyMessages()
+    {
+        // The 0008 guard counters must reset at each message boundary: sending
+        // many small messages under a tight MaxMessageLength must not
+        // accumulate a total across messages and falsely reject (the counters
+        // live in the transport core's per-peer materializer).
+        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            MaxMessageLength = 10,
+        });
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+        });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        const int count = 20;
+        for (var i = 0; i < count; i++)
+        {
+            await client.SendAsync(ZMessage.FromOwned("ab"u8.ToArray()), cts.Token);
+        }
+
+        var received = 0;
+        for (var attempt = 0; attempt < 50 && received < count; attempt++)
+        {
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            if (message is not null)
+            {
+                message.Value.Dispose();
+                received++;
+            }
+        }
+
+        received.Should().Be(count);
+        server.ReceiveRejections.Should().Be(0);
     }
 
     [Fact]

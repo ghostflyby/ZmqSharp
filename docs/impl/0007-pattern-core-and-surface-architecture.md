@@ -300,9 +300,11 @@ invalid after the reply is sent or the peer ends.
    Implemented: the transport core now aggregates complete messages per peer
    and delivers them through the public semantic seam `IPatternSink`
    (`BindMessageSink`); a bound sink is mutually exclusive with `OnFrame` on
-   the same instance. Per-frame materialization wiring (the receive policy
-   allocator and the 0008 guard counters) remains in `ZQueueSocket` for now
-   and moves into the transport core in a later slice.
+   the same instance. Per-frame receive materialization (the receive policy
+   allocator, the 0008 guard counters, and the rejection counter) also lives
+   in the transport core's per-connection `ReceiveMaterializer`, configured
+   through `ZQueueSocketOptions`; the guard counters reset at each message
+   boundary.
 2. Make the delivery chain async. Implemented: `IZMessageSink.OnFrameAsync`
    and `ZFrameHandlerAsync` return `ValueTask<bool>`, the parser awaits the
    sink, `SetFrameHandler` is the async seam, and the queue tier expresses
@@ -317,6 +319,10 @@ invalid after the reply is sent or the peer ends.
    `RouteOutbound` and `SocketTypeName` out of the base. `ZPairSocket` /
    `ZDealerSocket` become transport-core composition roots; the state machine
    cores (REQ/REP) land with their patterns.
+   Implemented: the base composes an internal `IPatternCore` (outbound
+   selection + Socket-Type); `ZPairCore` / `ZDealerCore` are the PAIR and
+   DEALER cores, and `ZPairSocket` / `ZDealerSocket` are now thin composition
+   roots with no pattern logic.
 4. Evolve `ZQueueSocket<TSocket>` into the channel surface bound to the
    semantic seam instead of `SetFrameSink`; keep per-peer queues, aggregate
    reading, and materialization.

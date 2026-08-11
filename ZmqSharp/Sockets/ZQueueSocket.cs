@@ -15,8 +15,6 @@ namespace ZmqSharp.Sockets;
 public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     where TSocket : ZSocketBase
 {
-    private const int SegmentBlockSize = 8192;
-
     /// <summary>Peer receive-queue lifecycle (0006 3.6): Active while parsing,
     /// Draining while reclaimed on disconnect, Closed afterwards.</summary>
     private enum PeerPhase
@@ -35,10 +33,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         /// drain (SingleReader is a promise, not an enforced exclusion).
         /// </summary>
         public Lock ReadLock { get; } = new();
-
-        public int FrameIndex { get; set; }
-
-        public long AccumulatedLength { get; set; }
 
         public PeerPhase Phase { get; set; }
     }
@@ -107,12 +101,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private volatile PeerState[] peerSnapshot = [];
     private readonly ZQueueFactory receiveQueueFactory;
     private readonly ZQueueFactory? sendQueueFactory;
-    private readonly IZReceivePolicy receivePolicy;
-    private readonly long maxFrameLength;
-    private readonly long maxMessageLength;
-    private readonly int maxFramesPerMessage;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private long rejections;
     private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
 
@@ -125,10 +114,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         receiveQueueFactory = options.ReceiveQueueFactory;
         ArgumentNullException.ThrowIfNull(receiveQueueFactory);
         sendQueueFactory = options.SendQueueFactory;
-        receivePolicy = options.ReceivePolicy;
-        maxFrameLength = options.MaxFrameLength;
-        maxMessageLength = options.MaxMessageLength;
-        maxFramesPerMessage = options.MaxFramesPerMessage;
         Messages = new AggregateReader(this);
 
         if (sendQueueFactory is { } outboundFactory)
@@ -138,15 +123,19 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
 
         socket.BindMessageSink(new QueueSurface(this));
-        socket.SetFrameAllocator(CreateAllocator);
+        socket.SetReceiveMaterialization(
+            options.ReceivePolicy,
+            options.MaxFrameLength,
+            options.MaxMessageLength,
+            options.MaxFramesPerMessage);
         socket.SetPeerConnectedHandler(OnPeerConnected);
         socket.PeerEnded += OnPeerEnded;
     }
 
     public ChannelReader<ZMessage> Messages { get; }
 
-    /// <summary>Total frames rejected by the receive policy since construction.</summary>
-    public long ReceiveRejections => Volatile.Read(ref rejections);
+    /// <summary>Total frames rejected by the receive materialization since construction.</summary>
+    public long ReceiveRejections => socket.ReceiveRejectionsCount;
 
     /// <summary>
     /// Optional outbound channel built by <c>SendQueueFactory</c>. When
@@ -318,109 +307,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         {
             Wake();
         }
-    }
-
-    private ZFrameAllocator CreateAllocator(IZConnection connection)
-    {
-        return (length, more) =>
-        {
-            PeerState state;
-            lock (StateLock)
-            {
-                if (!peers.TryGetValue(connection, out var s))
-                {
-                    throw new InvalidOperationException("frame allocator invoked for an unknown peer");
-                }
-
-                state = s;
-            }
-
-            var frameIndex = state.FrameIndex;
-            if (!ZReceiveGuard.TryAccumulate(state.AccumulatedLength, length, out var accumulated))
-            {
-                // An unrepresentable message total is a rejection, never an
-                // arithmetic exception (0008 D3/D6).
-                Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
-            }
-
-            state.FrameIndex = frameIndex + 1;
-            state.AccumulatedLength = accumulated;
-
-            // Connection-level limits are enforced here, before any allocation,
-            // so a custom policy can never bypass them (0008 D1).
-            if (ZReceiveGuard.CheckLimits(
-                    length,
-                    accumulated,
-                    frameIndex,
-                    maxFrameLength,
-                    maxMessageLength,
-                    maxFramesPerMessage) is { } rejection)
-            {
-                Reject(rejection);
-            }
-
-            var allocation = DecideAllocation(frameIndex, accumulated, length, more);
-            return AllocateSegments(allocation, length, more);
-        };
-    }
-
-    private ZReceiveAllocation DecideAllocation(
-        int frameIndex,
-        long accumulatedLength,
-        int frameLength,
-        bool more)
-        => receivePolicy.Decide(new ZReceiveContext
-        {
-            FrameLength = frameLength,
-            HasMore = more,
-            FrameIndex = frameIndex,
-            AccumulatedLength = accumulatedLength,
-        });
-
-    private void Reject(ZReceiveRejection rejection)
-    {
-        Interlocked.Increment(ref rejections);
-        throw new ZReceiveRejectedException(rejection);
-    }
-
-    private void Reject(ZReceiveRejectionReason reason, long? limit, long? actual)
-        => Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
-
-    private (object Owner, int Length) Allocate(ZReceiveMode mode, int length)
-    {
-        if (mode == ZReceiveMode.Owned)
-        {
-            var buffer = GC.AllocateUninitializedArray<byte>(length);
-            return (buffer, length);
-        }
-
-        var owner = Pool.Rent(length);
-        return (owner, length);
-    }
-
-    private ZFrame AllocateSegments(
-        ZReceiveAllocation allocation,
-        int length,
-        bool more)
-    {
-        if (allocation.Segmented && length > SegmentBlockSize)
-        {
-            var count = (length + SegmentBlockSize - 1) / SegmentBlockSize;
-            var segments = new ZSegment[count];
-            var offset = 0;
-            for (var i = 0; i < count; i++)
-            {
-                var blockLength = Math.Min(SegmentBlockSize, length - offset);
-                var (owner, _) = Allocate(allocation.Mode, blockLength);
-                segments[i] = new ZSegment(owner, 0, blockLength);
-                offset += blockLength;
-            }
-
-            return new ZFrame(new ZSegments(segments), more);
-        }
-
-        var (singleOwner, _) = Allocate(allocation.Mode, length);
-        return new ZFrame(new ZSegment(singleOwner, 0, length), more);
     }
 
     private bool AnyPeerHasItems()
