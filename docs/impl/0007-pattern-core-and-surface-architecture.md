@@ -332,8 +332,15 @@ invalid after the reply is sent or the peer ends.
    the transport core.
 5. Typed callback surfaces per pattern, in the 0006 section 6 exploration
    order (PAIR, PUSH/PULL, PUB/SUB, REQ/REP, DEALER/ROUTER).
+   REQ/REP implemented (0010): `ZReqSocket.RequestAsync` (operation surface),
+   `ZRepSocket` with `BindRequestHandler` + `SendReplyAsync` (typed callback
+   surface), `ZRequestContext`, and the directed-send primitive
+   (`ZSocketBase.SendToAsync`).
 6. Directed send lands with REP; the REQ operation surface lands with REQ;
    factory methods are extended alongside each pattern.
+   Implemented with 0010: `ZSocketBase.SendToAsync` (directed send), REQ
+   operation surface, REP typed callback, and `ZSocket.CreateReq` /
+   `CreateRep`.
 
 Each pattern receives its own numbered design document before implementation
 (0006 section 6). This document fixes the shared architecture; pattern

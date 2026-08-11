@@ -415,6 +415,9 @@ Recommended exploration order:
 2. PUSH/PULL as one-directional load balancing and fair intake.
 3. PUB/SUB as explicit lossy delivery plus subscription filtering.
 4. REQ/REP as operation-oriented request/reply state machines.
+   Implemented (0010): strict alternation, REQ round-robin outbound, REP
+   fair intake with directed replies, empty-delimiter wire framing, REQ
+   operation surface and REP typed callback surface.
 5. DEALER/ROUTER as asynchronous routing and identity-aware delivery.
 
 The design track must evaluate operation-oriented candidates such as a

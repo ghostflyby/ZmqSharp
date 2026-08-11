@@ -19,4 +19,10 @@ public static class ZSocket
 
     public static ZDealerSocket CreateDealerCallback(ZSocketOptions? options = null)
         => new(options ?? new ZSocketOptions());
+
+    public static ZReqSocket CreateReq(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
+
+    public static ZRepSocket CreateRep(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
 }
