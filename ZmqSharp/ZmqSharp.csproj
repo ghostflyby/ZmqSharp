@@ -6,10 +6,26 @@
         <Nullable>enable</Nullable>
         <IsAotCompatible>true</IsAotCompatible>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <IsPackable>true</IsPackable>
+        <PackageId>ZmqSharp</PackageId>
+        <Version>0.1.0</Version>
+        <Authors>ZmqSharp contributors</Authors>
+        <Description>A fully asynchronous, AOT-compatible ZMTP 3.0 / ZeroMQ library for .NET with libzmq-compatible socket semantics.</Description>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <RepositoryType>git</RepositoryType>
+        <RepositoryUrl>https://github.com/ghostflyby/ZmqSharp</RepositoryUrl>
+        <PackageTags>zmq;zmtp;zeromq;networking;messaging</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
         <InternalsVisibleTo Include="ZmqSharp.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="../README.md" Pack="true" PackagePath="/" />
+        <None Include="../NOTICE" Pack="true" PackagePath="/" />
+        <None Include="../LICENSE" Pack="true" PackagePath="/" />
     </ItemGroup>
 
 </Project>

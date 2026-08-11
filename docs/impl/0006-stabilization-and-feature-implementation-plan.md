@@ -474,16 +474,11 @@ not part of creating this plan.
 
 ### 7.2 License decision
 
-The project license remains open. Evaluate at least:
-
-- Apache-2.0 for permissive adoption with an explicit patent grant;
-- MIT for the simplest permissive terms;
-- MPL-2.0 for file-level reciprocity while allowing proprietary applications.
-
-Do not add a license expression or license file until the project owner makes
-the selection. After selection, add the root license, package license
-expression, repository metadata, package readme, copyright, and required
-third-party notices. Test-only NetMQ and assertion dependencies are
+The project license is **Apache-2.0** (owner decision): permissive adoption
+with an explicit patent grant. The root `LICENSE`, package license expression
+(`PackageLicenseExpression=Apache-2.0`), package readme, repository metadata,
+and `NOTICE` third-party notices (NetMQ/xUnit/FluentAssertions test
+dependencies) are in place; test-only NetMQ and assertion dependencies are
 included in the notice and redistribution review.
 
 ### 7.3 Continuous integration
