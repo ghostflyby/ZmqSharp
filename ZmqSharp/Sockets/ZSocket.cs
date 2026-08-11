@@ -31,4 +31,10 @@ public static class ZSocket
 
     public static ZQueueSocket<ZPullSocket> CreatePull(ZQueueSocketOptions? options = null)
         => new(new ZPullSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
+
+    public static ZQueueSocket<ZRouterSocket> CreateRouter(ZQueueSocketOptions? options = null)
+        => new(new ZRouterSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
+
+    public static ZRouterSocket CreateRouterCallback(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
 }

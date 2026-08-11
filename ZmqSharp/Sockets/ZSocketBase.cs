@@ -481,6 +481,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             try
             {
                 connection.OnConnectionEnded();
+                OnPatternPeerEnded(connection);
                 RaisePeerEnded(connection, failure);
             }
             finally
@@ -492,10 +493,20 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
     }
 
+    /// <summary>
+    /// Pattern hook on peer teardown: a pattern core releases per-connection
+    /// state (ROUTER drops its identity mapping). Runs before the connection
+    /// is disposed and before <c>PeerEnded</c> is raised.
+    /// </summary>
+    protected virtual void OnPatternPeerEnded(IZConnection peer)
+    {
+    }
+
     private static bool IsCompatibleSocketType(string localType, string peerType) => localType switch
     {
         "PAIR" => peerType == "PAIR",
         "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
+        "ROUTER" => peerType is "DEALER" or "REQ" or "ROUTER",
         "REQ" => peerType == "REP",
         "REP" => peerType is "REQ" or "DEALER",
         "PUSH" => peerType == "PULL",
@@ -616,9 +627,17 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         var message = BuildMessage(accumulator.Frames);
         accumulator.Frames.Clear();
         accumulator.Materializer?.Reset();
+        message = PrefixInboundForSink(connection, message);
         await messageSink!.OnMessageAsync(connection, message, token);
         return true;
     }
+
+    /// <summary>
+    /// Pattern hook on the semantic seam (0007 2.2): a pattern core may frame
+    /// inbound messages before they reach the sink. ROUTER prefixes the peer's
+    /// routing identity; the default passes the message through.
+    /// </summary>
+    protected virtual ZMessage PrefixInboundForSink(IZConnection peer, ZMessage message) => message;
 
     private static ZMessage BuildMessage(List<ZFrame> frames)
     {

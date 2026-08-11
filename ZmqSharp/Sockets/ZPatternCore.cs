@@ -77,6 +77,19 @@ internal sealed class ZPullCore : IPatternCore
 }
 
 /// <summary>
+/// ROUTER semantics (libzmq, 0012): identity-aware routing. Every inbound
+/// message carries the peer's routing id as the first frame; sends address a
+/// specific peer by identity.
+/// </summary>
+internal sealed class ZRouterCore : IPatternCore
+{
+    public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
+        => throw new InvalidOperationException("ROUTER sends through SendAsync(identity, message)");
+
+    public string SocketTypeName => "ROUTER";
+}
+
+/// <summary>
 /// REQ semantics (libzmq, 0010): strict single in-flight request, round-robin
 /// outbound, replies accepted only from the current peer.
 /// </summary>
