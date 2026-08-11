@@ -2,9 +2,17 @@ using System.Buffers;
 
 namespace ZmqSharp.Sockets;
 
-/// <summary>Socket configuration.</summary>
+/// <summary>Socket configuration (transport core).</summary>
 public sealed class ZSocketOptions
 {
+    /// <summary>
+    /// Lowest configurable command-size limit: prevents disabling the limit
+    /// entirely (0008 Slice B completion gate).
+    /// </summary>
+    public const int MinMaxCommandSize = 256;
+
+    private int maxCommandSize = Zmtp.ZmtpParser.DefaultMaxCommandSize;
+
     /// <summary>
     /// Memory pool used for the send copy path; defaults to the shared pool.
     /// <c>MemoryPool&lt;byte&gt;.Shared</c>'s Dispose is a no-op, which makes it a
@@ -12,4 +20,19 @@ public sealed class ZSocketOptions
     /// ownership stays with the caller.
     /// </summary>
     public MemoryPool<byte> Pool { get; init; } = MemoryPool<byte>.Shared;
+
+    /// <summary>
+    /// Maximum accepted ZMTP command-frame size; a larger command rejects the
+    /// connection (0006 3.2, 0008 Slice B). Defaults to 1 MiB and cannot be
+    /// lowered below <see cref="MinMaxCommandSize"/>.
+    /// </summary>
+    public int MaxCommandSize
+    {
+        get => maxCommandSize;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, MinMaxCommandSize);
+            maxCommandSize = value;
+        }
+    }
 }

@@ -30,6 +30,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     /// <summary>Per-peer frame accumulators for message aggregation (0007 2.3).</summary>
     private readonly Dictionary<IZConnection, PeerAccumulator> accumulators = [];
+    private readonly int maxCommandSize;
     private ZFrameHandler? onFrame;
     private IPatternSink? messageSink;
     private Func<IZConnection, ZFrameAllocator>? allocatorFactory;
@@ -40,6 +41,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         : base(options.Pool)
     {
         ArgumentNullException.ThrowIfNull(options);
+        maxCommandSize = options.MaxCommandSize;
     }
 
     /// <summary>Selects the outbound connection for a message; null = drop.</summary>
@@ -322,7 +324,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             peerConnected?.Invoke(connection);
         }
 
-        var parser = new ZmtpParser(connection, allocator, Pool);
+        var parser = new ZmtpParser(connection, allocator, Pool, maxCommandSize);
         var handler = messageSink is null ? BorrowedSink(parser) : MessageSinkHandler(connection, parser);
         connection.SetFrameHandler((frame, _) => handler(frame, Cts.Token));
 

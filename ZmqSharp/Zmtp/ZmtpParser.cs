@@ -20,11 +20,14 @@ public sealed class ZmtpParser : IDisposable
 {
     private const int InitialScratchSize = 4096;
     private const int ScratchShrinkThreshold = 1 << 20;
-    private const int MaxCommandSize = 1 << 20;
+
+    /// <summary>Default command-size limit (0008 Slice B).</summary>
+    public const int DefaultMaxCommandSize = 1 << 20;
 
     private readonly IZConnection connection;
     private readonly MemoryPool<byte> pool;
     private readonly ZFrameAllocator? allocator;
+    private readonly int maxCommandSize;
     private readonly byte[] headerBuffer = new byte[9];
 
     private IMemoryOwner<byte>? scratchOwner;
@@ -42,16 +45,21 @@ public sealed class ZmtpParser : IDisposable
     internal string? PeerSocketType => peerSocketType;
 
     public ZmtpParser(IZConnection connection, MemoryPool<byte>? pool = null)
-        : this(connection, null, pool ?? MemoryPool<byte>.Shared)
+        : this(connection, null, pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize)
     {
     }
 
-    internal ZmtpParser(IZConnection connection, ZFrameAllocator? allocator, MemoryPool<byte> pool)
+    internal ZmtpParser(
+        IZConnection connection,
+        ZFrameAllocator? allocator,
+        MemoryPool<byte> pool,
+        int maxCommandSize = DefaultMaxCommandSize)
     {
         ArgumentNullException.ThrowIfNull(connection);
         this.connection = connection;
         this.allocator = allocator;
         this.pool = pool;
+        this.maxCommandSize = maxCommandSize;
     }
 
     /// <summary>Call after a streaming callback returns false to resume the receive loop.</summary>
@@ -498,9 +506,9 @@ public sealed class ZmtpParser : IDisposable
         FrameHeader header,
         CancellationToken token)
     {
-        if (header.Size > MaxCommandSize)
+        if (header.Size > maxCommandSize)
         {
-            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
+            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {maxCommandSize} bytes");
         }
 
         if (header.Size > int.MaxValue)

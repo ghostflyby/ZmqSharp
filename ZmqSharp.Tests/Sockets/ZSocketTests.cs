@@ -454,6 +454,38 @@ public sealed class ZSocketTests
     }
 
     [Fact]
+    public async Task OversizedCommand_WithSmallMaxCommandSize_RejectsPeer()
+    {
+        var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { MaxCommandSize = 256 });
+        server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
+        var port = GetFreePort();
+        await server.BindAsync($"tcp://127.0.0.1:{port}");
+
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, port);
+        var stream = raw.GetStream();
+
+        // An oversized command frame during the handshake exceeds the
+        // configured command-size limit and rejects the peer (0008 Slice B).
+        var oversizedCommand = ZmtpTestData.Frame(new byte[300], command: true);
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), oversizedCommand));
+        await stream.FlushAsync();
+
+        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        failure.Should().BeOfType<ZeroMqProtocolException>();
+    }
+
+    [Fact]
+    public void MaxCommandSize_BelowFloor_Throws()
+    {
+        // The command-size limit is mandatory and cannot be disabled entirely
+        // (0008 Slice B completion gate).
+        var act = () => new ZSocketOptions { MaxCommandSize = ZSocketOptions.MinMaxCommandSize - 1 };
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
     public async Task MessageSink_AggregatesMultipart_AndDeliversCompleteMessage()
     {
         using var pool = new CountingMemoryPool();
