@@ -56,6 +56,12 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         maxCommandSize = options.MaxCommandSize;
     }
 
+    /// <summary>The composed pattern core (composition roots access it for pattern operations).</summary>
+    internal IPatternCore Core => core;
+
+    /// <summary>The routable-peer snapshot (pattern cores read it for outbound selection).</summary>
+    internal IZConnection[] PeerSnapshot => peerSnapshot;
+
     public event ZFrameHandler? OnFrame
     {
         add
@@ -284,6 +290,32 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             return;
         }
 
+        await SendToPeerAsync(connection, message, token);
+    }
+
+    private IZConnection? SelectTarget(ZMessage message)
+        => core.RouteOutbound(message, peerSnapshot.AsSpan());
+
+    /// <summary>
+    /// Directed send to a specific connection (0007 section 2.1 primitive,
+    /// used by REP reply routing and ROUTER identity addressing). The message
+    /// is disposed after the send, exactly once.
+    /// </summary>
+    internal async ValueTask SendToAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+    {
+        ThrowIfClosed();
+        try
+        {
+            await SendToPeerAsync(peer, message, token);
+        }
+        finally
+        {
+            message.Dispose();
+        }
+    }
+
+    private async ValueTask SendToPeerAsync(IZConnection connection, ZMessage message, CancellationToken token)
+    {
         await WaitUntilEstablishedAsync(connection, token);
         try
         {
@@ -297,9 +329,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             // (0006 3.6).
         }
     }
-
-    private IZConnection? SelectTarget(ZMessage message)
-        => core.RouteOutbound(message, peerSnapshot.AsSpan());
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
@@ -467,6 +496,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
         "PAIR" => peerType == "PAIR",
         "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
+        "REQ" => peerType == "REP",
+        "REP" => peerType == "REQ",
         _ => true,
     };
 

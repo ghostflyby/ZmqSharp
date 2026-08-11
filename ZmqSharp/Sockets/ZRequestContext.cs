@@ -1,0 +1,38 @@
+using System.Collections;
+using ZmqSharp.Messages;
+using ZmqSharp.Transports;
+
+namespace ZmqSharp.Sockets;
+
+/// <summary>
+/// REP request value (0010 section 3, 0007 M2): the originating peer plus the
+/// interpreted request message. It is the sole owner of the message - the
+/// REP core disposes it after the request handler completes, so the context
+/// is valid only during the handler call and must not be retained.
+/// </summary>
+public readonly struct ZRequestContext : IReadOnlyList<ZFrame>, IDisposable
+{
+    private readonly IZConnection peer;
+    private readonly ZMessage message;
+
+    internal ZRequestContext(IZConnection peer, ZMessage message)
+    {
+        this.peer = peer;
+        this.message = message;
+    }
+
+    /// <summary>The peer the request arrived from; replies route back to it.</summary>
+    public IZConnection Peer => peer;
+
+    public int Count => message.Count;
+
+    public ZFrame this[int index] => message[index];
+
+    public ZMessage.Enumerator GetEnumerator() => message.GetEnumerator();
+
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    public void Dispose() => message.Dispose();
+}

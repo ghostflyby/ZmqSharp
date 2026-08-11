@@ -26,7 +26,7 @@ The plan targets these outcomes, in order:
 6. An explicit, replaceable, AOT-compatible security mechanism boundary.
 7. Pattern-specific public APIs designed from their semantics rather than
    forced into one channel reader/writer shape.
-8. Interoperability coverage against libzmq through a CLRZMQ test adapter.
+8. Interoperability coverage against libzmq through a NetMQ test adapter.
 9. Documentation and packaging structure suitable for an eventual release.
 
 ## 2. Binding Constraints
@@ -157,7 +157,7 @@ Completion gate:
   merely mirror the implementation.
 - Correct READY and ERROR fixtures parse in partial-read configurations.
 - Malformed command and metadata cases fail with protocol errors.
-- At least one CLRZMQ/libzmq connection completes the NULL handshake in each
+- At least one NetMQ/libzmq connection completes the NULL handshake in each
   direction.
 
 ### 3.2 Protocol resource limits
@@ -383,22 +383,28 @@ Completion gate:
 - No mechanism type is found through reflection, attributes, or dynamic code.
 - Mechanism failures participate in the `ConnectAsync` failure contract.
 
-## 5. CLRZMQ/libzmq Interoperability
+## 5. libzmq Interoperability
 
-CLRZMQ is introduced only in the test project as the managed bridge to native
-libzmq. Native library installation and discovery must be explicit for Linux,
-Windows, and macOS CI; local absence may skip a separately categorized
-integration suite, but the release gate requires all configured CI jobs to run
-it.
+Interoperability tests use **NetMQ 4.x** in the test project as the managed
+libzmq-compatible peer. NetMQ is a C# rewrite of libzmq speaking the same
+ZMTP 3.0 protocol with libzmq socket semantics, and its interop with real
+libzmq is widely exercised; it is fully managed (net6.0+), so no native
+libzmq installation is required on Linux, Windows, or macOS CI - the
+integration suite runs on every configured job with no provisioning. The
+original `clrzmq`/`ZeroMQ` NuGet packages bind libzmq 2.x and target .NET
+Framework only, so they are unusable on net10.0; a native libzmq P/Invoke
+bridge remains a possible future option.
 
-The initial matrix covers both directions for:
+Implemented matrix (both directions over TCP, tagged `Category = "Interop"`):
 
-- greeting and NULL READY exchange;
-- PAIR and DEALER where their current experimental semantics permit it;
-- empty, short, long, and multipart messages;
-- partial transport reads;
-- peer close and protocol rejection;
-- `Socket-Type` metadata and a selected incompatible pairing.
+- PAIR: ZmqSharp server + NetMQ client and NetMQ server + ZmqSharp client;
+  short, long (>64 KB, crossing many TCP segments - real partial reads), and
+  multipart messages; peer close raising `PeerEnded`.
+- REQ/REP: ZmqSharp `ZReqSocket` + NetMQ `ResponseSocket` and NetMQ
+  `RequestSocket` + ZmqSharp `ZRepSocket`, exercising the leading
+  empty-delimiter framing in both directions; incompatible Socket-Type
+  pairing (PAIR vs DEALER) rejected during the handshake.
+- DEALER interop is deferred.
 
 Self-roundtrip tests remain useful unit tests but do not count as standards
 interoperability evidence.
@@ -415,6 +421,9 @@ Recommended exploration order:
 2. PUSH/PULL as one-directional load balancing and fair intake.
 3. PUB/SUB as explicit lossy delivery plus subscription filtering.
 4. REQ/REP as operation-oriented request/reply state machines.
+   Implemented (0010): strict alternation, REQ round-robin outbound, REP
+   fair intake with directed replies, empty-delimiter wire framing, REQ
+   operation surface and REP typed callback surface.
 5. DEALER/ROUTER as asynchronous routing and identity-aware delivery.
 
 The design track must evaluate operation-oriented candidates such as a
@@ -455,7 +464,7 @@ The project license remains open. Evaluate at least:
 Do not add a license expression or license file until the project owner makes
 the selection. After selection, add the root license, package license
 expression, repository metadata, package readme, copyright, and required
-third-party notices. Test-only CLRZMQ/libzmq and assertion dependencies are
+third-party notices. Test-only NetMQ and assertion dependencies are
 included in the notice and redistribution review.
 
 ### 7.3 Continuous integration
@@ -465,7 +474,7 @@ Add or retain these checks as the corresponding work lands:
 - Release build with warnings as errors and compatibility analyzers;
 - unit tests on Linux, Windows, and macOS;
 - `dotnet format --verify-no-changes`;
-- CLRZMQ/libzmq integration tests;
+- NetMQ libzmq-compatible interop tests;
 - queue saturation, cancellation, disconnect, and leak tests.
 
 No Native AOT smoke publish is included.
@@ -478,7 +487,7 @@ The recommended pull-request-sized sequence is:
 2. Implement the standards-correct command and metadata codec with wire
    fixtures and resource limits.
 3. Correct `ConnectAsync` establishment failure and connection cleanup.
-4. Add CLRZMQ/libzmq NULL-handshake and message interoperability tests.
+4. Add NetMQ libzmq-compatible NULL-handshake and message interoperability tests. Implemented.
 5. Refactor `ZSegment` to owner/source plus offset and length.
 6. Implement asynchronous per-peer receive queues and full-mode policies.
 7. Complete send-queue failure propagation and all queue drain paths.
