@@ -25,4 +25,10 @@ public static class ZSocket
 
     public static ZRepSocket CreateRep(ZSocketOptions? options = null)
         => new(options ?? new ZSocketOptions());
+
+    public static ZPushSocket CreatePush(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
+
+    public static ZQueueSocket<ZPullSocket> CreatePull(ZQueueSocketOptions? options = null)
+        => new(new ZPullSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
 }

@@ -497,7 +497,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         "PAIR" => peerType == "PAIR",
         "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
         "REQ" => peerType == "REP",
-        "REP" => peerType == "REQ",
+        "REP" => peerType is "REQ" or "DEALER",
+        "PUSH" => peerType == "PULL",
+        "PULL" => peerType == "PUSH",
         _ => true,
     };
 

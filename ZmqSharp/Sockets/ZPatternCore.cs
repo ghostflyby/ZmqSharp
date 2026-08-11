@@ -48,6 +48,34 @@ internal sealed class ZDealerCore : IPatternCore
     public string SocketTypeName => "DEALER";
 }
 
+/// <summary>PUSH semantics (libzmq): send-only, round-robin outbound.</summary>
+internal sealed class ZPushCore : IPatternCore
+{
+    private int next;
+
+    public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
+    {
+        if (peers.IsEmpty)
+        {
+            return null;
+        }
+
+        int index = (Interlocked.Increment(ref next) - 1) % peers.Length;
+        return peers[index];
+    }
+
+    public string SocketTypeName => "PUSH";
+}
+
+/// <summary>PULL semantics (libzmq): receive-only, fair-queue inbound.</summary>
+internal sealed class ZPullCore : IPatternCore
+{
+    public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
+        => throw new InvalidOperationException("PULL is receive-only");
+
+    public string SocketTypeName => "PULL";
+}
+
 /// <summary>
 /// REQ semantics (libzmq, 0010): strict single in-flight request, round-robin
 /// outbound, replies accepted only from the current peer.
