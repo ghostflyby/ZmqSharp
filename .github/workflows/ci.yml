@@ -35,6 +35,9 @@ jobs:
       - name: Build
         run: dotnet build ZmqSharp.slnx --no-restore --configuration Release
 
+      - name: Format
+        run: dotnet format ZmqSharp.slnx --verify-no-changes --no-restore
+
       - name: Test
         run: dotnet test ZmqSharp.slnx --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
 
