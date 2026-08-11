@@ -85,26 +85,32 @@ public sealed class PushPullInteropTests
             await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"turn-{i}")), cts.Token);
         }
 
-        // Drain both pulls to completion instead of racing 500ms windows: the
-        // round-robin cursor alternates peers, so each pull must end with
-        // exactly four messages in send order.
-        var turnsA = DrainAll(pullA);
-        var turnsB = DrainAll(pullB);
+        // Drain both pulls until all eight turns arrive or the overall window
+        // expires: the messages may still be in flight on a slow runner, so a
+        // single bounded drain would race them. The round-robin cursor
+        // alternates peers, so each pull must end with exactly four messages.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var turnsA = new List<string>();
+        var turnsB = new List<string>();
+        while (turnsA.Count + turnsB.Count < 8 && DateTime.UtcNow < deadline)
+        {
+            turnsA.AddRange(DrainAvailable(pullA));
+            turnsB.AddRange(DrainAvailable(pullB));
+            await Task.Delay(20, cts.Token);
+        }
+
         turnsA.Should().HaveCount(4);
         turnsB.Should().HaveCount(4);
         turnsA.Should().OnlyContain(turn => int.Parse(turn.Substring(5)) % 2 == 0);
         turnsB.Should().OnlyContain(turn => int.Parse(turn.Substring(5)) % 2 == 1);
     }
 
-    private static List<string> DrainAll(PullSocket pull)
+    private static IEnumerable<string> DrainAvailable(PullSocket pull)
     {
-        var turns = new List<string>();
-        while (pull.TryReceiveFrameBytes(TimeSpan.FromMilliseconds(500), out var frame))
+        while (pull.TryReceiveFrameBytes(TimeSpan.FromMilliseconds(50), out var frame))
         {
-            turns.Add(System.Text.Encoding.ASCII.GetString(frame));
+            yield return System.Text.Encoding.ASCII.GetString(frame);
         }
-
-        return turns;
     }
 
     [Fact]
