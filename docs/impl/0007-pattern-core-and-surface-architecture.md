@@ -317,6 +317,10 @@ invalid after the reply is sent or the peer ends.
    `RouteOutbound` and `SocketTypeName` out of the base. `ZPairSocket` /
    `ZDealerSocket` become transport-core composition roots; the state machine
    cores (REQ/REP) land with their patterns.
+   Implemented: the base composes an internal `IPatternCore` (outbound
+   selection + Socket-Type); `ZPairCore` / `ZDealerCore` are the PAIR and
+   DEALER cores, and `ZPairSocket` / `ZDealerSocket` are now thin composition
+   roots with no pattern logic.
 4. Evolve `ZQueueSocket<TSocket>` into the channel surface bound to the
    semantic seam instead of `SetFrameSink`; keep per-peer queues, aggregate
    reading, and materialization.

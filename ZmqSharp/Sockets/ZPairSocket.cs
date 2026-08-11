@@ -1,13 +1,8 @@
 using ZmqSharp.Messages;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
-/// <summary>Single peer, no routing (PAIR semantics).</summary>
-public sealed class ZPairSocket(ZSocketOptions options) : ZSocketBase(options)
+/// <summary>PAIR composition root: single peer, no routing (0007 section 5).</summary>
+public sealed class ZPairSocket(ZSocketOptions options) : ZSocketBase(options, new ZPairCore())
 {
-    protected override IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => peers.IsEmpty ? null : peers[0];
-
-    protected override string SocketTypeName => "PAIR";
 }

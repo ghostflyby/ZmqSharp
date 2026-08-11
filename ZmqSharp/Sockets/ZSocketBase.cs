@@ -7,10 +7,11 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Sockets;
 
 /// <summary>
-/// Shared socket mechanics: calls the transport, stores connections, drives
-/// the handshake externally, and delivers borrowed frames to the OnFrame
-/// callback. Socket types are subtypes that differ only in
-/// <see cref="RouteOutbound"/>.
+/// Pattern-agnostic transport core (0007 section 2.1): calls the transport,
+/// stores connections, drives the handshake externally, aggregates messages
+/// for a bound <see cref="IPatternSink"/>, and delivers borrowed frames to the
+/// raw OnFrame callback. Pattern semantics live in a composed
+/// <see cref="IPatternCore"/>; socket types are thin composition roots.
 /// </summary>
 public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 {
@@ -31,24 +32,21 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// <summary>Per-peer frame accumulators for message aggregation (0007 2.3).</summary>
     private readonly Dictionary<IZConnection, PeerAccumulator> accumulators = [];
     private readonly int maxCommandSize;
+    private readonly IPatternCore core;
     private ZFrameHandler? onFrame;
     private IPatternSink? messageSink;
     private Func<IZConnection, ZFrameAllocator>? allocatorFactory;
     private Action<IZConnection>? peerConnected;
     private Action<IZConnection, Exception?>? peerEnded;
 
-    protected ZSocketBase(ZSocketOptions options)
+    internal ZSocketBase(ZSocketOptions options, IPatternCore core)
         : base(options.Pool)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(core);
+        this.core = core;
         maxCommandSize = options.MaxCommandSize;
     }
-
-    /// <summary>Selects the outbound connection for a message; null = drop.</summary>
-    protected abstract IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers);
-
-    /// <summary>ZMTP Socket-Type metadata advertised in the READY handshake.</summary>
-    protected abstract string SocketTypeName { get; }
 
     public event ZFrameHandler? OnFrame
     {
@@ -281,7 +279,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     }
 
     private IZConnection? SelectTarget(ZMessage message)
-        => RouteOutbound(message, peerSnapshot.AsSpan());
+        => core.RouteOutbound(message, peerSnapshot.AsSpan());
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
@@ -350,18 +348,18 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         try
         {
             await connection.WriteAsync(
-                ZmtpFrameEncoder.BuildHandshake(ZmtpCommands.BuildReady(SocketTypeName)),
+                ZmtpFrameEncoder.BuildHandshake(ZmtpCommands.BuildReady(core.SocketTypeName)),
                 attemptToken);
             if (await parser.EstablishAsync(attemptToken))
             {
                 var peerType = parser.PeerSocketType;
-                if (peerType is null || !IsCompatibleSocketType(SocketTypeName, peerType))
+                if (peerType is null || !IsCompatibleSocketType(core.SocketTypeName, peerType))
                 {
                     // RFC 23: on socket-type validation failure, return an
                     // ERROR command before disconnecting the peer.
                     await connection.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), attemptToken);
                     throw new ZeroMqProtocolException(
-                        $"peer socket type '{peerType}' is not compatible with local socket type '{SocketTypeName}'");
+                        $"peer socket type '{peerType}' is not compatible with local socket type '{core.SocketTypeName}'");
                 }
 
                 established.TrySetResult();
