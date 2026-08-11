@@ -269,7 +269,23 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         await AwaitBackgroundAsync();
     }
 
-    public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
+    /// <summary>Broadcasts a message to every peer; the message is disposed once after the loop.</summary>
+    internal async ValueTask BroadcastAsync(IZConnection[] peers, ZMessage message, CancellationToken token)
+    {
+        try
+        {
+            foreach (var peer in peers)
+            {
+                await SendToPeerAsync(peer, message, token);
+            }
+        }
+        finally
+        {
+            message.Dispose();
+        }
+    }
+
+    public virtual async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
     {
         ThrowIfClosed();
         try
@@ -511,6 +527,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         "REP" => peerType is "REQ" or "DEALER",
         "PUSH" => peerType == "PULL",
         "PULL" => peerType == "PUSH",
+        "PUB" => peerType == "SUB",
+        "SUB" => peerType == "PUB",
         _ => true,
     };
 
@@ -627,17 +645,25 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         var message = BuildMessage(accumulator.Frames);
         accumulator.Frames.Clear();
         accumulator.Materializer?.Reset();
-        message = PrefixInboundForSink(connection, message);
-        await messageSink!.OnMessageAsync(connection, message, token);
+        ZMessage? prepared = PrepareInboundForSink(connection, message);
+        if (prepared is null)
+        {
+            // The pattern filtered the message (e.g. SUB topic mismatch); the
+            // filter disposed it. The peer's pump continues.
+            return true;
+        }
+
+        await messageSink!.OnMessageAsync(connection, prepared.Value, token);
         return true;
     }
 
     /// <summary>
     /// Pattern hook on the semantic seam (0007 2.2): a pattern core may frame
-    /// inbound messages before they reach the sink. ROUTER prefixes the peer's
-    /// routing identity; the default passes the message through.
+    /// (ROUTER identity prefix) or filter (SUB topic match) inbound messages
+    /// before they reach the sink. A null return drops the message - the
+    /// override must dispose it. The default passes the message through.
     /// </summary>
-    protected virtual ZMessage PrefixInboundForSink(IZConnection peer, ZMessage message) => message;
+    protected virtual ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message) => message;
 
     private static ZMessage BuildMessage(List<ZFrame> frames)
     {

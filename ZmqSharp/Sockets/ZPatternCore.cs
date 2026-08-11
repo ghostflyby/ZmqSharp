@@ -89,6 +89,24 @@ internal sealed class ZRouterCore : IPatternCore
     public string SocketTypeName => "ROUTER";
 }
 
+/// <summary>PUB semantics (libzmq, 0013): send-only broadcast; the message's first frame is the topic.</summary>
+internal sealed class ZPubCore : IPatternCore
+{
+    public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
+        => throw new InvalidOperationException("PUB broadcasts through SendAsync(message)");
+
+    public string SocketTypeName => "PUB";
+}
+
+/// <summary>SUB semantics (libzmq, 0013): receive-only with a topic-prefix subscription filter.</summary>
+internal sealed class ZSubCore : IPatternCore
+{
+    public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
+        => throw new InvalidOperationException("SUB is receive-only");
+
+    public string SocketTypeName => "SUB";
+}
+
 /// <summary>
 /// REQ semantics (libzmq, 0010): strict single in-flight request, round-robin
 /// outbound, replies accepted only from the current peer.

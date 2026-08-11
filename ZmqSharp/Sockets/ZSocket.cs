@@ -37,4 +37,10 @@ public static class ZSocket
 
     public static ZRouterSocket CreateRouterCallback(ZSocketOptions? options = null)
         => new(options ?? new ZSocketOptions());
+
+    public static ZPubSocket CreatePub(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
+
+    public static ZSubSocket CreateSubCallback(ZSocketOptions? options = null)
+        => new(options ?? new ZSocketOptions());
 }

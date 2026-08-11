@@ -69,7 +69,7 @@ public sealed class ZRouterSocket : ZSocketBase
     }
 
     /// <summary>Prefixes the peer's routing identity to every inbound message.</summary>
-    protected override ZMessage PrefixInboundForSink(IZConnection peer, ZMessage message)
+    protected override ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message)
     {
         var identity = GetOrAssignIdentity(peer);
         var frames = new List<ZFrame>(message.Count + 1)
