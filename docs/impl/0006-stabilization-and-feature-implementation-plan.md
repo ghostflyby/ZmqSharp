@@ -404,7 +404,11 @@ Implemented matrix (both directions over TCP, tagged `Category = "Interop"`):
   `RequestSocket` + ZmqSharp `ZRepSocket`, exercising the leading
   empty-delimiter framing in both directions; incompatible Socket-Type
   pairing (PAIR vs DEALER) rejected during the handshake.
-- DEALER interop is deferred.
+- DEALER/ROUTER: DEALER both directions over TCP; ROUTER identity framing
+  against a NetMQ DEALER peer (0012).
+- PUSH/PULL: both directions over TCP, round-robin distribution (0011).
+- PUB/SUB: both directions over TCP with subscription propagation (0013).
+- XPUB/XSUB: subscription observation and manual subscription frames (0014).
 
 Self-roundtrip tests remain useful unit tests but do not count as standards
 interoperability evidence.
@@ -418,13 +422,24 @@ its public API is implemented.
 Recommended exploration order:
 
 1. PAIR as the minimal single-peer lifecycle surface.
+   Implemented: `ZPairSocket` / `ZQueueSocket&lt;ZPairSocket&gt;` with NetMQ
+   interop both directions (0006 section 5).
 2. PUSH/PULL as one-directional load balancing and fair intake.
+   Implemented (0011): send-only round-robin PUSH, receive-only fair-queue
+   PULL, NetMQ interop both directions.
 3. PUB/SUB as explicit lossy delivery plus subscription filtering.
+   Implemented (0013): broadcast PUB, topic-prefix SUB with libzmq
+   subscription propagation, NetMQ interop both directions.
 4. REQ/REP as operation-oriented request/reply state machines.
    Implemented (0010): strict alternation, REQ round-robin outbound, REP
    fair intake with directed replies, empty-delimiter wire framing, REQ
-   operation surface and REP typed callback surface.
+   operation surface and REP typed callback surface, NetMQ interop.
 5. DEALER/ROUTER as asynchronous routing and identity-aware delivery.
+   Implemented (0012): DEALER round-robin / fair-queue, ROUTER identity
+   routing with router-assigned routing ids, NetMQ interop.
+6. XPUB/XSUB as subscription observation and manual subscription control.
+   Implemented (0014), with NetMQ interop; STREAM deferred (RFC 23/37
+   routing-id wire metadata is a prerequisite).
 
 The design track must evaluate operation-oriented candidates such as a
 reply-returning REQ send, a reply-capable REP request context, and explicit

@@ -265,17 +265,22 @@ boundaries and by M3 at internal seams - never by wrapper indirection.
 
 ## 5. Public surface shapes per pattern
 
-| Type | Operation model (0004) | Suggested public surface |
+All shapes are implemented with their NetMQ interop suites (0006 section 5);
+design docs 0010-0014 fix the exact signatures.
+
+| Type | Operation model (0004) | Public surface (implemented) |
 |---|---|---|
-| PAIR | symmetric, single peer | callback or channel |
-| PUSH | send-only, round-robin | `SendAsync` only |
-| PULL | receive-only, fair-queue | channel / async stream / callback |
-| PUB | send-only, broadcast, topic prefix | `SendAsync(topic, payload)` |
-| SUB | receive-only, topic filter | `Subscribe` / `Unsubscribe` + receive stream or callback |
-| REQ | strict alternation, single in-flight | `Task<ZMessage> RequestAsync(ZMessage)` |
-| REP | directed reply, strict alternation | `OnRequest(ZRequestContext)` or `ReceiveRequestAsync` + `SendReplyAsync(context, reply)` |
-| DEALER | asynchronous round-robin / fair-queue | free-form send + receive stream or callback |
-| ROUTER | identity-aware | `SendAsync(identity, message)`; receive returns a routed value |
+| PAIR | symmetric, single peer | `CreatePair` (channel) / `CreatePairCallback` |
+| PUSH | send-only, round-robin | `CreatePush` → `SendAsync` only |
+| PULL | receive-only, fair-queue | `CreatePull` → channel surface |
+| PUB | send-only, broadcast, topic prefix | `CreatePub` → `SendAsync(message)` broadcast |
+| SUB | receive-only, topic filter | `CreateSubCallback` → `Subscribe`/`Unsubscribe` + sink |
+| REQ | strict alternation, single in-flight | `CreateReq` → `Task<ZMessage> RequestAsync(ZMessage)` |
+| REP | directed reply, strict alternation | `CreateRep` → `BindRequestHandler` + `SendReplyAsync(context, reply)` |
+| DEALER | asynchronous round-robin / fair-queue | `CreateDealer` (channel) / `CreateDealerCallback` |
+| ROUTER | identity-aware | `CreateRouter` (channel) / `CreateRouterCallback` + `SendAsync(identity, message)` |
+| XPUB | broadcast + subscription observation | `CreateXPub` + sink |
+| XSUB | manual subscription control | `CreateXSubCallback` + sink |
 
 The factory (`ZSocket.Create*`) selects the surface: `CreatePair` /
 `CreatePairCallback`, and the analogous split per pattern as the surface set
