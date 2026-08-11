@@ -25,6 +25,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     /// <summary>Per-connection endpoint, used only by the rare DisconnectAsync lookup.</summary>
     private readonly Dictionary<IZConnection, object?> endpoints = [];
+
     private readonly List<(IZTransport Listener, object? Endpoint)> listeners = [];
     private readonly Dictionary<IZConnection, TaskCompletionSource> establishedGates = [];
     private readonly Dictionary<IZConnection, CancellationTokenSource> attemptTokens = [];
@@ -32,6 +33,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     /// <summary>Per-peer frame accumulators for message aggregation (0007 2.3).</summary>
     private readonly Dictionary<IZConnection, PeerAccumulator> accumulators = [];
+
     private readonly int maxCommandSize;
     private readonly IPatternCore core;
     private readonly int handshakeTimeoutMs;
@@ -77,9 +79,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 // a message sink is mutually exclusive with the raw frame
                 // surface on the same instance.
                 if (messageSink is not null)
-                {
                     throw new InvalidOperationException("cannot subscribe to OnFrame after a message sink is bound");
-                }
 
                 onFrame += value;
             }
@@ -114,10 +114,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// <summary>Resumes every peer receive pump paused by a false <see cref="OnFrame"/> return.</summary>
     public void ResumePaused()
     {
-        while (paused.TryDequeue(out var parser))
-        {
-            parser.Resume();
-        }
+        while (paused.TryDequeue(out var parser)) parser.Resume();
     }
 
     /// <summary>
@@ -131,9 +128,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         lock (StateLock)
         {
             if (peerSnapshot.Length > 0)
-            {
-                throw new InvalidOperationException("peer connected handler must be set before connections are established");
-            }
+                throw new InvalidOperationException(
+                    "peer connected handler must be set before connections are established");
 
             peerConnected = handler;
         }
@@ -151,9 +147,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         lock (StateLock)
         {
             if (peerSnapshot.Length > 0)
-            {
                 throw new InvalidOperationException("message sink must be bound before connections are established");
-            }
 
             messageSink = sink;
         }
@@ -175,9 +169,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         lock (StateLock)
         {
             if (peerSnapshot.Length > 0)
-            {
-                throw new InvalidOperationException("receive materialization must be set before connections are established");
-            }
+                throw new InvalidOperationException(
+                    "receive materialization must be set before connections are established");
 
             receivePolicy = policy;
             this.maxFrameLength = maxFrameLength;
@@ -189,7 +182,10 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// <summary>Total frames rejected by the receive materialization since construction.</summary>
     internal long ReceiveRejectionsCount => Volatile.Read(ref receiveRejections);
 
-    private void OnMaterializerRejected() => Interlocked.Increment(ref receiveRejections);
+    private void OnMaterializerRejected()
+    {
+        Interlocked.Increment(ref receiveRejections);
+    }
 
     public async Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
@@ -241,29 +237,18 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         {
             matches = [];
             foreach (var connection in peerSnapshot)
-            {
                 if (endpoints.TryGetValue(connection, out var peerEndpoint) && Equals(peerEndpoint, endpoint))
-                {
                     matches.Add(connection);
-                }
-            }
 
             foreach (var match in matches)
-            {
                 // Cancel the in-flight attempt first: disposing the transport
                 // stream does not reliably interrupt a pending read, which
                 // would leave the connection pump stuck and the peer routable.
                 if (attemptTokens.TryGetValue(match, out var attemptCts))
-                {
                     attemptCts.Cancel();
-                }
-            }
         }
 
-        foreach (var match in matches)
-        {
-            match.Dispose();
-        }
+        foreach (var match in matches) match.Dispose();
 
         return Task.CompletedTask;
     }
@@ -279,10 +264,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
         try
         {
-            foreach (var peer in peers)
-            {
-                await SendToPeerAsync(peer, message, token);
-            }
+            foreach (var peer in peers) await SendToPeerAsync(peer, message, token);
         }
         finally
         {
@@ -306,16 +288,15 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private async ValueTask SendToTargetAsync(ZMessage message, CancellationToken token)
     {
         var connection = SelectTarget(message);
-        if (connection is null)
-        {
-            return;
-        }
+        if (connection is null) return;
 
         await SendToPeerAsync(connection, message, token);
     }
 
     private IZConnection? SelectTarget(ZMessage message)
-        => core.RouteOutbound(message, peerSnapshot.AsSpan());
+    {
+        return core.RouteOutbound(message, peerSnapshot.AsSpan());
+    }
 
     /// <summary>
     /// Establishes the ZMTP handshake within <c>HandshakeTimeoutMs</c> (0006
@@ -325,10 +306,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private async Task<bool> EstablishWithTimeoutAsync(ZmtpParser parser, CancellationToken token)
     {
         if (handshakeTimeoutMs > 0)
-        {
             return await parser.EstablishAsync(token).AsTask().WaitAsync(
                 TimeSpan.FromMilliseconds(handshakeTimeoutMs), token);
-        }
 
         return await parser.EstablishAsync(token);
     }
@@ -383,7 +362,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         return ValueTask.CompletedTask;
     }
 
-    private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint, CancellationToken token = default)
+    private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint,
+        CancellationToken token = default)
     {
         ReceiveMaterializer? materializer = null;
         ZFrameAllocator? allocator = null;
@@ -510,22 +490,17 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         finally
         {
             // Internal state first: a failing callback must not leave the peer routable.
-            PeerAccumulator? accumulator = null;
             lock (StateLock)
             {
                 PublishRemove(connection);
                 establishedGates.Remove(connection);
                 attemptTokens.Remove(connection);
                 incompleteHandshakes--;
-                if (accumulators.Remove(connection, out accumulator))
-                {
+                if (accumulators.Remove(connection, out var accumulator))
                     // The peer ended mid-message: owning frames accumulated for
                     // the incomplete message have no consumer and must not leak.
                     foreach (var frame in accumulator.Frames)
-                    {
                         frame.Dispose();
-                    }
-                }
             }
 
             try
@@ -552,21 +527,24 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
     }
 
-    private static bool IsCompatibleSocketType(string localType, string peerType) => localType switch
+    private static bool IsCompatibleSocketType(string localType, string peerType)
     {
-        "PAIR" => peerType == "PAIR",
-        "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
-        "ROUTER" => peerType is "DEALER" or "REQ" or "ROUTER",
-        "REQ" => peerType == "REP",
-        "REP" => peerType is "REQ" or "DEALER",
-        "PUSH" => peerType == "PULL",
-        "PULL" => peerType == "PUSH",
-        "PUB" => peerType == "SUB",
-        "SUB" => peerType == "PUB",
-        "XPUB" => peerType is "SUB" or "XSUB" or "XPUB",
-        "XSUB" => peerType is "PUB" or "XPUB" or "XSUB",
-        _ => true,
-    };
+        return localType switch
+        {
+            "PAIR" => peerType == "PAIR",
+            "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
+            "ROUTER" => peerType is "DEALER" or "REQ" or "ROUTER",
+            "REQ" => peerType == "REP",
+            "REP" => peerType is "REQ" or "DEALER",
+            "PUSH" => peerType == "PULL",
+            "PULL" => peerType == "PUSH",
+            "PUB" => peerType == "SUB",
+            "SUB" => peerType == "PUB",
+            "XPUB" => peerType is "SUB" or "XSUB" or "XPUB",
+            "XSUB" => peerType is "PUB" or "XPUB" or "XSUB",
+            _ => true
+        };
+    }
 
     private async ValueTask WaitUntilEstablishedAsync(IZConnection connection, CancellationToken token)
     {
@@ -578,10 +556,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
         // An established peer's gate completed successfully; skipping the
         // WaitAsync keeps the steady-state send path allocation-free (0006 3.6).
-        if (gate is null || gate.Task.IsCompletedSuccessfully)
-        {
-            return;
-        }
+        if (gate is null || gate.Task.IsCompletedSuccessfully) return;
 
         await gate.Task.WaitAsync(token);
     }
@@ -591,16 +566,15 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// callback; a false return pauses this peer's pump until ResumePaused.
     /// </summary>
     private ZFrameHandlerAsync BorrowedSink(ZmtpParser parser)
-        => (frame, _) =>
+    {
+        return (frame, _) =>
         {
             var keepGoing = RaiseOnFrame(frame);
-            if (!keepGoing)
-            {
-                paused.Enqueue(parser);
-            }
+            if (!keepGoing) paused.Enqueue(parser);
 
             return ValueTask.FromResult(keepGoing);
         };
+    }
 
     private bool RaiseOnFrame(ZFrame frame)
     {
@@ -610,16 +584,10 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             handler = onFrame;
         }
 
-        if (handler is null)
-        {
-            return true;
-        }
+        if (handler is null) return true;
 
         var keepGoing = true;
-        foreach (Delegate item in handler.GetInvocationList())
-        {
-            keepGoing &= ((ZFrameHandler)item)(frame, Cts.Token);
-        }
+        foreach (var item in handler.GetInvocationList()) keepGoing &= ((ZFrameHandler)item)(frame, Cts.Token);
 
         return keepGoing;
     }
@@ -638,7 +606,8 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         public ReceiveMaterializer? Materializer { get; init; }
     }
 
-    private ZFrameHandlerAsync MessageSinkHandler(IZConnection connection, ZmtpParser parser, ReceiveMaterializer? materializer)
+    private ZFrameHandlerAsync MessageSinkHandler(IZConnection connection, ZmtpParser parser,
+        ReceiveMaterializer? materializer)
     {
         var accumulator = new PeerAccumulator { Materializer = materializer };
         lock (StateLock)
@@ -673,21 +642,16 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 frame.More));
         }
 
-        if (frame.More)
-        {
-            return true;
-        }
+        if (frame.More) return true;
 
         var message = BuildMessage(accumulator.Frames);
         accumulator.Frames.Clear();
         accumulator.Materializer?.Reset();
-        ZMessage? prepared = PrepareInboundForSink(connection, message);
+        var prepared = PrepareInboundForSink(connection, message);
         if (prepared is null)
-        {
             // The pattern filtered the message (e.g. SUB topic mismatch); the
             // filter disposed it. The peer's pump continues.
             return true;
-        }
 
         await messageSink!.OnMessageAsync(connection, prepared.Value, token);
         return true;
@@ -699,14 +663,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// before they reach the sink. A null return drops the message - the
     /// override must dispose it. The default passes the message through.
     /// </summary>
-    protected virtual ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message) => message;
+    protected virtual ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message)
+    {
+        return message;
+    }
 
     private static ZMessage BuildMessage(List<ZFrame> frames)
     {
-        if (frames.Count == 1)
-        {
-            return new ZMessage(new ZSingleMessage(frames[0]));
-        }
+        if (frames.Count == 1) return new ZMessage(new ZSingleMessage(frames[0]));
 
         return new ZMessage(new ZMultiMessage([.. frames]));
     }
@@ -731,41 +695,40 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         private int frameIndex;
         private long accumulatedLength;
 
-        public ZFrameAllocator CreateAllocator() => (length, more) =>
+        public ZFrameAllocator CreateAllocator()
         {
-            var frameIndex = this.frameIndex;
-            if (!ZReceiveGuard.TryAccumulate(accumulatedLength, length, out var accumulated))
+            return (length, more) =>
             {
-                // An unrepresentable message total is a rejection, never an
-                // arithmetic exception (0008 D3/D6).
-                Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
-            }
+                var frameIndex = this.frameIndex;
+                if (!ZReceiveGuard.TryAccumulate(accumulatedLength, length, out var accumulated))
+                    // An unrepresentable message total is a rejection, never an
+                    // arithmetic exception (0008 D3/D6).
+                    Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
 
-            this.frameIndex = frameIndex + 1;
-            accumulatedLength = accumulated;
+                this.frameIndex = frameIndex + 1;
+                accumulatedLength = accumulated;
 
-            // Connection-level limits are enforced here, before any allocation,
-            // so a custom policy can never bypass them (0008 D1).
-            if (ZReceiveGuard.CheckLimits(
-                    length,
-                    accumulated,
-                    frameIndex,
-                    maxFrameLength,
-                    maxMessageLength,
-                    maxFramesPerMessage) is { } rejection)
-            {
-                Reject(rejection);
-            }
+                // Connection-level limits are enforced here, before any allocation,
+                // so a custom policy can never bypass them (0008 D1).
+                if (ZReceiveGuard.CheckLimits(
+                        length,
+                        accumulated,
+                        frameIndex,
+                        maxFrameLength,
+                        maxMessageLength,
+                        maxFramesPerMessage) is { } rejection)
+                    Reject(rejection);
 
-            var allocation = policy.Decide(new ZReceiveContext
-            {
-                FrameLength = length,
-                HasMore = more,
-                FrameIndex = frameIndex,
-                AccumulatedLength = accumulated,
-            });
-            return AllocateSegments(allocation, length, more);
-        };
+                var allocation = policy.Decide(new ZReceiveContext
+                {
+                    FrameLength = length,
+                    HasMore = more,
+                    FrameIndex = frameIndex,
+                    AccumulatedLength = accumulated
+                });
+                return AllocateSegments(allocation, length, more);
+            };
+        }
 
         /// <summary>Resets the guard counters at a message boundary.</summary>
         public void Reset()
@@ -781,7 +744,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
 
         private void Reject(ZReceiveRejectionReason reason, long? limit, long? actual)
-            => Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
+        {
+            Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
+        }
 
         private (object Owner, int Length) Allocate(ZReceiveMode mode, int length)
         {
@@ -834,10 +799,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     private async Task StopAsync()
     {
-        if (Interlocked.Exchange(ref Closed, 1) != 0)
-        {
-            return;
-        }
+        if (Interlocked.Exchange(ref Closed, 1) != 0) return;
 
         await Cts.CancelAsync();
         List<IZTransport> listenerSnapshot;
@@ -847,10 +809,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             listeners.Clear();
         }
 
-        foreach (var listener in listenerSnapshot)
-        {
-            listener.Dispose();
-        }
+        foreach (var listener in listenerSnapshot) listener.Dispose();
 
         Cts.Dispose();
     }
@@ -873,10 +832,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
         var current = peerSnapshot;
         var index = Array.IndexOf(current, connection);
-        if (index < 0)
-        {
-            return;
-        }
+        if (index < 0) return;
 
         var updated = new IZConnection[current.Length - 1];
         current.AsSpan(0, index).CopyTo(updated);

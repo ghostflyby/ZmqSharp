@@ -70,9 +70,9 @@ public sealed class ZmtpFrameEncoder(Stream stream)
 
     public async ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
     {
-        for (int i = 0; i < message.Count; i++)
+        for (var i = 0; i < message.Count; i++)
         {
-            bool more = i < message.Count - 1;
+            var more = i < message.Count - 1;
             await WriteFrameAsync(message[i], more, token);
         }
     }
@@ -89,31 +89,22 @@ public sealed class ZmtpFrameEncoder(Stream stream)
         if (frame.TryGetValue(out ZSegments segments))
         {
             var length = 0L;
-            foreach (var seg in segments)
-            {
-                length += seg.Memory.Length;
-            }
+            foreach (var seg in segments) length += seg.Memory.Length;
 
             await WriteFrameHeaderAsync(length, more, token);
-            foreach (var seg in segments)
-            {
-                await stream.WriteAsync(seg.Memory, token);
-            }
+            foreach (var seg in segments) await stream.WriteAsync(seg.Memory, token);
         }
     }
 
     public async ValueTask WriteFrameAsync(ReadOnlySequence<byte> frame, bool more, CancellationToken token = default)
     {
         await WriteFrameHeaderAsync(frame.Length, more, token);
-        foreach (var memory in frame)
-        {
-            await stream.WriteAsync(memory, token);
-        }
+        foreach (var memory in frame) await stream.WriteAsync(memory, token);
     }
 
     private async ValueTask WriteFrameHeaderAsync(long length, bool more, CancellationToken token)
     {
-        bool isLong = length > 255;
+        var isLong = length > 255;
         if (isLong)
         {
             header[0] = (byte)((more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None) | ZmtpFrameFlags.LongSize);

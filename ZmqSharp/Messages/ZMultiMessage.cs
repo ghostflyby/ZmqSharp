@@ -7,7 +7,10 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
 {
     private readonly ZFrame[] frames;
 
-    internal ZMultiMessage(ZFrame[] frames) => this.frames = frames;
+    internal ZMultiMessage(ZFrame[] frames)
+    {
+        this.frames = frames;
+    }
 
     public int Count => frames.Length;
 
@@ -21,18 +24,24 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator() => new(frames);
+    public Enumerator GetEnumerator()
+    {
+        return new Enumerator(frames);
+    }
 
-    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
     public void Dispose()
     {
-        foreach (var frame in frames)
-        {
-            frame.Dispose();
-        }
+        foreach (var frame in frames) frame.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZFrame>
@@ -51,9 +60,7 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
             get
             {
                 if (index < 0 || index >= frames.Length)
-                {
                     throw new InvalidOperationException("enumeration has not started or has already finished");
-                }
 
                 return frames[index];
             }
@@ -73,7 +80,10 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
             return false;
         }
 
-        public void Reset() => index = -1;
+        public void Reset()
+        {
+            index = -1;
+        }
 
         public void Dispose()
         {

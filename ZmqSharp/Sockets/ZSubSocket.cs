@@ -58,13 +58,9 @@ public class ZSubSocket : ZSocketBase
         lock (StateLock)
         {
             foreach (var subscription in subscriptions)
-            {
                 if (subscription.Length <= topic.Length
                     && topic.Slice(0, subscription.Length).ToArray().AsSpan().SequenceEqual(subscription))
-                {
                     return message;
-                }
-            }
         }
 
         message.Dispose();

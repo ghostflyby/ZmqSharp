@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Text;
 using System.Threading.Channels;
 using FluentAssertions;
 using NetMQ;
@@ -9,7 +8,7 @@ using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>
 /// DEALER/ROUTER interop with the NetMQ libzmq-compatible implementation over
@@ -28,21 +27,21 @@ public sealed class DealerRouterInteropTests
 
         await using var ours = ZSocket.CreateDealer(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await ours.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
         // Ours -> NetMQ.
-        await ours.SendAsync(ZMessage.FromOwned("hello"u8.ToArray()), cts.Token);
+        await ours.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
         var received = InteropHelpers.ReceiveFrame(dealer, TimeSpan.FromSeconds(5));
-        received.Should().Equal("hello"u8.ToArray());
+        received.Should().Equal([.. "hello"u8]);
 
         // NetMQ -> ours.
-        dealer.SendFrame("world"u8.ToArray());
+        dealer.SendFrame([.. "world"u8]);
         var message = await ReadMessageAsync(ours.Messages, TimeSpan.FromSeconds(5));
         message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal("world"u8.ToArray());
+        message.Value[0].ToSequence().ToArray().Should().Equal([.. "world"u8]);
         message.Value.Dispose();
     }
 
@@ -64,26 +63,17 @@ public sealed class DealerRouterInteropTests
         await router.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
         // The dealer sends [payload]; our router prefixes its own routing id.
-        dealer.SendFrame("ping"u8.ToArray());
+        dealer.SendFrame([.. "ping"u8]);
         var routed = await routedMessage.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var identity = routed[0].ToSequence().ToArray();
         identity.Should().NotBeEmpty();
-        routed[1].ToSequence().ToArray().Should().Equal("ping"u8.ToArray());
+        routed[1].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
         routed.Dispose();
 
         // Reply with the identity frame -> routes back to the dealer.
-        await router.SendAsync(identity, ZMessage.FromOwned("pong"u8.ToArray()), cts.Token);
+        await router.SendAsync(identity, ZMessage.FromOwned([.. "pong"u8]), cts.Token);
         var reply = InteropHelpers.ReceiveFrame(dealer, TimeSpan.FromSeconds(5));
-        reply.Should().Equal("pong"u8.ToArray());
-    }
-
-    private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink
-    {
-        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
-        {
-            onMessage(message);
-            return ValueTask.CompletedTask;
-        }
+        reply.Should().Equal([.. "pong"u8]);
     }
 
     private static async Task<ZMessage?> ReadMessageAsync(ChannelReader<ZMessage> reader, TimeSpan timeout)
@@ -96,6 +86,15 @@ public sealed class DealerRouterInteropTests
         catch (OperationCanceledException)
         {
             return null;
+        }
+    }
+
+    private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink
+    {
+        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        {
+            onMessage(message);
+            return ValueTask.CompletedTask;
         }
     }
 }

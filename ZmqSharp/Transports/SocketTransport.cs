@@ -34,7 +34,7 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
         {
             await socket.ConnectAsync(endpoint, token);
             socket.NoDelay = true;
-            return new ZConnection(new NetworkStream(socket, ownsSocket: true));
+            return new ZConnection(new NetworkStream(socket, true));
         }
         catch
         {
@@ -75,15 +75,11 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
             try
             {
                 accepted.NoDelay = true;
-                var connection = new ZConnection(new NetworkStream(accepted, ownsSocket: true));
+                var connection = new ZConnection(new NetworkStream(accepted, true));
                 if (onAccept is not null)
-                {
                     await onAccept(connection, token);
-                }
                 else
-                {
                     connection.Dispose();
-                }
             }
             catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
             {
@@ -96,9 +92,6 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref closed, 1) == 0)
-        {
-            socket.Dispose();
-        }
+        if (Interlocked.Exchange(ref closed, 1) == 0) socket.Dispose();
     }
 }

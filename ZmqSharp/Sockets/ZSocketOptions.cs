@@ -1,4 +1,5 @@
 using System.Buffers;
+using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Sockets;
 
@@ -10,10 +11,6 @@ public sealed class ZSocketOptions
     /// entirely (0008 Slice B completion gate).
     /// </summary>
     public const int MinMaxCommandSize = 256;
-
-    private int maxCommandSize = Zmtp.ZmtpParser.DefaultMaxCommandSize;
-    private int handshakeTimeoutMs = 30_000;
-    private int maxIncompleteHandshakes = 1024;
 
     /// <summary>
     /// Memory pool used for the send copy path; defaults to the shared pool.
@@ -30,13 +27,13 @@ public sealed class ZSocketOptions
     /// </summary>
     public int MaxCommandSize
     {
-        get => maxCommandSize;
+        get;
         init
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(value, MinMaxCommandSize);
-            maxCommandSize = value;
+            field = value;
         }
-    }
+    } = ZmtpParser.DefaultMaxCommandSize;
 
     /// <summary>
     /// ZMTP handshake timeout in milliseconds (0006 3.2); a peer that does not
@@ -45,13 +42,13 @@ public sealed class ZSocketOptions
     /// </summary>
     public int HandshakeTimeoutMs
     {
-        get => handshakeTimeoutMs;
+        get;
         init
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
-            handshakeTimeoutMs = value;
+            field = value;
         }
-    }
+    } = 30_000;
 
     /// <summary>
     /// Maximum concurrently incomplete handshakes on the inbound (accepted)
@@ -61,11 +58,11 @@ public sealed class ZSocketOptions
     /// </summary>
     public int MaxIncompleteHandshakes
     {
-        get => maxIncompleteHandshakes;
+        get;
         init
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
-            maxIncompleteHandshakes = value;
+            field = value;
         }
-    }
+    } = 1024;
 }

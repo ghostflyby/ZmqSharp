@@ -8,12 +8,12 @@ using Xunit;
 using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>
-/// PAIR interop with the NetMQ libzmq-compatible implementation over TCP,
-/// in both directions (0006 section 5): greeting/READY, short/long/multipart
-/// messages, partial reads (long frames), and peer close.
+///     PAIR interop with the NetMQ libzmq-compatible implementation over TCP,
+///     in both directions (0006 section 5): greeting/READY, short/long/multipart
+///     messages, partial reads (long frames), and peer close.
 /// </summary>
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class PairInteropTests
@@ -28,21 +28,21 @@ public sealed class PairInteropTests
 
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await server.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
         // ZmqSharp -> NetMQ.
-        await server.SendAsync(ZMessage.FromOwned("ping"u8.ToArray()), cts.Token);
+        await server.SendAsync(ZMessage.FromOwned([.. "ping"u8]), cts.Token);
         var received = InteropHelpers.ReceiveFrame(peer, TimeSpan.FromSeconds(5));
-        received.Should().Equal("ping"u8.ToArray());
+        received.Should().Equal([.. "ping"u8]);
 
         // NetMQ -> ZmqSharp.
-        peer.SendFrame("pong"u8.ToArray());
+        peer.SendFrame([.. "pong"u8]);
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
         message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal("pong"u8.ToArray());
+        message.Value[0].ToSequence().ToArray().Should().Equal([.. "pong"u8]);
         message.Value.Dispose();
     }
 
@@ -56,22 +56,22 @@ public sealed class PairInteropTests
 
         await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
         // NetMQ -> ZmqSharp.
-        peer.SendFrame("hello"u8.ToArray());
+        peer.SendFrame([.. "hello"u8]);
         var message = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), cts.Token);
         message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal("hello"u8.ToArray());
+        message.Value[0].ToSequence().ToArray().Should().Equal([.. "hello"u8]);
         message.Value.Dispose();
 
         // ZmqSharp -> NetMQ.
-        await client.SendAsync(ZMessage.FromOwned("world"u8.ToArray()), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "world"u8]), cts.Token);
         var received = InteropHelpers.ReceiveFrame(peer, TimeSpan.FromSeconds(5));
-        received.Should().Equal("world"u8.ToArray());
+        received.Should().Equal([.. "world"u8]);
     }
 
     [Fact]
@@ -84,31 +84,32 @@ public sealed class PairInteropTests
 
         await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
         // ZmqSharp -> NetMQ multipart.
-        await socket.SendAsync(MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray(), "c"u8.ToArray()), cts.Token);
+        await socket.SendAsync(MessageFactory.Multipart([.. "a"u8], [.. "b"u8], [.. "c"u8]), cts.Token);
         var frames = new NetMQMessage();
         peer.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref frames).Should().BeTrue();
+        frames.Should().NotBeNull();
         frames.FrameCount.Should().Be(3);
-        frames[0].ToByteArray().Should().Equal("a"u8.ToArray());
-        frames[1].ToByteArray().Should().Equal("b"u8.ToArray());
-        frames[2].ToByteArray().Should().Equal("c"u8.ToArray());
+        frames[0].ToByteArray().Should().Equal([.. "a"u8]);
+        frames[1].ToByteArray().Should().Equal([.. "b"u8]);
+        frames[2].ToByteArray().Should().Equal([.. "c"u8]);
 
         // NetMQ -> ZmqSharp multipart.
         var reply = new NetMQMessage();
-        reply.Append(new NetMQFrame("x"u8.ToArray()));
-        reply.Append(new NetMQFrame("y"u8.ToArray()));
+        reply.Append(new NetMQFrame([.. "x"u8]));
+        reply.Append(new NetMQFrame([.. "y"u8]));
         peer.SendMultipartMessage(reply);
 
         var message = await ReadMessageAsync(socket.Messages, TimeSpan.FromSeconds(5), cts.Token);
         message.Should().NotBeNull();
         message.Value.Count.Should().Be(2);
-        message.Value[0].ToSequence().ToArray().Should().Equal("x"u8.ToArray());
-        message.Value[1].ToSequence().ToArray().Should().Equal("y"u8.ToArray());
+        message.Value[0].ToSequence().ToArray().Should().Equal([.. "x"u8]);
+        message.Value[1].ToSequence().ToArray().Should().Equal([.. "y"u8]);
         message.Value.Dispose();
     }
 
@@ -116,10 +117,7 @@ public sealed class PairInteropTests
     public async Task LongFrame_BothDirections()
     {
         var payload = new byte[100_000];
-        for (var i = 0; i < payload.Length; i++)
-        {
-            payload[i] = (byte)(i % 251);
-        }
+        for (var i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 251);
 
         using var peer = new PairSocket();
         peer.Options.Linger = TimeSpan.Zero;
@@ -128,7 +126,7 @@ public sealed class PairInteropTests
 
         await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
@@ -157,7 +155,7 @@ public sealed class PairInteropTests
 
         await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         socket.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));

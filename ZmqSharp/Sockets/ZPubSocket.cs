@@ -1,4 +1,3 @@
-using System.Buffers;
 using ZmqSharp.Messages;
 
 namespace ZmqSharp.Sockets;

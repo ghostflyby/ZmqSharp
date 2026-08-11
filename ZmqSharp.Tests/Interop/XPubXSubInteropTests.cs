@@ -9,12 +9,12 @@ using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>
-/// XPUB/XSUB interop with the NetMQ libzmq-compatible implementation over TCP
-/// (0006 section 5, 0014): subscription observation and manual subscription
-/// frames.
+///     XPUB/XSUB interop with the NetMQ libzmq-compatible implementation over TCP
+///     (0006 section 5, 0014): subscription observation and manual subscription
+///     frames.
 /// </summary>
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class XPubXSubInteropTests
@@ -56,7 +56,7 @@ public sealed class XPubXSubInteropTests
     {
         var received = Channel.CreateUnbounded<ZMessage>();
         await using var xsub = ZSocket.CreateXSubCallback();
-        xsub.Subscribe("any"u8.ToArray());
+        xsub.Subscribe([.. "any"u8]);
         xsub.BindMessageSink(new TestSink(message => received.Writer.TryWrite(message)));
         var port = InteropHelpers.GetFreePort();
         await xsub.BindAsync($"tcp://127.0.0.1:{port}");
@@ -68,9 +68,10 @@ public sealed class XPubXSubInteropTests
 
         // NetMQ's XPublisherSocket (like PUB) only forwards data matching a
         // received subscription; our XSUB delivers the frame unfiltered.
-        var payload = Encoding.ASCII.GetBytes("any-thing").ToArray();
+        var payload = Encoding.ASCII.GetBytes("any-thing");
         xpub.SendFrame(payload);
-        var message = await received.Reader.ReadAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await received.Reader.ReadAsync(CancellationToken.None).AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5));
         message[0].ToSequence().ToArray().Should().Equal(payload);
         message.Dispose();
         await xsub.DisposeAsync();

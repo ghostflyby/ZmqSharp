@@ -11,13 +11,9 @@ namespace ZmqSharp.Sockets;
 /// publisher learns them. Data messages broadcast to all peers (topic =
 /// first frame, like PUB).
 /// </summary>
-public sealed class ZXPubSocket : ZPubSocket
+// ReSharper disable once InconsistentNaming
+public sealed class ZXPubSocket(ZSocketOptions options) : ZPubSocket(options, new ZXPubCore())
 {
-    public ZXPubSocket(ZSocketOptions options)
-        : base(options, new ZXPubCore())
-    {
-    }
-
     /// <summary>
     /// Forwards an inbound subscription frame to every peer except the sender,
     /// then hands it to the sink unchanged.
@@ -26,10 +22,7 @@ public sealed class ZXPubSocket : ZPubSocket
     {
         foreach (var other in PeerSnapshot)
         {
-            if (other == peer)
-            {
-                continue;
-            }
+            if (other == peer) continue;
 
             // The subscription frame is a single frame whose payload is
             // 0x01/0x00 + topic; forward a per-peer fresh copy (SendToAsync

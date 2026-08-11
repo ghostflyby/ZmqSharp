@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
 using ZmqSharp.Messages;
@@ -74,12 +73,9 @@ public sealed class ZRouterSocket : ZSocketBase
         var identity = GetOrAssignIdentity(peer);
         var frames = new List<ZFrame>(message.Count + 1)
         {
-            new(new ZSegment(identity, 0, identity.Length)),
+            new(new ZSegment(identity, 0, identity.Length))
         };
-        for (var i = 0; i < message.Count; i++)
-        {
-            frames.Add(message[i]);
-        }
+        for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
 
         return new ZMessage(new ZMultiMessage([.. frames]));
     }
@@ -88,10 +84,7 @@ public sealed class ZRouterSocket : ZSocketBase
     {
         lock (StateLock)
         {
-            if (peerIdentities.TryGetValue(peer, out var existing))
-            {
-                return existing;
-            }
+            if (peerIdentities.TryGetValue(peer, out var existing)) return existing;
 
             // Routing ids are local metadata: the identity never leaves this
             // socket, so byte order is irrelevant but fixed for determinism.
@@ -107,10 +100,7 @@ public sealed class ZRouterSocket : ZSocketBase
     {
         lock (StateLock)
         {
-            if (!peerIdentities.Remove(peer, out var identity))
-            {
-                return;
-            }
+            if (!peerIdentities.Remove(peer, out var identity)) return;
 
             identities.Remove(Encoding.Latin1.GetString(identity));
         }

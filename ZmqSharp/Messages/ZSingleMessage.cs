@@ -7,7 +7,10 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
 {
     private readonly ZFrame frame;
 
-    internal ZSingleMessage(ZFrame frame) => this.frame = frame;
+    internal ZSingleMessage(ZFrame frame)
+    {
+        this.frame = frame;
+    }
 
     public int Count => 1;
 
@@ -20,13 +23,25 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator() => new(frame);
+    public Enumerator GetEnumerator()
+    {
+        return new Enumerator(frame);
+    }
 
-    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    public void Dispose() => frame.Dispose();
+    public void Dispose()
+    {
+        frame.Dispose();
+    }
 
     public struct Enumerator : IEnumerator<ZFrame>
     {
@@ -39,7 +54,9 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
             state = 0;
         }
 
-        public ZFrame Current => state != 1 ? throw new InvalidOperationException("enumeration has not started or has already finished") : frame;
+        public ZFrame Current => state != 1
+            ? throw new InvalidOperationException("enumeration has not started or has already finished")
+            : frame;
 
         object IEnumerator.Current => Current;
 
@@ -55,7 +72,10 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
             return false;
         }
 
-        public void Reset() => state = 0;
+        public void Reset()
+        {
+            state = 0;
+        }
 
         public void Dispose()
         {

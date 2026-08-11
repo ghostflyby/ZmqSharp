@@ -10,7 +10,10 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
 {
     private readonly ZSegment[] segments;
 
-    internal ZSegments(ZSegment[] segments) => this.segments = segments;
+    internal ZSegments(ZSegment[] segments)
+    {
+        this.segments = segments;
+    }
 
     public int Count => segments.Length;
 
@@ -24,18 +27,24 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator() => new(segments);
+    public Enumerator GetEnumerator()
+    {
+        return new Enumerator(segments);
+    }
 
-    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
     public void Dispose()
     {
-        foreach (var segment in segments)
-        {
-            segment.Dispose();
-        }
+        foreach (var segment in segments) segment.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZSegment>
@@ -54,9 +63,7 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
             get
             {
                 if (index < 0 || index >= segments.Length)
-                {
                     throw new InvalidOperationException("enumeration has not started or has already finished");
-                }
 
                 return segments[index];
             }
@@ -76,7 +83,10 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
             return false;
         }
 
-        public void Reset() => index = -1;
+        public void Reset()
+        {
+            index = -1;
+        }
 
         public void Dispose()
         {

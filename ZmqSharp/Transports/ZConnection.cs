@@ -13,12 +13,20 @@ internal sealed class ZConnection(Stream stream) : IZConnection
     private Action? onConnectionEnded;
     private int disposed;
 
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> handler) => onFrame = handler;
+    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> handler)
+    {
+        onFrame = handler;
+    }
 
-    public void SetConnectionEndedHandler(Action handler) => onConnectionEnded = handler;
+    public void SetConnectionEndedHandler(Action handler)
+    {
+        onConnectionEnded = handler;
+    }
 
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
-        => stream.ReadAsync(buffer, token);
+    {
+        return stream.ReadAsync(buffer, token);
+    }
 
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
@@ -73,16 +81,19 @@ internal sealed class ZConnection(Stream stream) : IZConnection
     }
 
     public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-        => onFrame?.Invoke(frame, token) ?? ValueTask.FromResult(true);
+    {
+        return onFrame?.Invoke(frame, token) ?? ValueTask.FromResult(true);
+    }
 
-    public void OnConnectionEnded() => onConnectionEnded?.Invoke();
+    public void OnConnectionEnded()
+    {
+        onConnectionEnded?.Invoke();
+    }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref disposed, 1) == 0)
-        {
-            writeGate.Dispose();
-            stream.Dispose();
-        }
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        writeGate.Dispose();
+        stream.Dispose();
     }
 }

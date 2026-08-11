@@ -29,23 +29,33 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
     }
 
     public override int Read(byte[] buffer, int offset, int count)
-        => ReadInternal(buffer.AsSpan(offset, count));
+    {
+        return ReadInternal(buffer.AsSpan(offset, count));
+    }
 
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        => ValueTask.FromResult(ReadInternal(buffer.Span));
+    {
+        return ValueTask.FromResult(ReadInternal(buffer.Span));
+    }
 
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        throw new NotSupportedException();
+    }
 
-    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void SetLength(long value)
+    {
+        throw new NotSupportedException();
+    }
 
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        throw new NotSupportedException();
+    }
 
     private int ReadInternal(Span<byte> buffer)
     {
-        if (position >= data.Length)
-        {
-            return 0;
-        }
+        if (position >= data.Length) return 0;
 
         var available = data.Length - position;
         var chunk = maxChunkSize > 0 ? Math.Min(maxChunkSize, available) : available;
@@ -75,10 +85,7 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
-        {
-            inner.Dispose();
-        }
+        if (disposing) inner.Dispose();
     }
 
     private sealed class TrackingOwner(CountingMemoryPool pool, IMemoryOwner<byte> inner) : IMemoryOwner<byte>
@@ -118,22 +125,19 @@ internal sealed class ProbingMemoryPool : MemoryPool<byte>
     public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
     {
         Interlocked.Increment(ref rented);
-        if (FailOnRent is { } failure)
-        {
-            throw failure;
-        }
+        if (FailOnRent is { } failure) throw failure;
 
         return inner.Rent(minimumBufferSize);
     }
 
-    public void Reset() => Interlocked.Exchange(ref rented, 0);
+    public void Reset()
+    {
+        Interlocked.Exchange(ref rented, 0);
+    }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
-        {
-            inner.Dispose();
-        }
+        if (disposing) inner.Dispose();
     }
 }
 
@@ -141,7 +145,9 @@ internal sealed class ProbingMemoryPool : MemoryPool<byte>
 internal static class MessageFactory
 {
     public static ZMessage SingleFrame(byte[] payload)
-        => new(new ZSingleMessage(new ZFrame(new ZSegment(payload, 0, payload.Length))));
+    {
+        return new ZMessage(new ZSingleMessage(new ZFrame(new ZSegment(payload, 0, payload.Length))));
+    }
 
     public static ZMessage PooledSingleFrame(MemoryPool<byte> pool, byte[] payload)
     {
@@ -153,10 +159,7 @@ internal static class MessageFactory
 
     public static ZMessage SegmentedFrame(params byte[][] segments)
     {
-        if (segments.Length == 1)
-        {
-            return SingleFrame(segments[0]);
-        }
+        if (segments.Length == 1) return SingleFrame(segments[0]);
 
         return new ZMessage(new ZSingleMessage(
             new ZFrame(new ZSegments(
@@ -164,8 +167,10 @@ internal static class MessageFactory
     }
 
     public static ZMessage Multipart(params byte[][] frames)
-        => new(new ZMultiMessage(
+    {
+        return new ZMessage(new ZMultiMessage(
             [.. frames.Select(frame => new ZFrame(new ZSegment(frame, 0, frame.Length)))]));
+    }
 
     public static ZMessage PooledMultipart(MemoryPool<byte> pool, params byte[][] frames)
     {
@@ -212,18 +217,12 @@ internal static class ZmtpTestRunner
     public static async Task RunParserAsync(IZConnection connection, IZMessageSink sink)
     {
         using var parser = CreateParser(connection, sink);
-        if (await parser.EstablishAsync())
-        {
-            await parser.ParseAsync();
-        }
+        if (await parser.EstablishAsync()) await parser.ParseAsync();
     }
 
     public static async Task RunParserAsync(ZmtpParser parser)
     {
-        if (await parser.EstablishAsync())
-        {
-            await parser.ParseAsync();
-        }
+        if (await parser.EstablishAsync()) await parser.ParseAsync();
     }
 }
 
@@ -240,13 +239,20 @@ internal static class ZmtpTestData
         return result;
     }
 
-    public static byte[] Ready(string socketType = "PAIR") => Frame(ReadyBody(socketType), command: true);
+    public static byte[] Ready(string socketType = "PAIR")
+    {
+        return Frame(ReadyBody(socketType), command: true);
+    }
 
     private static byte[] ReadyBody(string socketType = "PAIR")
-        => ReadyBodyWithProperties(("Socket-Type", socketType));
+    {
+        return ReadyBodyWithProperties(("Socket-Type", socketType));
+    }
 
     public static byte[] ReadyWithProperties(params (string Name, string Value)[] properties)
-        => Frame(ReadyBodyWithProperties(properties), command: true);
+    {
+        return Frame(ReadyBodyWithProperties(properties), command: true);
+    }
 
     public static byte[] ReadyBodyWithProperties(params (string Name, string Value)[] properties)
     {
@@ -268,7 +274,9 @@ internal static class ZmtpTestData
     }
 
     public static byte[] ReadyWithRawProperty(ReadOnlySpan<byte> name, int valueLength)
-        => Frame(ReadyBodyWithRawProperty(name, valueLength), command: true);
+    {
+        return Frame(ReadyBodyWithRawProperty(name, valueLength), command: true);
+    }
 
     private static byte[] ReadyBodyWithRawProperty(ReadOnlySpan<byte> name, int valueLength)
     {
@@ -350,15 +358,22 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
         EndPoint endpoint,
         ZTransportOptions options,
         CancellationToken token = default)
-        => ValueTask.FromResult<IZConnection>(new EstablishedFakeConnection());
+    {
+        return ValueTask.FromResult<IZConnection>(new EstablishedFakeConnection());
+    }
 
     public static ValueTask<EstablishedFakeTransport> BindAsync(
         EndPoint endpoint,
         ZTransportOptions options,
         CancellationToken token = default)
-        => ValueTask.FromResult(new EstablishedFakeTransport());
+    {
+        return ValueTask.FromResult(new EstablishedFakeTransport());
+    }
 
-    public ValueTask StartAsync(CancellationToken token = default) => ValueTask.CompletedTask;
+    public ValueTask StartAsync(CancellationToken token = default)
+    {
+        return ValueTask.CompletedTask;
+    }
 
     public void Dispose()
     {
@@ -367,7 +382,7 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
 internal sealed class EstablishedFakeConnection : IZConnection
 {
-    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
     private int position;
     private int disposed;
 
@@ -396,16 +411,24 @@ internal sealed class EstablishedFakeConnection : IZConnection
     }
 
     public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
-        => WriteAsync(frame, token);
+    {
+        return WriteAsync(frame, token);
+    }
 
     public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-        => WriteAsync(body, token);
+    {
+        return WriteAsync(body, token);
+    }
 
     public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-        => WriteAsync(ReadOnlyMemory<byte>.Empty, token);
+    {
+        return WriteAsync(ReadOnlyMemory<byte>.Empty, token);
+    }
 
     public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-        => ValueTask.FromResult(true);
+    {
+        return ValueTask.FromResult(true);
+    }
 
     public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
     {
@@ -419,5 +442,8 @@ internal sealed class EstablishedFakeConnection : IZConnection
     {
     }
 
-    public void Dispose() => Interlocked.Exchange(ref disposed, 1);
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref disposed, 1);
+    }
 }

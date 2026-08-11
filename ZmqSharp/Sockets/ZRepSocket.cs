@@ -41,7 +41,9 @@ public sealed class ZRepSocket : ZSocketBase, IPatternSink
     /// the handler returns.
     /// </summary>
     public ValueTask SendReplyAsync(ZRequestContext context, ZMessage reply, CancellationToken token = default)
-        => core.SendReplyAsync(this, context, reply, token);
+    {
+        return core.SendReplyAsync(this, context, reply, token);
+    }
 
     internal ValueTask RaiseRequestAsync(ZRequestContext context, CancellationToken token)
     {
@@ -51,9 +53,11 @@ public sealed class ZRepSocket : ZSocketBase, IPatternSink
             handler = requestHandler;
         }
 
-        return handler is null ? ValueTask.CompletedTask : handler(context, token);
+        return handler?.Invoke(context, token) ?? ValueTask.CompletedTask;
     }
 
     public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
-        => core.OnMessageAsync(this, peer, message, token);
+    {
+        return core.OnMessageAsync(this, peer, message, token);
+    }
 }

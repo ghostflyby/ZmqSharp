@@ -7,7 +7,7 @@ public enum ZReceiveMode
     Pooled,
 
     /// <summary>Allocate an uninitialized array; never touches a pool.</summary>
-    Owned,
+    Owned
 }
 
 /// <summary>The complete allocation decision for a message's frames.</summary>
@@ -58,7 +58,10 @@ public interface IZReceivePolicy
 /// <summary>Wraps a decide delegate as a policy.</summary>
 public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy
 {
-    public ZReceiveAllocation Decide(ZReceiveContext context) => decide(context);
+    public ZReceiveAllocation Decide(ZReceiveContext context)
+    {
+        return decide(context);
+    }
 }
 
 /// <summary>Decides how each frame is allocated, with message accumulation context.</summary>
@@ -79,9 +82,11 @@ public sealed class ZReceiveOptions : IZReceivePolicy
     public int ContiguousFrameLimit { get; init; } = 85_000;
 
     public ZReceiveAllocation Decide(ZReceiveContext context)
-        => new()
+    {
+        return new ZReceiveAllocation
         {
             Mode = Mode,
-            Segmented = context.FrameLength > ContiguousFrameLimit,
+            Segmented = context.FrameLength > ContiguousFrameLimit
         };
+    }
 }

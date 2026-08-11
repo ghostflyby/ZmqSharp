@@ -1,8 +1,9 @@
 using System.Net;
+using System.Net.Sockets;
 using FluentAssertions;
 using NetMQ;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>Shared helpers for the NetMQ libzmq-compatible interop suite (0006 section 5).</summary>
 internal static class InteropHelpers
@@ -12,7 +13,7 @@ internal static class InteropHelpers
 
     public static int GetFreePort()
     {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
@@ -23,6 +24,7 @@ internal static class InteropHelpers
     public static byte[] ReceiveFrame(NetMQSocket socket, TimeSpan timeout)
     {
         socket.TryReceiveFrameBytes(timeout, out var frame).Should().BeTrue("expected a frame within the timeout");
+        frame.Should().NotBeNull();
         return frame;
     }
 }

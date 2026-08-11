@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using ZmqSharp.Messages;
 
 namespace ZmqSharp.Sockets;
 

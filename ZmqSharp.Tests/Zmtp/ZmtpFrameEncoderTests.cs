@@ -4,14 +4,14 @@ using Xunit;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Zmtp;
 
 public sealed class ZmtpFrameEncoderTests
 {
     [Fact]
     public async Task MultipartMessage_RoundTripsThroughParser()
     {
-        using var message = MessageFactory.Multipart("A"u8.ToArray(), "B"u8.ToArray(), "C"u8.ToArray());
+        using var message = MessageFactory.Multipart([.. "A"u8], [.. "B"u8], [.. "C"u8]);
         using var stream = new MemoryStream();
         await stream.WriteAsync(ZmtpTestData.Greeting());
         await stream.WriteAsync(ZmtpTestData.Ready());
@@ -24,9 +24,9 @@ public sealed class ZmtpFrameEncoderTests
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
         recorder.Frames.Should().HaveCount(3);
-        recorder.Frames[0].Should().Equal("A"u8.ToArray());
-        recorder.Frames[1].Should().Equal("B"u8.ToArray());
-        recorder.Frames[2].Should().Equal("C"u8.ToArray());
+        recorder.Frames[0].Should().Equal([.. "A"u8]);
+        recorder.Frames[1].Should().Equal([.. "B"u8]);
+        recorder.Frames[2].Should().Equal([.. "C"u8]);
         recorder.MoreFlags.Should().Equal(true, true, false);
     }
 
@@ -53,7 +53,7 @@ public sealed class ZmtpFrameEncoderTests
     [Fact]
     public async Task SegmentedSingleFrame_RoundTripsAsOneFrame()
     {
-        using var message = MessageFactory.SegmentedFrame("hel"u8.ToArray(), "lo"u8.ToArray(), "!"u8.ToArray());
+        using var message = MessageFactory.SegmentedFrame([.. "hel"u8], [.. "lo"u8], [.. "!"u8]);
         using var stream = new MemoryStream();
         await stream.WriteAsync(ZmtpTestData.Greeting());
         await stream.WriteAsync(ZmtpTestData.Ready());
@@ -66,7 +66,7 @@ public sealed class ZmtpFrameEncoderTests
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
         recorder.Frames.Should().HaveCount(1);
-        recorder.Frames[0].Should().Equal("hello!"u8.ToArray());
+        recorder.Frames[0].Should().Equal([.. "hello!"u8]);
     }
 
     [Fact]

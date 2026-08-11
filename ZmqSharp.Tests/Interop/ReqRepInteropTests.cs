@@ -9,12 +9,12 @@ using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>
-/// REQ/REP interop with the NetMQ libzmq-compatible implementation over TCP
-/// (0006 section 5): the empty-delimiter wire framing is exercised in both
-/// directions, plus an incompatible Socket-Type pairing is rejected.
+///     REQ/REP interop with the NetMQ libzmq-compatible implementation over TCP
+///     (0006 section 5): the empty-delimiter wire framing is exercised in both
+///     directions, plus an incompatible Socket-Type pairing is rejected.
 /// </summary>
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class ReqRepInteropTests
@@ -39,6 +39,7 @@ public sealed class ReqRepInteropTests
 
             var received = new NetMQMessage();
             rep.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref received).Should().BeTrue();
+            received.Should().NotBeNull();
             received.FrameCount.Should().Be(1);
             received[0].ToByteArray().Should().Equal(Encoding.ASCII.GetBytes($"req-{i}"));
             rep.SendFrame(Encoding.ASCII.GetBytes($"ack-{i}"));
@@ -71,9 +72,7 @@ public sealed class ReqRepInteropTests
             // handler echoes, re-framing [reply, empty] back.
             req.SendFrame(Encoding.ASCII.GetBytes($"ping-{i}"));
             if (!req.TryReceiveFrameBytes(TimeSpan.FromSeconds(5), out var reply))
-            {
                 throw new TimeoutException("expected a reply within the timeout");
-            }
 
             reply.Should().Equal(Encoding.ASCII.GetBytes($"ping-{i}"));
         }

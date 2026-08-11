@@ -10,7 +10,7 @@ public enum ZReceiveRejectionReason
     MessageTooLarge,
 
     /// <summary>The message has more frames than the configured per-message limit.</summary>
-    TooManyFrames,
+    TooManyFrames
 }
 
 /// <summary>The rejection payload of the connection-level guard (0008 D1).</summary>
@@ -73,35 +73,29 @@ internal static class ZReceiveGuard
         int maxFramesPerMessage)
     {
         if (frameLength > maxFrameLength)
-        {
             return new ZReceiveRejection
             {
                 Reason = ZReceiveRejectionReason.FrameTooLarge,
                 Limit = maxFrameLength,
-                Actual = frameLength,
+                Actual = frameLength
             };
-        }
 
         if (accumulatedLength > maxMessageLength)
-        {
             return new ZReceiveRejection
             {
                 Reason = ZReceiveRejectionReason.MessageTooLarge,
                 Limit = maxMessageLength,
-                Actual = accumulatedLength,
+                Actual = accumulatedLength
             };
-        }
 
         if (frameIndex >= maxFramesPerMessage)
-        {
             // FrameIndex is zero-based, so reaching the limit means a frame is already in excess.
             return new ZReceiveRejection
             {
                 Reason = ZReceiveRejectionReason.TooManyFrames,
                 Limit = maxFramesPerMessage,
-                Actual = frameIndex + 1L,
+                Actual = frameIndex + 1L
             };
-        }
 
         return null;
     }

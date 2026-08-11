@@ -9,12 +9,12 @@ using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>
-/// PUB/SUB interop with the NetMQ libzmq-compatible implementation over TCP
-/// (0006 section 5, 0013): broadcast outbound and topic-prefix subscription
-/// filtering.
+///     PUB/SUB interop with the NetMQ libzmq-compatible implementation over TCP
+///     (0006 section 5, 0013): broadcast outbound and topic-prefix subscription
+///     filtering.
 /// </summary>
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class PubSubInteropTests
@@ -26,7 +26,7 @@ public sealed class PubSubInteropTests
         sub.Options.Linger = TimeSpan.Zero;
         var port = InteropHelpers.GetFreePort();
         sub.Bind($"tcp://127.0.0.1:{port}");
-        sub.Subscribe("news"u8.ToArray());
+        sub.Subscribe([.. "news"u8]);
 
         await using var pub = ZSocket.CreatePub();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -46,7 +46,7 @@ public sealed class PubSubInteropTests
     {
         var channel = Channel.CreateUnbounded<ZMessage>();
         var sub = ZSocket.CreateSubCallback();
-        sub.Subscribe("news"u8.ToArray());
+        sub.Subscribe([.. "news"u8]);
         sub.BindMessageSink(new TestSink(message => channel.Writer.TryWrite(message)));
         var port = InteropHelpers.GetFreePort();
         await sub.BindAsync($"tcp://127.0.0.1:{port}");
@@ -60,14 +60,15 @@ public sealed class PubSubInteropTests
         await Task.Delay(500);
 
         pub.SendFrame(Concat("news", "headline"));
-        var message = await channel.Reader.ReadAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await channel.Reader.ReadAsync(CancellationToken.None).AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5));
         message.Count.Should().Be(1);
         message[0].ToSequence().ToArray().Should().Equal(Concat("news", "headline"));
         message.Dispose();
 
         // Unsubscribe propagates the 0x00 frame; the filter then drops the
         // topic and the publisher stops sending it.
-        sub.Unsubscribe("news"u8.ToArray());
+        sub.Unsubscribe([.. "news"u8]);
         pub.SendFrame(Concat("sport", "score"));
         var drainTask = channel.Reader.ReadAsync(CancellationToken.None).AsTask();
         var idle = Task.Delay(300);

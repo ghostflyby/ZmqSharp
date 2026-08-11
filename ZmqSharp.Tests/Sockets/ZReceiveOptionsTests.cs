@@ -2,12 +2,12 @@ using FluentAssertions;
 using Xunit;
 using ZmqSharp.Sockets;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Sockets;
 
 /// <summary>
-/// Unit tests for the receive policy (allocation only, 0008 D1/D6) and the
-/// connection-level numeric limits enforced by the guard (0008 D2/D4), plus
-/// the checked accumulation guard (0008 D3/D6).
+///     Unit tests for the receive policy (allocation only, 0008 D1/D6) and the
+///     connection-level numeric limits enforced by the guard (0008 D2/D4), plus
+///     the checked accumulation guard (0008 D3/D6).
 /// </summary>
 public sealed class ZReceiveOptionsTests
 {
@@ -16,20 +16,20 @@ public sealed class ZReceiveOptionsTests
     {
         // Limits are enforced by the connection-level guard, not the policy.
         ZReceiveGuard.CheckLimits(
-            frameLength: 100,
-            accumulatedLength: 100,
-            frameIndex: 0,
-            maxFrameLength: 100,
-            maxMessageLength: long.MaxValue,
-            maxFramesPerMessage: int.MaxValue).Should().BeNull();
+            100,
+            100,
+            0,
+            100,
+            long.MaxValue,
+            int.MaxValue).Should().BeNull();
 
         var rejection = ZReceiveGuard.CheckLimits(
-            frameLength: 101,
-            accumulatedLength: 101,
-            frameIndex: 0,
-            maxFrameLength: 100,
-            maxMessageLength: long.MaxValue,
-            maxFramesPerMessage: int.MaxValue);
+            101,
+            101,
+            0,
+            100,
+            long.MaxValue,
+            int.MaxValue);
         rejection.Should().NotBeNull();
         rejection.Value.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
         rejection.Value.Limit.Should().Be(100);
@@ -40,20 +40,20 @@ public sealed class ZReceiveOptionsTests
     public void MessageLimit_AtLimitAccepts_OnePastRejects()
     {
         ZReceiveGuard.CheckLimits(
-            frameLength: 1,
-            accumulatedLength: 100,
-            frameIndex: 0,
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: 100,
-            maxFramesPerMessage: int.MaxValue).Should().BeNull();
+            1,
+            100,
+            0,
+            long.MaxValue,
+            100,
+            int.MaxValue).Should().BeNull();
 
         var rejection = ZReceiveGuard.CheckLimits(
-            frameLength: 1,
-            accumulatedLength: 101,
-            frameIndex: 0,
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: 100,
-            maxFramesPerMessage: int.MaxValue);
+            1,
+            101,
+            0,
+            long.MaxValue,
+            100,
+            int.MaxValue);
         rejection.Should().NotBeNull();
         rejection.Value.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
         rejection.Value.Limit.Should().Be(100);
@@ -64,20 +64,20 @@ public sealed class ZReceiveOptionsTests
     public void FramesPerMessage_AtLimitAccepts_OnePastRejects()
     {
         ZReceiveGuard.CheckLimits(
-            frameLength: 1,
-            accumulatedLength: 3,
-            frameIndex: 2,
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: long.MaxValue,
-            maxFramesPerMessage: 3).Should().BeNull();
+            1,
+            3,
+            2,
+            long.MaxValue,
+            long.MaxValue,
+            3).Should().BeNull();
 
         var rejection = ZReceiveGuard.CheckLimits(
-            frameLength: 1,
-            accumulatedLength: 4,
-            frameIndex: 3,
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: long.MaxValue,
-            maxFramesPerMessage: 3);
+            1,
+            4,
+            3,
+            long.MaxValue,
+            long.MaxValue,
+            3);
         rejection.Should().NotBeNull();
         rejection.Value.Reason.Should().Be(ZReceiveRejectionReason.TooManyFrames);
         rejection.Value.Limit.Should().Be(3);
@@ -88,12 +88,12 @@ public sealed class ZReceiveOptionsTests
     public void Limits_UnlimitedByDefault_AcceptEveryFrame()
     {
         ZReceiveGuard.CheckLimits(
-            frameLength: int.MaxValue,
-            accumulatedLength: long.MaxValue,
-            frameIndex: int.MaxValue - 1, // the int.MaxValue-th frame is still in range
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: long.MaxValue,
-            maxFramesPerMessage: int.MaxValue).Should().BeNull();
+            int.MaxValue,
+            long.MaxValue,
+            int.MaxValue - 1, // the int.MaxValue-th frame is still in range
+            long.MaxValue,
+            long.MaxValue,
+            int.MaxValue).Should().BeNull();
     }
 
     [Fact]
@@ -101,34 +101,34 @@ public sealed class ZReceiveOptionsTests
     {
         // Frame violation wins over the message total.
         var frameFirst = ZReceiveGuard.CheckLimits(
-            frameLength: 11,
-            accumulatedLength: 11,
-            frameIndex: 0,
-            maxFrameLength: 10,
-            maxMessageLength: 20,
-            maxFramesPerMessage: 2);
+            11,
+            11,
+            0,
+            10,
+            20,
+            2);
         frameFirst.Should().NotBeNull();
         frameFirst.Value.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
 
         // Message-total violation wins over the frame count.
         var messageFirst = ZReceiveGuard.CheckLimits(
-            frameLength: 5,
-            accumulatedLength: 25,
-            frameIndex: 3,
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: 20,
-            maxFramesPerMessage: 2);
+            5,
+            25,
+            3,
+            long.MaxValue,
+            20,
+            2);
         messageFirst.Should().NotBeNull();
         messageFirst.Value.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
 
         // Frame-count violation wins when the earlier limits are satisfied.
         var countFirst = ZReceiveGuard.CheckLimits(
-            frameLength: 5,
-            accumulatedLength: 15,
-            frameIndex: 3,
-            maxFrameLength: long.MaxValue,
-            maxMessageLength: 20,
-            maxFramesPerMessage: 2);
+            5,
+            15,
+            3,
+            long.MaxValue,
+            20,
+            2);
         countFirst.Should().NotBeNull();
         countFirst.Value.Reason.Should().Be(ZReceiveRejectionReason.TooManyFrames);
     }

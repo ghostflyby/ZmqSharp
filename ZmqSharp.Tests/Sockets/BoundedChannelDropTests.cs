@@ -1,14 +1,13 @@
 using System.Threading.Channels;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Sockets;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Sockets;
 
 /// <summary>
-/// Pins the BCL bounded-channel drop contract the socket relies on (0006
-/// section 3.5: the item-dropped callback receives the item selected by each
-/// drop mode), exercised through the options the factory applies.
+///     Pins the BCL bounded-channel drop contract the socket relies on (0006
+///     section 3.5: the item-dropped callback receives the item selected by each
+///     drop mode), exercised through the options the factory applies.
 /// </summary>
 public sealed class BoundedChannelDropTests
 {
@@ -24,7 +23,7 @@ public sealed class BoundedChannelDropTests
         channel.Writer.TryWrite(2);
         channel.Writer.TryWrite(3).Should().BeTrue();
 
-        dropped.Should().Equal([3]);
+        dropped.Should().Equal(3);
     }
 
     [Fact]
@@ -39,7 +38,7 @@ public sealed class BoundedChannelDropTests
         channel.Writer.TryWrite(2);
         channel.Writer.TryWrite(3).Should().BeTrue();
 
-        dropped.Should().Equal([2]);
+        dropped.Should().Equal(2);
         channel.Reader.TryRead(out var first).Should().BeTrue();
         first.Should().Be(1);
         channel.Reader.TryRead(out var second).Should().BeTrue();
@@ -58,7 +57,7 @@ public sealed class BoundedChannelDropTests
         channel.Writer.TryWrite(2);
         channel.Writer.TryWrite(3).Should().BeTrue();
 
-        dropped.Should().Equal([1]);
+        dropped.Should().Equal(1);
         channel.Reader.TryRead(out var first).Should().BeTrue();
         first.Should().Be(2);
         channel.Reader.TryRead(out var second).Should().BeTrue();

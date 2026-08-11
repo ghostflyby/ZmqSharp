@@ -39,15 +39,18 @@ public sealed class ZmtpParser : IDisposable
     private TaskCompletionSource gate = CreateGate();
 
     private static TaskCompletionSource CreateGate()
-        => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    {
+        return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     /// <summary>Socket-Type advertised by the peer in READY; null before the handshake completes.</summary>
     internal string? PeerSocketType => peerSocketType;
 
     public ZmtpParser(IZConnection connection, MemoryPool<byte>? pool = null)
-        : this(connection, null, pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize)
+        : this(connection, null, pool ?? MemoryPool<byte>.Shared)
     {
     }
+
 
     internal ZmtpParser(
         IZConnection connection,
@@ -78,15 +81,9 @@ public sealed class ZmtpParser : IDisposable
     /// </summary>
     public async ValueTask<bool> EstablishAsync(CancellationToken token = default)
     {
-        if (!await ReadGreetingAsync(token))
-        {
-            return false;
-        }
+        if (!await ReadGreetingAsync(token)) return false;
 
-        if (!await ReadHandshakeAsync(token))
-        {
-            return false;
-        }
+        if (!await ReadHandshakeAsync(token)) return false;
 
         return true;
     }
@@ -114,19 +111,12 @@ public sealed class ZmtpParser : IDisposable
     {
         using var owner = pool.Rent(64);
         var greeting = owner.Memory[..64];
-        if (!await TryReadExactlyAsync(greeting, token))
-        {
-            return false;
-        }
+        if (!await TryReadExactlyAsync(greeting, token)) return false;
 
         var span = greeting.Span;
-        if (span[0] != 0xFF || span[9] != 0x7F)
-        {
-            throw new ZeroMqProtocolException("invalid ZMTP greeting signature");
-        }
+        if (span[0] != 0xFF || span[9] != 0x7F) throw new ZeroMqProtocolException("invalid ZMTP greeting signature");
 
         if (span[10] < 3)
-        {
             // Greeting revision 0 = ZMTP 1.0, revision 1 = ZMTP 2.0. The whole
             // maintained ZeroMQ ecosystem is on ZMTP 3.0/3.1, so legacy peers
             // are rejected explicitly rather than negotiated down (libzmq
@@ -135,33 +125,23 @@ public sealed class ZmtpParser : IDisposable
             {
                 0 => "ZMTP 1.0 peers are not supported; only ZMTP 3.0 is implemented",
                 1 => "ZMTP 2.0 peers are not supported; only ZMTP 3.0 is implemented",
-                _ => "unsupported ZMTP version",
+                _ => "unsupported ZMTP version"
             });
-        }
 
-        if (!IsNullMechanism(span[12..32]))
-        {
-            throw new ZeroMqProtocolException("unsupported ZMTP security mechanism (only NULL is supported)");
-        }
-
-        return true;
+        return !IsNullMechanism(span[12..32])
+            ? throw new ZeroMqProtocolException("unsupported ZMTP security mechanism (only NULL is supported)")
+            : true;
     }
 
     private static bool IsNullMechanism(ReadOnlySpan<byte> mechanism)
     {
         if (mechanism[0] != (byte)'N' || mechanism[1] != (byte)'U' ||
             mechanism[2] != (byte)'L' || mechanism[3] != (byte)'L')
-        {
             return false;
-        }
 
         for (var i = 4; i < mechanism.Length; i++)
-        {
             if (mechanism[i] != 0)
-            {
                 return false;
-            }
-        }
 
         return true;
     }
@@ -173,35 +153,23 @@ public sealed class ZmtpParser : IDisposable
         while (true)
         {
             var header = await TryReadFrameHeaderAsync(token);
-            if (header is null)
-            {
-                return false;
-            }
+            if (header is null) return false;
 
             if (!header.Value.Flags.HasFlag(ZmtpFrameFlags.Command))
-            {
                 throw new ZeroMqProtocolException("expected a command frame during handshake");
-            }
 
             var body = await ReadBodyIntoScratchAsync(header.Value, token);
-            if (body is null)
-            {
-                return false;
-            }
+            if (body is null) return false;
 
             var bodySpan = body.Value.Span;
             if (!TryReadCommandName(bodySpan, out var commandName))
-            {
                 throw new ZeroMqProtocolException("malformed command name");
-            }
 
             if (commandName.SequenceEqual("READY"u8))
             {
                 var properties = ParseMetadata(bodySpan[(1 + commandName.Length)..]);
                 if (!properties.TryGetValue("Socket-Type", out var peerType) || !IsValidSocketType(peerType))
-                {
                     throw new ZeroMqProtocolException("READY is missing a valid Socket-Type property");
-                }
 
                 peerSocketType = peerType;
                 scratchUsed = 0;
@@ -210,13 +178,12 @@ public sealed class ZmtpParser : IDisposable
             }
 
             if (commandName.SequenceEqual("ERROR"u8))
-            {
                 throw new ZeroMqProtocolException(
                     $"peer sent ERROR: {ParseErrorReason(bodySpan[(1 + commandName.Length)..])}");
-            }
 
             scratchUsed = 0;
-            throw new ZeroMqProtocolException($"unknown command '{Encoding.ASCII.GetString(commandName)}' during handshake");
+            throw new ZeroMqProtocolException(
+                $"unknown command '{Encoding.ASCII.GetString(commandName)}' during handshake");
         }
     }
 
@@ -252,24 +219,15 @@ public sealed class ZmtpParser : IDisposable
 
     private static string ParseErrorReason(ReadOnlySpan<byte> body)
     {
-        if (body.IsEmpty)
-        {
-            throw new ZeroMqProtocolException("malformed ERROR command");
-        }
+        if (body.IsEmpty) throw new ZeroMqProtocolException("malformed ERROR command");
 
         var reasonLength = body[0];
         if (body.Length != 1 + reasonLength)
-        {
             throw new ZeroMqProtocolException("ERROR reason length does not match the command body");
-        }
 
         foreach (var c in body[1..])
-        {
-            if (c is < (byte)0x21 or > (byte)0x7E)
-            {
+            if (c is < 0x21 or > 0x7E)
                 throw new ZeroMqProtocolException("ERROR reason contains a non-visible character");
-            }
-        }
 
         return Encoding.UTF8.GetString(body[1..]);
     }
@@ -282,61 +240,51 @@ public sealed class ZmtpParser : IDisposable
         {
             var nameLength = metadata[offset];
             offset++;
-            if (nameLength == 0)
-            {
-                throw new ZeroMqProtocolException("metadata property name is empty");
-            }
+            if (nameLength == 0) throw new ZeroMqProtocolException("metadata property name is empty");
 
             if (metadata.Length - offset < nameLength)
-            {
                 throw new ZeroMqProtocolException("metadata property name exceeds command body");
-            }
 
             var name = metadata.Slice(offset, nameLength);
             foreach (var c in name)
-            {
                 if (!IsMetadataNameChar(c))
-                {
                     throw new ZeroMqProtocolException("metadata property name contains an invalid character");
-                }
-            }
 
             offset += nameLength;
             if (metadata.Length - offset < sizeof(int))
-            {
                 throw new ZeroMqProtocolException("metadata property value length is truncated");
-            }
 
             var valueLength = BinaryPrimitives.ReadInt32BigEndian(metadata[offset..]);
             offset += sizeof(int);
             if (valueLength < 0 || valueLength > metadata.Length - offset)
-            {
                 throw new ZeroMqProtocolException("metadata property value exceeds command body");
-            }
 
             var nameString = Encoding.ASCII.GetString(name);
             var value = Encoding.UTF8.GetString(metadata.Slice(offset, valueLength));
             offset += valueLength;
             if (!properties.TryAdd(nameString, value))
-            {
                 throw new ZeroMqProtocolException($"duplicate metadata property '{nameString}'");
-            }
         }
 
         return properties;
     }
 
     private static bool IsMetadataNameChar(byte c)
-        => (c >= (byte)'A' && c <= (byte)'Z')
-            || (c >= (byte)'a' && c <= (byte)'z')
-            || (c >= (byte)'0' && c <= (byte)'9')
-            || c == (byte)'-'
-            || c == (byte)'_'
-            || c == (byte)'.'
-            || c == (byte)'+';
+    {
+        return (c >= (byte)'A' && c <= (byte)'Z')
+               || (c >= (byte)'a' && c <= (byte)'z')
+               || (c >= (byte)'0' && c <= (byte)'9')
+               || c == (byte)'-'
+               || c == (byte)'_'
+               || c == (byte)'.'
+               || c == (byte)'+';
+    }
 
-    private static bool IsValidSocketType(string socketType) => socketType is
-        "REQ" or "REP" or "DEALER" or "ROUTER" or "PUB" or "XPUB" or "SUB" or "XSUB" or "PUSH" or "PULL" or "PAIR";
+    private static bool IsValidSocketType(string socketType)
+    {
+        return socketType is
+            "REQ" or "REP" or "DEALER" or "ROUTER" or "PUB" or "XPUB" or "SUB" or "XSUB" or "PUSH" or "PULL" or "PAIR";
+    }
 
     // ---- Traffic ----
 
@@ -345,39 +293,26 @@ public sealed class ZmtpParser : IDisposable
         while (true)
         {
             var nullableHeader = await TryReadFrameHeaderAsync(token);
-            if (nullableHeader is not { } header)
-            {
-                return;
-            }
+            if (nullableHeader is not { } header) return;
 
             if (header.Flags.HasFlag(ZmtpFrameFlags.Command))
             {
                 var commandBody = await ReadBodyIntoScratchAsync(header, token);
-                if (commandBody is null)
-                {
-                    return;
-                }
+                if (commandBody is null) return;
 
                 if (!TryReadCommandName(commandBody.Value.Span, out var commandName))
-                {
                     throw new ZeroMqProtocolException("malformed command name");
-                }
 
                 if (commandName.SequenceEqual("ERROR"u8))
-                {
                     throw new ZeroMqProtocolException(
                         $"peer sent ERROR: {ParseErrorReason(commandBody.Value.Span[(1 + commandName.Length)..])}");
-                }
 
                 scratchUsed = 0;
                 MaybeShrinkScratch();
                 continue;
             }
 
-            if (header.Size > int.MaxValue)
-            {
-                throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
-            }
+            if (header.Size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
             var length = (int)header.Size;
             var more = header.Flags.HasFlag(ZmtpFrameFlags.More);
@@ -393,10 +328,7 @@ public sealed class ZmtpParser : IDisposable
                     }
 
                     var materializedKeepGoing = await connection.OnFrameAsync(materialized, token);
-                    if (!materializedKeepGoing)
-                    {
-                        await WaitForResumeAsync(token);
-                    }
+                    if (!materializedKeepGoing) await WaitForResumeAsync(token);
 
                     continue;
                 }
@@ -406,20 +338,14 @@ public sealed class ZmtpParser : IDisposable
                     for (var i = 0; i < many.Count; i++)
                     {
                         var segment = many[i];
-                        if (await TryReadExactlyAsync(segment.Writable, token))
-                        {
-                            continue;
-                        }
+                        if (await TryReadExactlyAsync(segment.Writable, token)) continue;
 
                         many.Dispose();
                         return;
                     }
 
                     var multiKeepGoing = await connection.OnFrameAsync(materialized, token);
-                    if (!multiKeepGoing)
-                    {
-                        await WaitForResumeAsync(token);
-                    }
+                    if (!multiKeepGoing) await WaitForResumeAsync(token);
 
                     continue;
                 }
@@ -427,25 +353,17 @@ public sealed class ZmtpParser : IDisposable
 
             EnsureScratchCapacity(checked(scratchUsed + length));
             var target = scratch.Slice(scratchUsed, length);
-            if (!await TryReadExactlyAsync(target, token))
-            {
-                return;
-            }
+            if (!await TryReadExactlyAsync(target, token)) return;
 
             // The borrowed segment refers to the scratch owner without taking
             // ownership; EnsureScratchCapacity guarantees the owner is live for
             // the duration of this frame's delivery (0006 3.4).
             if (scratchOwner is not { } source)
-            {
                 throw new InvalidOperationException("borrowed frame without scratch owner");
-            }
 
             var frame = new ZFrame(ZSegment.Borrowed(source, scratchUsed, length), more);
             var keepGoing = await connection.OnFrameAsync(frame, token);
-            if (!keepGoing)
-            {
-                await WaitForResumeAsync(token);
-            }
+            if (!keepGoing) await WaitForResumeAsync(token);
 
             // The borrowed frame must outlive the await; the scratch is
             // reused only after delivery (and any pause) completes.
@@ -462,10 +380,7 @@ public sealed class ZmtpParser : IDisposable
         while (filled < target.Length)
         {
             var count = await connection.ReadAsync(target[filled..], token);
-            if (count == 0)
-            {
-                return false;
-            }
+            if (count == 0) return false;
 
             filled += count;
         }
@@ -477,36 +392,23 @@ public sealed class ZmtpParser : IDisposable
 
     private async ValueTask<FrameHeader?> TryReadFrameHeaderAsync(CancellationToken token)
     {
-        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(0, 1), token))
-        {
-            return null;
-        }
+        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(0, 1), token)) return null;
 
         var flags = (ZmtpFrameFlags)headerBuffer[0];
         if ((flags & (ZmtpFrameFlags)0b1111_1000) != 0)
-        {
             throw new ZeroMqProtocolException("reserved ZMTP frame flag bits are set");
-        }
 
         if (flags.HasFlag(ZmtpFrameFlags.Command) && flags.HasFlag(ZmtpFrameFlags.More))
-        {
             throw new ZeroMqProtocolException("command frame cannot carry the MORE flag");
-        }
 
         var isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);
         var sizeLength = isLong ? 8 : 1;
-        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(1, sizeLength), token))
-        {
-            return null;
-        }
+        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(1, sizeLength), token)) return null;
 
         var size = isLong
             ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
             : headerBuffer[1];
-        if (size < 0)
-        {
-            throw new ZeroMqProtocolException("negative ZMTP frame size");
-        }
+        if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
 
         return new FrameHeader(flags, size);
     }
@@ -516,22 +418,14 @@ public sealed class ZmtpParser : IDisposable
         CancellationToken token)
     {
         if (header.Size > maxCommandSize)
-        {
             throw new ZeroMqProtocolException($"command frame exceeds maximum size of {maxCommandSize} bytes");
-        }
 
-        if (header.Size > int.MaxValue)
-        {
-            throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
-        }
+        if (header.Size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
         var length = (int)header.Size;
         EnsureScratchCapacity(checked(scratchUsed + length));
         var target = scratch.Slice(scratchUsed, length);
-        if (!await TryReadExactlyAsync(target, token))
-        {
-            return null;
-        }
+        if (!await TryReadExactlyAsync(target, token)) return null;
 
         var body = scratch.Slice(scratchUsed, length);
         scratchUsed += length;
@@ -540,10 +434,7 @@ public sealed class ZmtpParser : IDisposable
 
     private void EnsureScratchCapacity(int required)
     {
-        if (scratch.Length >= required)
-        {
-            return;
-        }
+        if (scratch.Length >= required) return;
 
         var newSize = Math.Max(required, Math.Max(InitialScratchSize, scratch.Length * 2));
         var newOwner = pool.Rent(newSize);

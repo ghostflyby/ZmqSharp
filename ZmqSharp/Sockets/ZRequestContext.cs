@@ -12,27 +12,38 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 public readonly struct ZRequestContext : IReadOnlyList<ZFrame>, IDisposable
 {
-    private readonly IZConnection peer;
     private readonly ZMessage message;
 
     internal ZRequestContext(IZConnection peer, ZMessage message)
     {
-        this.peer = peer;
+        Peer = peer;
         this.message = message;
     }
 
     /// <summary>The peer the request arrived from; replies route back to it.</summary>
-    public IZConnection Peer => peer;
+    public IZConnection Peer { get; }
 
     public int Count => message.Count;
 
     public ZFrame this[int index] => message[index];
 
-    public ZMessage.Enumerator GetEnumerator() => message.GetEnumerator();
+    public ZMessage.Enumerator GetEnumerator()
+    {
+        return message.GetEnumerator();
+    }
 
-    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    public void Dispose() => message.Dispose();
+    public void Dispose()
+    {
+        message.Dispose();
+    }
 }

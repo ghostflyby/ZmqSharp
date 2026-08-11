@@ -34,9 +34,15 @@ public abstract class ZQueueFactory : IZQueueFactory
     /// <summary>Creates a fresh channel; see <see cref="IZQueueFactory.Create"/>.</summary>
     public abstract Channel<ZMessage> Create(Action<ZMessage> itemDropped);
 
-    public static implicit operator ZQueueFactory(BoundedChannelOptions options) => new ZBoundedQueueFactory(options);
+    public static implicit operator ZQueueFactory(BoundedChannelOptions options)
+    {
+        return new ZBoundedQueueFactory(options);
+    }
 
-    public static implicit operator ZQueueFactory(UnboundedChannelOptions options) => new ZUnboundedQueueFactory(options);
+    public static implicit operator ZQueueFactory(UnboundedChannelOptions options)
+    {
+        return new ZUnboundedQueueFactory(options);
+    }
 }
 
 /// <summary>
@@ -59,7 +65,9 @@ internal sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory
 
     /// <inheritdoc />
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
-        => Channel.CreateBounded(Options, itemDropped);
+    {
+        return Channel.CreateBounded(Options, itemDropped);
+    }
 
     /// <summary>
     /// Copies the caller's options into the factory-owned snapshot, forcing
@@ -68,13 +76,15 @@ internal sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory
     /// while the outbound channel is a shared producer surface.
     /// </summary>
     private static BoundedChannelOptions Build(BoundedChannelOptions source)
-        => new(source.Capacity)
+    {
+        return new BoundedChannelOptions(source.Capacity)
         {
             SingleReader = true,
             SingleWriter = source.SingleWriter,
             FullMode = source.FullMode,
-            AllowSynchronousContinuations = source.AllowSynchronousContinuations,
+            AllowSynchronousContinuations = source.AllowSynchronousContinuations
         };
+    }
 }
 
 /// <summary>
@@ -97,13 +107,17 @@ internal sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory
 
     /// <inheritdoc />
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
-        => Channel.CreateUnbounded<ZMessage>(Options);
+    {
+        return Channel.CreateUnbounded<ZMessage>(Options);
+    }
 
     private static UnboundedChannelOptions Build(UnboundedChannelOptions source)
-        => new()
+    {
+        return new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = source.SingleWriter,
-            AllowSynchronousContinuations = source.AllowSynchronousContinuations,
+            AllowSynchronousContinuations = source.AllowSynchronousContinuations
         };
+    }
 }

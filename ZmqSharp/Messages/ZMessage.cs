@@ -10,17 +10,29 @@ namespace ZmqSharp.Messages;
 public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 {
     private readonly ZSingleMessage? single; // Single case
-    private readonly ZMultiMessage? multi;   // Multi case
+    private readonly ZMultiMessage? multi; // Multi case
 
-    public ZMessage(ZSingleMessage single) => this.single = single;
+    public ZMessage(ZSingleMessage single)
+    {
+        this.single = single;
+    }
 
-    public ZMessage(ZMultiMessage multi) => this.multi = multi;
+    public ZMessage(ZMultiMessage multi)
+    {
+        this.multi = multi;
+    }
 
     /// <summary>Implicit conversion from the single case (0005).</summary>
-    public static implicit operator ZMessage(ZSingleMessage single) => new(single);
+    public static implicit operator ZMessage(ZSingleMessage single)
+    {
+        return new ZMessage(single);
+    }
 
     /// <summary>Implicit conversion from the multi case (0005).</summary>
-    public static implicit operator ZMessage(ZMultiMessage multi) => new(multi);
+    public static implicit operator ZMessage(ZMultiMessage multi)
+    {
+        return new ZMessage(multi);
+    }
 
     /// <summary>Builds a single-frame owned message (zero copy; Dispose never touches a pool).</summary>
     public static ZMessage FromOwned(byte[] data)
@@ -47,11 +59,19 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
         => multi is null ? single.GetValueOrDefault()[index] : multi.Value[index];
 
     public Enumerator GetEnumerator()
-        => multi is null ? new Enumerator(single.GetValueOrDefault()) : new Enumerator(multi.Value);
+    {
+        return multi is null ? new Enumerator(single.GetValueOrDefault()) : new Enumerator(multi.Value);
+    }
 
-    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
     public void Dispose()
     {
@@ -85,11 +105,11 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
             {
                 var count = singleMessage is not null ? 1 : multiMessage.GetValueOrDefault().Count;
                 if (index < 0 || index >= count)
-                {
                     throw new InvalidOperationException("enumeration has not started or has already finished");
-                }
 
-                return singleMessage is not null ? singleMessage.GetValueOrDefault()[index] : multiMessage.GetValueOrDefault()[index];
+                return singleMessage is not null
+                    ? singleMessage.GetValueOrDefault()[index]
+                    : multiMessage.GetValueOrDefault()[index];
             }
         }
 
@@ -108,7 +128,10 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
             return false;
         }
 
-        public void Reset() => index = -1;
+        public void Reset()
+        {
+            index = -1;
+        }
 
         public void Dispose()
         {

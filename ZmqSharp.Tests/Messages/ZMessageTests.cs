@@ -3,7 +3,7 @@ using FluentAssertions;
 using Xunit;
 using ZmqSharp.Messages;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Messages;
 
 public sealed class ZMessageTests
 {
@@ -27,34 +27,31 @@ public sealed class ZMessageTests
     [Fact]
     public void Multipart_FramesAreAccessible()
     {
-        var message = MessageFactory.Multipart("ab"u8.ToArray(), "cde"u8.ToArray());
+        var message = MessageFactory.Multipart([.. "ab"u8], [.. "cde"u8]);
         message.Count.Should().Be(2);
         message.TryGetValue(out ZMultiMessage multi).Should().BeTrue();
         multi.Count.Should().Be(2);
-        message[0].ToSequence().ToArray().Should().Equal("ab"u8.ToArray());
-        message[1].ToSequence().ToArray().Should().Equal("cde"u8.ToArray());
+        message[0].ToSequence().ToArray().Should().Equal([.. "ab"u8]);
+        message[1].ToSequence().ToArray().Should().Equal([.. "cde"u8]);
         message[0].TryGetValue(out ZSegment first).Should().BeTrue();
-        first.Memory.ToArray().Should().Equal("ab"u8.ToArray());
+        first.Memory.ToArray().Should().Equal([.. "ab"u8]);
         message.Dispose();
     }
 
     [Fact]
     public void Enumerator_IsStruct_AndIteratesFrames()
     {
-        var message = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        var message = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
 
         var enumerator = message.GetEnumerator();
         enumerator.GetType().IsValueType.Should().BeTrue();
 
         var frames = new List<byte[]>();
-        foreach (var frame in message)
-        {
-            frames.Add(frame.ToSequence().ToArray());
-        }
+        foreach (var frame in message) frames.Add(frame.ToSequence().ToArray());
 
         frames.Should().HaveCount(2);
-        frames[0].Should().Equal("a"u8.ToArray());
-        frames[1].Should().Equal("b"u8.ToArray());
+        frames[0].Should().Equal([.. "a"u8]);
+        frames[1].Should().Equal([.. "b"u8]);
         message.Dispose();
     }
 
@@ -75,7 +72,7 @@ public sealed class ZMessageTests
     public void SegmentedFrame_ManySegments_ReadsInOrder()
     {
         var message = MessageFactory.SegmentedFrame([1], [2], [3], [4], [5]);
-        message[0].ToSequence().ToArray().Should().Equal([1, 2, 3, 4, 5]);
+        message[0].ToSequence().ToArray().Should().Equal(1, 2, 3, 4, 5);
         message[0].ToSequence().Length.Should().Be(5);
         message.Dispose();
     }
@@ -107,9 +104,10 @@ public sealed class ZMessageTests
         using var pool = new CountingMemoryPool();
         var firstOwner = pool.Rent(4);
         var secondOwner = pool.Rent(4);
-        ZFrame[] frames = [
-            new ZFrame(new ZSegment(firstOwner, 0, 4)),
-            new ZFrame(new ZSegment(secondOwner, 0, 4)),
+        ZFrame[] frames =
+        [
+            new(new ZSegment(firstOwner, 0, 4)),
+            new(new ZSegment(secondOwner, 0, 4))
         ];
         var multi = new ZMultiMessage(frames);
 
@@ -122,7 +120,7 @@ public sealed class ZMessageTests
     [Fact]
     public void Indexer_OutOfRange_Throws()
     {
-        var message = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        var message = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
         message.Invoking(act => act[2]).Should()
             .Throw<ArgumentOutOfRangeException>();
         message.Dispose();
@@ -132,7 +130,7 @@ public sealed class ZMessageTests
     public void PooledMultipart_ReturnsBuffersOnDispose()
     {
         using var pool = new CountingMemoryPool();
-        var message = MessageFactory.PooledMultipart(pool, "a"u8.ToArray(), "b"u8.ToArray());
+        var message = MessageFactory.PooledMultipart(pool, [.. "a"u8], [.. "b"u8]);
         message.Dispose();
         pool.Outstanding.Should().Be(0);
     }
@@ -157,7 +155,7 @@ public sealed class ZMessageTests
         byte[] source = [0, 1, 2, 3, 4, 5];
         var segment = new ZSegment(source, 2, 3);
 
-        segment.Memory.ToArray().Should().Equal([2, 3, 4]);
+        segment.Memory.ToArray().Should().Equal(2, 3, 4);
         segment.GetOwnedArray(out var array).Should().BeTrue();
         array.Should().BeSameAs(source);
 
@@ -177,7 +175,7 @@ public sealed class ZMessageTests
     public void GetOwnedArray_FailsForPooledFrame()
     {
         using var pool = new CountingMemoryPool();
-        var message = MessageFactory.PooledSingleFrame(pool, "x"u8.ToArray());
+        var message = MessageFactory.PooledSingleFrame(pool, [.. "x"u8]);
         message[0].TryGetValue(out ZSegment segment).Should().BeTrue();
 
         segment.GetOwnedArray(out _).Should().BeFalse();
@@ -200,16 +198,13 @@ public sealed class ZMessageTests
         var frame = message[0];
 
         frame.Count.Should().Be(1);
-        frame[0].Memory.ToArray().Should().Equal([1, 2, 3]);
+        frame[0].Memory.ToArray().Should().Equal(1, 2, 3);
 
         var segments = new List<byte[]>();
-        foreach (var segment in frame)
-        {
-            segments.Add(segment.Memory.ToArray());
-        }
+        foreach (var segment in frame) segments.Add(segment.Memory.ToArray());
 
         segments.Should().HaveCount(1);
-        segments[0].Should().Equal([1, 2, 3]);
+        segments[0].Should().Equal(1, 2, 3);
         message.Dispose();
     }
 
@@ -220,18 +215,15 @@ public sealed class ZMessageTests
         var frame = message[0];
 
         frame.Count.Should().Be(2);
-        frame[0].Memory.ToArray().Should().Equal([1, 2, 3]);
-        frame[1].Memory.ToArray().Should().Equal([4, 5]);
+        frame[0].Memory.ToArray().Should().Equal(1, 2, 3);
+        frame[1].Memory.ToArray().Should().Equal(4, 5);
 
         var segments = new List<byte[]>();
-        foreach (var segment in frame)
-        {
-            segments.Add(segment.Memory.ToArray());
-        }
+        foreach (var segment in frame) segments.Add(segment.Memory.ToArray());
 
         segments.Should().HaveCount(2);
-        segments[0].Should().Equal([1, 2, 3]);
-        segments[1].Should().Equal([4, 5]);
+        segments[0].Should().Equal(1, 2, 3);
+        segments[1].Should().Equal(4, 5);
         message.Dispose();
     }
 
@@ -242,16 +234,13 @@ public sealed class ZMessageTests
         var segment = message[0][0];
 
         segment.Count.Should().Be(1);
-        segment[0].Memory.ToArray().Should().Equal([1, 2, 3]);
+        segment[0].Memory.ToArray().Should().Equal(1, 2, 3);
 
         var items = new List<byte[]>();
-        foreach (var item in segment)
-        {
-            items.Add(item.Memory.ToArray());
-        }
+        foreach (var item in segment) items.Add(item.Memory.ToArray());
 
         items.Should().HaveCount(1);
-        items[0].Should().Equal([1, 2, 3]);
+        items[0].Should().Equal(1, 2, 3);
         message.Dispose();
     }
 
@@ -276,7 +265,7 @@ public sealed class ZMessageTests
 
         frame.TryGetValue(out ZSegments converted).Should().BeTrue();
         converted.Count.Should().Be(2);
-        frame.ToSequence().ToArray().Should().Equal([1, 2, 3, 4, 5]);
+        frame.ToSequence().ToArray().Should().Equal(1, 2, 3, 4, 5);
         message.Dispose();
     }
 
@@ -289,7 +278,7 @@ public sealed class ZMessageTests
 
         converted.TryGetValue(out ZSingleMessage convertedSingle).Should().BeTrue();
         convertedSingle.Count.Should().Be(1);
-        converted[0].ToSequence().ToArray().Should().Equal([1, 2, 3]);
+        converted[0].ToSequence().ToArray().Should().Equal(1, 2, 3);
         converted.Dispose();
     }
 
@@ -303,22 +292,19 @@ public sealed class ZMessageTests
         var singleEnum = singleMsg.GetEnumerator();
         FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
         singleEnum.MoveNext().Should().BeTrue();
-        singleEnum.Current.ToSequence().ToArray().Should().Equal([1, 2, 3]);
+        singleEnum.Current.ToSequence().ToArray().Should().Equal(1, 2, 3);
         singleEnum.MoveNext().Should().BeFalse();
         FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
         singleEnum.Reset();
         singleEnum.MoveNext().Should().BeTrue();
         single.Dispose();
 
-        var multi = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
         multi.TryGetValue(out ZMultiMessage multiMsg).Should().BeTrue();
         var multiEnum = multiMsg.GetEnumerator();
         FluentActions.Invoking(() => multiEnum.Current).Should().Throw<InvalidOperationException>();
         var frames = new List<byte[]>();
-        while (multiEnum.MoveNext())
-        {
-            frames.Add(multiEnum.Current.ToSequence().ToArray());
-        }
+        while (multiEnum.MoveNext()) frames.Add(multiEnum.Current.ToSequence().ToArray());
 
         frames.Should().HaveCount(2);
         FluentActions.Invoking(() => multiEnum.Current).Should().Throw<InvalidOperationException>();
@@ -346,7 +332,7 @@ public sealed class ZMessageTests
         var singleEnum = single.GetEnumerator();
         FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
         singleEnum.MoveNext().Should().BeTrue();
-        singleEnum.Current.ToSequence().ToArray().Should().Equal([1, 2, 3]);
+        singleEnum.Current.ToSequence().ToArray().Should().Equal(1, 2, 3);
         singleEnum.MoveNext().Should().BeFalse();
         FluentActions.Invoking(() => singleEnum.Current).Should().Throw<InvalidOperationException>();
         singleEnum.Reset();
@@ -354,21 +340,18 @@ public sealed class ZMessageTests
         single.Dispose();
 
         // Multi-message enumerator: Reset restarts iteration.
-        var multi = MessageFactory.Multipart("a"u8.ToArray(), "b"u8.ToArray());
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
         var multiEnum = multi.GetEnumerator();
         multiEnum.MoveNext().Should().BeTrue();
         multiEnum.MoveNext().Should().BeTrue();
         multiEnum.MoveNext().Should().BeFalse();
         multiEnum.Reset();
         var frames = new List<byte[]>();
-        while (multiEnum.MoveNext())
-        {
-            frames.Add(multiEnum.Current.ToSequence().ToArray());
-        }
+        while (multiEnum.MoveNext()) frames.Add(multiEnum.Current.ToSequence().ToArray());
 
         frames.Should().HaveCount(2);
-        frames[0].Should().Equal("a"u8.ToArray());
-        frames[1].Should().Equal("b"u8.ToArray());
+        frames[0].Should().Equal([.. "a"u8]);
+        frames[1].Should().Equal([.. "b"u8]);
         multi.Dispose();
 
         // Index out of range throws on both cases.
@@ -379,14 +362,14 @@ public sealed class ZMessageTests
     [Fact]
     public void ImplicitConversion_MultiToMessage()
     {
-        var message = MessageFactory.Multipart("ab"u8.ToArray(), "cde"u8.ToArray());
+        var message = MessageFactory.Multipart([.. "ab"u8], [.. "cde"u8]);
         message.TryGetValue(out ZMultiMessage multi).Should().BeTrue();
         ZMessage converted = multi;
 
         converted.TryGetValue(out ZMultiMessage convertedMulti).Should().BeTrue();
         convertedMulti.Count.Should().Be(2);
-        converted[0].ToSequence().ToArray().Should().Equal("ab"u8.ToArray());
-        converted[1].ToSequence().ToArray().Should().Equal("cde"u8.ToArray());
+        converted[0].ToSequence().ToArray().Should().Equal([.. "ab"u8]);
+        converted[1].ToSequence().ToArray().Should().Equal([.. "cde"u8]);
         converted.Dispose();
     }
 }

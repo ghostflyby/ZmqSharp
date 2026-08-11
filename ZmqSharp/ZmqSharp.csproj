@@ -19,13 +19,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <InternalsVisibleTo Include="ZmqSharp.Tests" />
+        <InternalsVisibleTo Include="ZmqSharp.Tests"/>
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="../README.md" Pack="true" PackagePath="/" />
-        <None Include="../NOTICE" Pack="true" PackagePath="/" />
-        <None Include="../LICENSE" Pack="true" PackagePath="/" />
+        <None Include="../README.md" Pack="true" PackagePath="/"/>
+        <None Include="../NOTICE" Pack="true" PackagePath="/"/>
+        <None Include="../LICENSE" Pack="true" PackagePath="/"/>
     </ItemGroup>
 
 </Project>

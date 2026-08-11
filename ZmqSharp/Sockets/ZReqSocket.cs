@@ -28,8 +28,12 @@ public sealed class ZReqSocket : ZSocketBase, IPatternSink
     /// in flight (strict alternation) or no peer is connected.
     /// </summary>
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token = default)
-        => core.RequestAsync(this, message, token);
+    {
+        return core.RequestAsync(this, message, token);
+    }
 
     public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
-        => core.OnMessageAsync(this, peer, message, token);
+    {
+        return core.OnMessageAsync(this, peer, message, token);
+    }
 }

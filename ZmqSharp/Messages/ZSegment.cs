@@ -19,7 +19,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     private readonly bool isBorrowed;
 
     internal ZSegment(object owner, int offset, int length)
-        : this(owner, offset, length, isBorrowed: false)
+        : this(owner, offset, length, false)
     {
     }
 
@@ -41,7 +41,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     internal static ZSegment Borrowed(IMemoryOwner<byte> source, int offset, int length)
     {
         ArgumentNullException.ThrowIfNull(source);
-        return new ZSegment(source, offset, length, isBorrowed: true);
+        return new ZSegment(source, offset, length, true);
     }
 
     /// <summary>The segment content; reacquires the owner memory on every access.</summary>
@@ -69,12 +69,15 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         return false;
     }
 
-    private Memory<byte> Reacquire() => owner switch
+    private Memory<byte> Reacquire()
     {
-        byte[] array => array,
-        IMemoryOwner<byte> pooled => pooled.Memory,
-        _ => Memory<byte>.Empty,
-    };
+        return owner switch
+        {
+            byte[] array => array,
+            IMemoryOwner<byte> pooled => pooled.Memory,
+            _ => Memory<byte>.Empty
+        };
+    }
 
     public int Count => 1;
 
@@ -87,21 +90,27 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator() => new(this);
+    public Enumerator GetEnumerator()
+    {
+        return new Enumerator(this);
+    }
 
-    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator() => GetEnumerator();
+    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 
     public void Dispose()
     {
         // A pooled owner is released; a borrowed segment must never release
         // the parser's scratch. Owner-specific behavior after disposal is
         // neither caught nor normalized (0005 section 2.1).
-        if (!isBorrowed && owner is IMemoryOwner<byte> memoryOwner)
-        {
-            memoryOwner.Dispose();
-        }
+        if (!isBorrowed && owner is IMemoryOwner<byte> memoryOwner) memoryOwner.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZSegment>
@@ -115,7 +124,9 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
             state = 0;
         }
 
-        public ZSegment Current => state != 1 ? throw new InvalidOperationException("enumeration has not started or has already finished") : segment;
+        public ZSegment Current => state != 1
+            ? throw new InvalidOperationException("enumeration has not started or has already finished")
+            : segment;
 
         object IEnumerator.Current => Current;
 
@@ -131,7 +142,10 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
             return false;
         }
 
-        public void Reset() => state = 0;
+        public void Reset()
+        {
+            state = 0;
+        }
 
         public void Dispose()
         {

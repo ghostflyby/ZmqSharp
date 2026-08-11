@@ -1,4 +1,3 @@
-using System.Threading;
 using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
@@ -24,7 +23,9 @@ internal interface IPatternCore
 internal sealed class ZPairCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => peers.IsEmpty ? null : peers[0];
+    {
+        return peers.IsEmpty ? null : peers[0];
+    }
 
     public string SocketTypeName => "PAIR";
 }
@@ -36,12 +37,9 @@ internal sealed class ZDealerCore : IPatternCore
 
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
     {
-        if (peers.IsEmpty)
-        {
-            return null;
-        }
+        if (peers.IsEmpty) return null;
 
-        int index = (Interlocked.Increment(ref next) - 1) % peers.Length;
+        var index = (Interlocked.Increment(ref next) - 1) % peers.Length;
         return peers[index];
     }
 
@@ -55,12 +53,9 @@ internal sealed class ZPushCore : IPatternCore
 
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
     {
-        if (peers.IsEmpty)
-        {
-            return null;
-        }
+        if (peers.IsEmpty) return null;
 
-        int index = (Interlocked.Increment(ref next) - 1) % peers.Length;
+        var index = (Interlocked.Increment(ref next) - 1) % peers.Length;
         return peers[index];
     }
 
@@ -71,7 +66,9 @@ internal sealed class ZPushCore : IPatternCore
 internal sealed class ZPullCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => throw new InvalidOperationException("PULL is receive-only");
+    {
+        throw new InvalidOperationException("PULL is receive-only");
+    }
 
     public string SocketTypeName => "PULL";
 }
@@ -84,7 +81,9 @@ internal sealed class ZPullCore : IPatternCore
 internal sealed class ZRouterCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => throw new InvalidOperationException("ROUTER sends through SendAsync(identity, message)");
+    {
+        throw new InvalidOperationException("ROUTER sends through SendAsync(identity, message)");
+    }
 
     public string SocketTypeName => "ROUTER";
 }
@@ -93,7 +92,9 @@ internal sealed class ZRouterCore : IPatternCore
 internal class ZPubCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => throw new InvalidOperationException("PUB broadcasts through SendAsync(message)");
+    {
+        throw new InvalidOperationException("PUB broadcasts through SendAsync(message)");
+    }
 
     public virtual string SocketTypeName => "PUB";
 }
@@ -102,7 +103,9 @@ internal class ZPubCore : IPatternCore
 internal class ZSubCore : IPatternCore
 {
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => throw new InvalidOperationException("SUB is receive-only");
+    {
+        throw new InvalidOperationException("SUB is receive-only");
+    }
 
     public virtual string SocketTypeName => "SUB";
 }
@@ -137,23 +140,19 @@ internal sealed class ZReqCore : IPatternCore
     /// <c>RequestAsync</c>, which manages the in-flight gate atomically.
     /// </summary>
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => throw new InvalidOperationException("REQ sends through RequestAsync, not SendAsync");
+    {
+        throw new InvalidOperationException("REQ sends through RequestAsync, not SendAsync");
+    }
 
     public Task<ZMessage> RequestAsync(ZReqSocket socket, ZMessage message, CancellationToken token)
     {
         Task<ZMessage> result;
         lock (gateLock)
         {
-            if (pending is not null)
-            {
-                throw new InvalidOperationException("a request is already in flight");
-            }
+            if (pending is not null) throw new InvalidOperationException("a request is already in flight");
 
             var peers = socket.PeerSnapshot;
-            if (peers.Length == 0)
-            {
-                throw new InvalidOperationException("no connected peer to send the request to");
-            }
+            if (peers.Length == 0) throw new InvalidOperationException("no connected peer to send the request to");
 
             // Round robin: the cursor advances unconditionally, so a slow or
             // failing peer never starves the others (0010 section 2).
@@ -200,10 +199,7 @@ internal sealed class ZReqCore : IPatternCore
         TaskCompletionSource<ZMessage>? completion;
         lock (gateLock)
         {
-            if (peer != current || pending is null)
-            {
-                return;
-            }
+            if (peer != current || pending is null) return;
 
             completion = pending;
             current = null;
@@ -240,10 +236,7 @@ internal sealed class ZReqCore : IPatternCore
     private static ZMessage BuildOutbound(ZMessage message)
     {
         var frames = new List<ZFrame>(message.Count + 1) { EmptyFrame };
-        for (var i = 0; i < message.Count; i++)
-        {
-            frames.Add(message[i]);
-        }
+        for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
 
         return new ZMessage(new ZMultiMessage([.. frames]));
     }
@@ -259,10 +252,7 @@ internal sealed class ZReqCore : IPatternCore
         }
 
         var frames = new List<ZFrame>(count - 1);
-        for (var i = 1; i < count; i++)
-        {
-            frames.Add(message[i]);
-        }
+        for (var i = 1; i < count; i++) frames.Add(message[i]);
 
         return frames.Count == 1
             ? new ZMessage(new ZSingleMessage(frames[0]))
@@ -284,9 +274,12 @@ internal sealed class ZRepCore : IPatternCore
     public string SocketTypeName => "REP";
 
     public IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers)
-        => throw new InvalidOperationException("REP replies through SendReplyAsync, not SendAsync");
+    {
+        throw new InvalidOperationException("REP replies through SendReplyAsync, not SendAsync");
+    }
 
-    public async ValueTask OnMessageAsync(ZRepSocket socket, IZConnection peer, ZMessage message, CancellationToken token)
+    public async ValueTask OnMessageAsync(ZRepSocket socket, IZConnection peer, ZMessage message,
+        CancellationToken token)
     {
         // Strict alternation across all peers: one request is handled at a
         // time; the per-peer pumps stay alive (no starvation, 0010 section 3).
@@ -313,10 +306,7 @@ internal sealed class ZRepCore : IPatternCore
     private static ZMessage BuildOutbound(ZMessage message)
     {
         var frames = new List<ZFrame>(message.Count + 1) { ZReqCore.EmptyFrame };
-        for (var i = 0; i < message.Count; i++)
-        {
-            frames.Add(message[i]);
-        }
+        for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
 
         return new ZMessage(new ZMultiMessage([.. frames]));
     }
@@ -331,10 +321,7 @@ internal sealed class ZRepCore : IPatternCore
         }
 
         var frames = new List<ZFrame>(count - 1);
-        for (var i = 1; i < count; i++)
-        {
-            frames.Add(message[i]);
-        }
+        for (var i = 1; i < count; i++) frames.Add(message[i]);
 
         return frames.Count == 1
             ? new ZMessage(new ZSingleMessage(frames[0]))

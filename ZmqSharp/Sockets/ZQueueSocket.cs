@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Threading.Channels;
 using ZmqSharp.Messages;
 using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Sockets;
 
@@ -16,12 +15,12 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     where TSocket : ZSocketBase
 {
     /// <summary>Peer receive-queue lifecycle (0006 3.6): Active while parsing,
-    /// Draining while reclaimed on disconnect, Closed afterwards.</summary>
+    /// Draining while reclaimed on disconnect, Closed afterward.</summary>
     private enum PeerPhase
     {
         Active,
         Draining,
-        Closed,
+        Closed
     }
 
     private sealed class PeerState
@@ -48,18 +47,13 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             // allocation (0006 3.6). Reclaim drains under the peer's ReadLock,
             // so a message never leaks out of a concurrent drain.
             foreach (var state in owner.peerSnapshot)
-            {
                 lock (state.ReadLock)
                 {
-                    if (!state.Queue.Reader.TryRead(out var candidate))
-                    {
-                        continue;
-                    }
+                    if (!state.Queue.Reader.TryRead(out var candidate)) continue;
 
                     item = candidate;
                     return true;
                 }
-            }
 
             item = default;
             return false;
@@ -68,20 +62,14 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         public override async ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
         {
             var completed = owner.completion.Task;
-            if (completed.IsCompleted)
-            {
-                return false;
-            }
+            if (completed.IsCompleted) return false;
 
             // Capture the gate before the level check: an item arriving
             // between the check and the await completes the captured gate, so
             // no wake is lost; the 0->1 edge wake means a continuously
             // readable queue does not spin (0006 3.5).
             var wake = owner.GetWakeTask();
-            if (owner.AnyPeerHasItems())
-            {
-                return true;
-            }
+            if (owner.AnyPeerHasItems()) return true;
 
             var done = await Task.WhenAny(wake, completed).WaitAsync(cancellationToken);
             return done == wake;
@@ -99,8 +87,8 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     /// so the receive hot path allocates nothing (0006 3.6).
     /// </summary>
     private volatile PeerState[] peerSnapshot = [];
+
     private readonly ZQueueFactory receiveQueueFactory;
-    private readonly ZQueueFactory? sendQueueFactory;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
@@ -113,10 +101,10 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         options ??= new ZQueueSocketOptions();
         receiveQueueFactory = options.ReceiveQueueFactory;
         ArgumentNullException.ThrowIfNull(receiveQueueFactory);
-        sendQueueFactory = options.SendQueueFactory;
+        var sendQueueFactory1 = options.SendQueueFactory;
         Messages = new AggregateReader(this);
 
-        if (sendQueueFactory is { } outboundFactory)
+        if (sendQueueFactory1 is { } outboundFactory)
         {
             sendChannel = outboundFactory.Create(static message => message.Dispose());
             sendPump = SendPumpAsync(Cts.Token);
@@ -165,33 +153,42 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     }
 
     public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-        => socket.SendAsync(message, token);
+    {
+        return socket.SendAsync(message, token);
+    }
 
     public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-        => socket.SendAsync(bytes, token);
+    {
+        return socket.SendAsync(bytes, token);
+    }
 
     public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => socket.BindAsync<TEndpoint, TTransport>(endpoint, token);
+    {
+        return socket.BindAsync<TEndpoint, TTransport>(endpoint, token);
+    }
 
     public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => socket.ConnectAsync<TEndpoint, TTransport>(endpoint, token);
+    {
+        return socket.ConnectAsync<TEndpoint, TTransport>(endpoint, token);
+    }
 
     public Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => socket.UnbindAsync<TEndpoint, TTransport>(endpoint);
+    {
+        return socket.UnbindAsync<TEndpoint, TTransport>(endpoint);
+    }
 
     public Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => socket.DisconnectAsync<TEndpoint, TTransport>(endpoint);
+    {
+        return socket.DisconnectAsync<TEndpoint, TTransport>(endpoint);
+    }
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref Closed, 1) != 0)
-        {
-            return;
-        }
+        if (Interlocked.Exchange(ref Closed, 1) != 0) return;
 
         socket.PeerEnded -= OnPeerEnded;
         await Cts.CancelAsync();
@@ -200,7 +197,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         await socket.DisposeAsync();
 
         if (sendPump is not null)
-        {
             try
             {
                 await sendPump;
@@ -218,7 +214,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
                 // surfaced here.
                 sendChannel?.Writer.TryComplete(failure);
             }
-        }
 
         await AwaitBackgroundAsync();
 
@@ -226,18 +221,11 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         // unsubscribe above means OnPeerEnded no longer runs during disposal,
         // so reclaiming here is the only path for messages that lose their
         // consumer on socket disposal (0006 3.5).
-        foreach (var state in peerSnapshot)
-        {
-            Reclaim(state);
-        }
+        foreach (var state in peerSnapshot) Reclaim(state);
 
         if (sendChannel is { } outbound)
-        {
             while (outbound.Reader.TryRead(out var message))
-            {
                 message.Dispose();
-            }
-        }
 
         completion.TrySetResult();
         Cts.Dispose();
@@ -251,7 +239,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private sealed class QueueSurface(ZQueueSocket<TSocket> owner) : IPatternSink
     {
         public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
-            => owner.OnPeerMessageAsync(peer, message, token);
+        {
+            return owner.OnPeerMessageAsync(peer, message, token);
+        }
     }
 
     private void OnPeerConnected(IZConnection connection)
@@ -259,7 +249,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         var state = new PeerState
         {
             Queue = receiveQueueFactory.Create(static message => message.Dispose()),
-            Phase = PeerPhase.Active,
+            Phase = PeerPhase.Active
         };
         lock (StateLock)
         {
@@ -303,21 +293,14 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         // transition, so waiting readers wake once per message batch instead
         // of spinning on a continuously readable queue. A drop-mode write to
         // a full queue leaves Count unchanged and wakes nobody (0006 3.5).
-        if (state.Queue.Reader.Count == 1)
-        {
-            Wake();
-        }
+        if (state.Queue.Reader.Count == 1) Wake();
     }
 
     private bool AnyPeerHasItems()
     {
         foreach (var state in peerSnapshot)
-        {
             if (state.Queue.Reader.Count > 0)
-            {
                 return true;
-            }
-        }
 
         return false;
     }
@@ -327,10 +310,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         PeerState? state;
         lock (StateLock)
         {
-            if (!peers.Remove(connection, out state))
-            {
-                return;
-            }
+            if (!peers.Remove(connection, out state)) return;
 
             // Removed from the routing snapshot first, so the aggregate reader
             // can never hand out a message that is about to be drained; no
@@ -349,9 +329,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         // - independent of whether the pump routed before or after the peer's
         // teardown (0006 3.5/3.6).
         if (failure is not null && sendChannel is { } outbound && peerSnapshot.Length == 0)
-        {
             outbound.Writer.TryComplete(failure);
-        }
 
         Action<IZConnection, Exception?>? handler;
         lock (StateLock)
@@ -374,10 +352,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         lock (state.ReadLock)
         {
             state.Queue.Writer.TryComplete();
-            while (state.Queue.Reader.TryRead(out var message))
-            {
-                message.Dispose();
-            }
+            while (state.Queue.Reader.TryRead(out var message)) message.Dispose();
         }
     }
 
@@ -415,10 +390,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     {
         var current = peerSnapshot;
         var index = Array.IndexOf(current, state);
-        if (index < 0)
-        {
-            return;
-        }
+        if (index < 0) return;
 
         var updated = new PeerState[current.Length - 1];
         current.AsSpan(0, index).CopyTo(updated);
@@ -427,7 +399,9 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     }
 
     private static TaskCompletionSource CreateGate()
-        => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    {
+        return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     private async Task SendPumpAsync(CancellationToken token)
     {
@@ -435,7 +409,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         try
         {
             await foreach (var message in channel.Reader.ReadAllAsync(token))
-            {
                 try
                 {
                     await socket.SendAsync(message, token);
@@ -458,7 +431,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
                     channel.Writer.TryComplete(failure);
                     return;
                 }
-            }
         }
         catch (ChannelClosedException)
         {

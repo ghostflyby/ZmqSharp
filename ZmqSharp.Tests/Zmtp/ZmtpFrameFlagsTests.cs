@@ -2,7 +2,7 @@ using FluentAssertions;
 using Xunit;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Zmtp;
 
 public sealed class ZmtpFrameFlagsTests
 {

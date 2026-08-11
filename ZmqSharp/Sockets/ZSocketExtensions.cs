@@ -39,21 +39,13 @@ public static class ZSocketExtensions
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
         var uri = new Uri(endpoint);
         if (!uri.Scheme.Equals("tcp", StringComparison.OrdinalIgnoreCase))
-        {
             throw new NotSupportedException($"unsupported endpoint scheme '{uri.Scheme}' in '{endpoint}'");
-        }
 
-        int port = uri.Port;
-        if (IPAddress.TryParse(uri.Host, out var address))
-        {
-            return new IPEndPoint(address, port);
-        }
+        var port = uri.Port;
+        if (IPAddress.TryParse(uri.Host, out var address)) return new IPEndPoint(address, port);
 
         var addresses = await Dns.GetHostAddressesAsync(uri.Host, token);
-        if (addresses.Length == 0)
-        {
-            throw new InvalidOperationException($"could not resolve endpoint host '{uri.Host}'");
-        }
+        if (addresses.Length == 0) throw new InvalidOperationException($"could not resolve endpoint host '{uri.Host}'");
 
         return new IPEndPoint(addresses[0], port);
     }

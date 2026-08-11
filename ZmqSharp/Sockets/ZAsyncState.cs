@@ -34,10 +34,7 @@ public abstract class ZAsyncState(MemoryPool<byte> pool)
             tasks = [.. BackgroundTasks];
         }
 
-        if (tasks.Length == 0)
-        {
-            return;
-        }
+        if (tasks.Length == 0) return;
 
         try
         {

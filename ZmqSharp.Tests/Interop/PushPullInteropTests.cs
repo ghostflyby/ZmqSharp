@@ -8,12 +8,12 @@ using Xunit;
 using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 
-namespace ZmqSharp.Tests;
+namespace ZmqSharp.Tests.Interop;
 
 /// <summary>
-/// PUSH/PULL interop with the NetMQ libzmq-compatible implementation over TCP
-/// (0006 section 5): send-only round-robin outbound and receive-only
-/// fair-queue inbound, in both directions.
+///     PUSH/PULL interop with the NetMQ libzmq-compatible implementation over TCP
+///     (0006 section 5): send-only round-robin outbound and receive-only
+///     fair-queue inbound, in both directions.
 /// </summary>
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class PushPullInteropTests
@@ -43,7 +43,7 @@ public sealed class PushPullInteropTests
     {
         await using var pull = ZSocket.CreatePull(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         var port = InteropHelpers.GetFreePort();
         await pull.BindAsync($"tcp://127.0.0.1:{port}");
@@ -81,9 +81,7 @@ public sealed class PushPullInteropTests
 
         // Distinct payloads per turn make cross-peer reordering detectable.
         for (var i = 0; i < 8; i++)
-        {
             await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"turn-{i}")), cts.Token);
-        }
 
         // Drain both pulls until all eight turns arrive or the overall window
         // expires: the messages may still be in flight on a slow runner, so a
@@ -108,9 +106,7 @@ public sealed class PushPullInteropTests
     private static IEnumerable<string> DrainAvailable(PullSocket pull)
     {
         while (pull.TryReceiveFrameBytes(TimeSpan.FromMilliseconds(50), out var frame))
-        {
-            yield return System.Text.Encoding.ASCII.GetString(frame);
-        }
+            yield return Encoding.ASCII.GetString(frame);
     }
 
     [Fact]
@@ -118,9 +114,9 @@ public sealed class PushPullInteropTests
     {
         await using var pull = ZSocket.CreatePull(new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
-        Func<Task> act = () => pull.SendAsync(ZMessage.FromOwned("x"u8.ToArray())).AsTask();
+        var act = () => pull.SendAsync(ZMessage.FromOwned([.. "x"u8])).AsTask();
         (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("receive-only");
     }
 
