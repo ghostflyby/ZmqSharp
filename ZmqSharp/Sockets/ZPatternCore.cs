@@ -165,31 +165,30 @@ internal sealed class ZReqCore : IPatternCore
         }
     }
 
-    /// <summary>Appends the empty delimiter frame; frames move (0007 M3).</summary>
+    /// <summary>Prepends the empty delimiter frame; frames move (0007 M3).</summary>
     private static ZMessage BuildOutbound(ZMessage message)
     {
-        var frames = new List<ZFrame>(message.Count + 1);
+        var frames = new List<ZFrame>(message.Count + 1) { EmptyFrame };
         for (var i = 0; i < message.Count; i++)
         {
             frames.Add(message[i]);
         }
 
-        frames.Add(EmptyFrame);
         return new ZMessage(new ZMultiMessage([.. frames]));
     }
 
-    /// <summary>Strips the trailing empty delimiter; the wire message's frames move.</summary>
+    /// <summary>Strips the leading empty delimiter; the wire message's frames move.</summary>
     private static ZMessage InterpretInbound(ZMessage message)
     {
         var count = message.Count;
-        if (count < 2 || message[count - 1].ToSequence().Length != 0)
+        if (count < 2 || message[0].ToSequence().Length != 0)
         {
             message.Dispose();
-            throw new ZeroMqProtocolException("reply is missing the trailing empty delimiter");
+            throw new ZeroMqProtocolException("request is missing the leading empty delimiter");
         }
 
         var frames = new List<ZFrame>(count - 1);
-        for (var i = 0; i < count - 1; i++)
+        for (var i = 1; i < count; i++)
         {
             frames.Add(message[i]);
         }
@@ -242,27 +241,26 @@ internal sealed class ZRepCore : IPatternCore
 
     private static ZMessage BuildOutbound(ZMessage message)
     {
-        var frames = new List<ZFrame>(message.Count + 1);
+        var frames = new List<ZFrame>(message.Count + 1) { ZReqCore.EmptyFrame };
         for (var i = 0; i < message.Count; i++)
         {
             frames.Add(message[i]);
         }
 
-        frames.Add(ZReqCore.EmptyFrame);
         return new ZMessage(new ZMultiMessage([.. frames]));
     }
 
     private static ZMessage InterpretInbound(ZMessage message)
     {
         var count = message.Count;
-        if (count < 2 || message[count - 1].ToSequence().Length != 0)
+        if (count < 2 || message[0].ToSequence().Length != 0)
         {
             message.Dispose();
-            throw new ZeroMqProtocolException("request is missing the trailing empty delimiter");
+            throw new ZeroMqProtocolException("reply is missing the leading empty delimiter");
         }
 
         var frames = new List<ZFrame>(count - 1);
-        for (var i = 0; i < count - 1; i++)
+        for (var i = 1; i < count; i++)
         {
             frames.Add(message[i]);
         }

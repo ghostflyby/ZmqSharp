@@ -12,20 +12,21 @@ wire.
 
 ## 1. Wire semantics (empty delimiter)
 
-ZMTP REQ/REP frame a payload with an empty delimiter frame so a peer can
-distinguish request/reply payloads from routing frames:
+libzmq REQ/REP frame a payload with an empty delimiter frame **in front of**
+the payload, so a peer can distinguish request/reply payloads from routing
+frames:
 
 ```text
-REQ send:   [payload frames..., empty]
-REP send:   [reply frames..., empty]
-REP recv:   wire [payload..., empty]  -> interpret -> [payload...] request
-REQ recv:   wire [reply..., empty]    -> interpret -> [reply...] reply
+REQ send:   [empty, payload frames...]
+REP send:   [empty, reply frames...]
+REP recv:   wire [empty, payload...]  -> interpret -> [payload...] request
+REQ recv:   wire [empty, reply...]    -> interpret -> [reply...] reply
 ```
 
-- `BuildOutbound(ZMessage)` appends an empty frame (0007 M3: frames move from
+- `BuildOutbound(ZMessage)` prepends an empty frame (0007 M3: frames move from
   the semantic value into the wire message).
-- `InterpretInbound(ZMessage)` removes the trailing empty frame; a missing or
-  non-empty delimiter is a `ZeroMqProtocolException`.
+- `InterpretInbound(ZMessage)` removes the leading empty frame; a missing or
+  non-empty first frame is a `ZeroMqProtocolException`.
 - Frames move, never copy; the consumed semantic value is inert afterwards
   (0007 M3). The message passed to `RequestAsync` / `SendReplyAsync` is owned
   by the pattern once called.
