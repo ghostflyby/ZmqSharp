@@ -317,6 +317,20 @@ session without an authenticator rejects every accepted connection), matching
 libzmq where PLAIN client and server options are independent
 (`ZMQ_PLAIN_USERNAME`/`ZMQ_PLAIN_PASSWORD` vs `ZMQ_PLAIN_SERVER`).
 
+### 6.4 Implementation deltas vs. this design
+
+- The authenticator delegate is `ZPlainAuthenticator(string username,
+  ReadOnlySpan<byte> password)`: the username arrives as the decoded UTF-8
+  text of the HELLO Username property, and the password as the raw bytes of
+  the Password property (the shared metadata parser decodes both as text).
+  Password *encoding* is therefore the metadata parser's UTF-8; a caller who
+  needs non-UTF-8 passwords would decode through a mechanism-side wrapper.
+- The client also parses ERROR: the WELCOME step accepts ERROR and throws
+  with the peer's reason, so a server-side rejection surfaces as
+  `ZMechanismException` on the client.
+- Both roles reject an unexpected first command (the client before HELLO,
+  the server before WELCOME) with `ZMechanismException`.
+
 ## 7. Configuration
 
 `ZSocketOptions` gains one property; the default preserves today's behavior:
@@ -409,8 +423,8 @@ needs it.
 | # | Work item | Size | Notes |
 |---|-----------|------|-------|
 | 1 | Mechanism boundary + NULL extraction | Medium | **Implemented** (this revision): 0006 section 4 gate met; parser slims to traffic; `ZmtpHandshake` + `ZmtpCommandCodec` + `ZmtpGreeting`; READY Socket-Type validation moved to the socket layer; codec made public and the PLAIN-style mechanism verified end to end against the public surface only |
-| 2 | PLAIN mechanism | Small | Pure command frames, no crypto (0015 section 3.3); next |
-| 3 | NetMQ PLAIN interop | Small | Extends the existing interop harness |
+| 2 | PLAIN mechanism | Small | **Implemented** (this revision): `ZPlainMechanism` + `ZPlainAuthenticator`, pure command frames, no crypto (0015 section 3.3); built only against the public mechanism surface and verified by wire fixtures plus end-to-end real-socket handshakes incl. an authentication rejection |
+| 3 | NetMQ PLAIN interop | Small | Extends the existing interop harness; deferred to its own slice |
 | 4 | CURVE (managed X25519 AOT evaluation first) | Large | Own tracked item; deferred |
 
 The security boundary depends on nothing else in 0015, so slice 1 can land in
