@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -109,7 +108,9 @@ public sealed class ZmtpParserTests
             return true;
         });
         var session = await ZmtpTestRunner.EstablishAsync(connection);
-        using var parser = ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"), recorder);
+        using var parser =
+            ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"),
+                recorder);
 
         var parseTask = parser.ParseAsync().AsTask();
         await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -146,7 +147,9 @@ public sealed class ZmtpParserTests
             return true;
         });
         var session = await ZmtpTestRunner.EstablishAsync(connection);
-        var parser = ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"), sink);
+        var parser =
+            ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"),
+                sink);
 
         var parseTask = parser.ParseAsync().AsTask();
         await firstSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));

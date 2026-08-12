@@ -8,7 +8,7 @@ namespace ZmqSharp.Zmtp;
 /// format. Public so custom mechanisms can construct commands their sessions
 /// send (notably the ERROR a server writes when rejecting authentication); the
 /// socket layer builds the READY body, and a mechanism usually sends it via
-/// <see cref="ZMechanismContext.LocalReadyBody"/>.
+/// <see cref="ZmqSharp.Security.ZMechanismContext.LocalReadyBody"/>.
 /// </summary>
 public static class ZmtpCommands
 {

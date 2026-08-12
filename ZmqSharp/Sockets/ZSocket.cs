@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// Socket factory: the queue surface is the primary path with short names;

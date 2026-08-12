@@ -1,4 +1,3 @@
-using System.Buffers;
 using FluentAssertions;
 using Xunit;
 
@@ -15,17 +14,24 @@ public sealed class LibsodiumKnownVectorTests
 {
     private static readonly byte[] Sk1 =
         Convert.FromHexString("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+
     private static readonly byte[] Pk1 =
         Convert.FromHexString("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+
     private static readonly byte[] Sk2 =
         Convert.FromHexString("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+
     private static readonly byte[] Pk2 =
         Convert.FromHexString("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+
     private static readonly byte[] Nonce =
         Convert.FromHexString("df44535f814886b74ff0ff2ab0b8d2ff15b128594cabb60b");
+
     private static readonly byte[] Plain = [.. "cross box test"u8];
+
     private static readonly byte[] LibsodiumBox =
         Convert.FromHexString("2596569f8ea62536c778dc731a92ee70f4df000f54b57626e65c61fbad29");
+
     private static readonly byte[] LibsodiumBeforenm =
         Convert.FromHexString("1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389");
 

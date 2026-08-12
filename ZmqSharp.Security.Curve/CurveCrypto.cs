@@ -104,17 +104,21 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
             0x79622d32,
             ReadLe32(x25519Shared, 16), ReadLe32(x25519Shared, 20),
             ReadLe32(x25519Shared, 24), ReadLe32(x25519Shared, 28),
-            0x6b206574,
+            0x6b206574
         ];
 
         for (var i = 0; i < 10; i++)
         {
             // Column round.
-            QuarterRound(x, 0, 4, 8, 12); QuarterRound(x, 5, 9, 13, 1);
-            QuarterRound(x, 10, 14, 2, 6); QuarterRound(x, 15, 3, 7, 11);
+            QuarterRound(x, 0, 4, 8, 12);
+            QuarterRound(x, 5, 9, 13, 1);
+            QuarterRound(x, 10, 14, 2, 6);
+            QuarterRound(x, 15, 3, 7, 11);
             // Row round.
-            QuarterRound(x, 0, 1, 2, 3); QuarterRound(x, 5, 6, 7, 4);
-            QuarterRound(x, 10, 11, 8, 9); QuarterRound(x, 15, 12, 13, 14);
+            QuarterRound(x, 0, 1, 2, 3);
+            QuarterRound(x, 5, 6, 7, 4);
+            QuarterRound(x, 10, 11, 8, 9);
+            QuarterRound(x, 15, 12, 13, 14);
         }
 
         var output = new byte[32];
@@ -148,8 +152,8 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
 
     private static uint ReadLe32(byte[] source, int offset)
     {
-        return (uint)source[offset] | ((uint)source[offset + 1] << 8)
-               | ((uint)source[offset + 2] << 16) | ((uint)source[offset + 3] << 24);
+        return source[offset] | ((uint)source[offset + 1] << 8)
+                              | ((uint)source[offset + 2] << 16) | ((uint)source[offset + 3] << 24);
     }
 
     private static void WriteLe32(byte[] target, int offset, uint value)

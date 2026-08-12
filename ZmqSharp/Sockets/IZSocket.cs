@@ -1,7 +1,6 @@
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// Common contract of every socket surface: endpoint management and direct

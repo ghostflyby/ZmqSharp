@@ -1,6 +1,6 @@
-using ZmqSharp.Zmtp;
+using ZmqSharp.Security;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// ZMTP security configuration (0016 section 7): the single mechanism used by

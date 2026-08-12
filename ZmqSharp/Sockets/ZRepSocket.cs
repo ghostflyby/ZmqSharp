@@ -1,7 +1,6 @@
-using ZmqSharp.Messages;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
-
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// REP composition root (0010 section 4): fair intake of requests serialized

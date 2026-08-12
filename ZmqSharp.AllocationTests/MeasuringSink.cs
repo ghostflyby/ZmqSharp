@@ -1,5 +1,3 @@
-using ZmqSharp.Messages;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 
 namespace ZmqSharp.AllocationTests;
@@ -67,13 +65,11 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 
             var delivered = Volatile.Read(ref received);
             for (var i = pending.Count - 1; i >= 0; i--)
-            {
                 if (delivered >= pending[i].Threshold)
                 {
                     pending[i].Tcs.TrySetResult();
                     pending.RemoveAt(i);
                 }
-            }
         }
     }
 }

@@ -1,4 +1,4 @@
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// Server-side PLAIN credential check (RFC 27). The delegate keeps the

@@ -1,7 +1,7 @@
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>Callback receive surface: borrowed streaming frames.</summary>
 public interface IZCallbackSocket : IZSocket

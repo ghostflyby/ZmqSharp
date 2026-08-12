@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -146,7 +145,7 @@ public sealed class CurveSessionConnection : IZConnection
 
             if (frame.Length == 0) return;
 
-            await raw.WriteAsync(SealFrame(frame, flags: 0), token);
+            await raw.WriteAsync(SealFrame(frame, 0), token);
         }
     }
 
@@ -204,8 +203,10 @@ public sealed class CurveSessionConnection : IZConnection
     {
         var plaintext = new byte[1 + payload.Length];
         plaintext[0] = (byte)((flags & ZmtpFrameFlags.More) != 0
-                              ? 0x01
-                              : ((flags & ZmtpFrameFlags.Command) != 0 ? 0x02 : 0x00));
+            ? 0x01
+            : (flags & ZmtpFrameFlags.Command) != 0
+                ? 0x02
+                : 0x00);
         payload.CopyTo(plaintext.AsSpan(1));
 
         var nonce = new byte[24];
@@ -245,7 +246,7 @@ public sealed class CurveSessionConnection : IZConnection
         var headerLength = isLong ? 9 : 2;
         if (buffer.Count < headerLength) return null;
 
-        long size = isLong
+        var size = isLong
             ? BinaryPrimitives.ReadInt64BigEndian(CollectionsMarshal.AsSpan(buffer).Slice(1, 8))
             : buffer[1];
         if (size < 0 || size > int.MaxValue) throw new ZeroMqProtocolException("invalid ZMTP frame size");

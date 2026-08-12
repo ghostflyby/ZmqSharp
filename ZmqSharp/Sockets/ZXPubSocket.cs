@@ -1,8 +1,7 @@
 using System.Buffers;
-using ZmqSharp.Messages;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
-
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// XPUB composition root (0014): broadcast plus subscription observation.

@@ -1,7 +1,7 @@
-using ZmqSharp.Messages;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// REQ composition root (0010 section 4): strict single in-flight request
@@ -22,7 +22,7 @@ public sealed class ZReqSocket : ZSocketBase, IPatternSink
     }
 
     /// <summary>
-    /// Sends a request to the next peer (round robin) and waits for its reply.
+    /// Sends a request to the next peer (round-robin) and waits for its reply.
     /// The message is consumed by the request; the returned reply is owned by
     /// the caller and disposed exactly once. Throws when a request is already
     /// in flight (strict alternation) or no peer is connected.

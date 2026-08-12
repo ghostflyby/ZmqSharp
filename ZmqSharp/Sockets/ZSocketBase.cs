@@ -1,11 +1,13 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
-using ZmqSharp.Messages;
+using ZmqSharp.Security;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Sockets;
+// ReSharper disable once CheckNamespace
+namespace ZmqSharp;
 
 /// <summary>
 /// Pattern-agnostic transport core (0007 section 2.1): calls the transport,

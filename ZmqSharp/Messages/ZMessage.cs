@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace ZmqSharp.Messages;
+namespace ZmqSharp;
 
 /// <summary>
 /// A message with two cases: Single (one frame) or Multi (several frames).

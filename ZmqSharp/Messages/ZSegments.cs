@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace ZmqSharp.Messages;
+namespace ZmqSharp;
 
 /// <summary>
 /// NonContiguous case of a frame: a table of segments. Dispose releases every

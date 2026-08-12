@@ -1,4 +1,3 @@
-using ZmqSharp.Messages;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Transports;

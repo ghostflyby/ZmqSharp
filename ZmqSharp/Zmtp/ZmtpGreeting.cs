@@ -1,5 +1,5 @@
 using System.Text;
-using ZmqSharp.Transports;
+using ZmqSharp.Security;
 
 namespace ZmqSharp.Zmtp;
 

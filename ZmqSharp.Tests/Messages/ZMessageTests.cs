@@ -1,7 +1,6 @@
 using System.Buffers;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Messages;
 
 namespace ZmqSharp.Tests.Messages;
 

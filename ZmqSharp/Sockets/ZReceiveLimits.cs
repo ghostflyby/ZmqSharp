@@ -1,7 +1,7 @@
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>Why a received frame was rejected by the connection-level guard.</summary>
-public enum ZReceiveRejectionReason
+internal enum ZReceiveRejectionReason
 {
     /// <summary>The frame exceeds the configured single-frame limit.</summary>
     FrameTooLarge,
@@ -14,7 +14,7 @@ public enum ZReceiveRejectionReason
 }
 
 /// <summary>The rejection payload of the connection-level guard (0008 D1).</summary>
-public readonly struct ZReceiveRejection
+internal readonly struct ZReceiveRejection
 {
     /// <summary>Classification of the rejection.</summary>
     public ZReceiveRejectionReason Reason { get; init; }

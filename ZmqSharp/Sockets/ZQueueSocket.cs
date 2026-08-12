@@ -1,9 +1,8 @@
 using System.Buffers;
 using System.Threading.Channels;
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// High-level queue surface: wraps a callback socket type, takes over its

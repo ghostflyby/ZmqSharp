@@ -463,9 +463,7 @@ the single place that later switches to `ZSocketType.AcceptsPeer`.
 
 ## 13. Open questions
 
-- **Namespace**: `ZmqSharp.Zmtp` is proposed (mechanisms are ZMTP protocol
-  concepts). A dedicated `ZmqSharp.Security` layer is the alternative if the
-  mechanism surface grows beyond the ZMTP layer.
+- **Namespace**: resolved by 0018 - the mechanism surface ships as a dedicated `ZmqSharp.Security` layer, separate from the ZMTP wire codec layer in `ZmqSharp.Zmtp`.
 - **`ZmtpParser.EstablishAsync`**: removed (a draft public type; the parser is
   traffic-only). Resolved in implementation (section 4.1).
 - **as-server conflict strictness**: the current code ignores the peer's

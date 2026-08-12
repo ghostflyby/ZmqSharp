@@ -3,8 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Messages;
-using ZmqSharp.Sockets;
 
 namespace ZmqSharp.Tests.Sockets;
 

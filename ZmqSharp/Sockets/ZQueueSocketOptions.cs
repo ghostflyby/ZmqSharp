@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Threading.Channels;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>Queue socket configuration.</summary>
 public sealed class ZQueueSocketOptions

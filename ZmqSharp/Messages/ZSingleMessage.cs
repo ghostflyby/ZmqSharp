@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace ZmqSharp.Messages;
+namespace ZmqSharp;
 
 /// <summary>Single-frame message: exactly one ZFrame.</summary>
 public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable

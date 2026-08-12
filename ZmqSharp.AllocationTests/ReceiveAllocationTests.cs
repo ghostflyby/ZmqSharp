@@ -2,8 +2,6 @@ using System.Buffers;
 using System.Net;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.AllocationTests;
 
@@ -135,9 +133,10 @@ public class ReceiveAllocationTests
         byte[] secondFrame = [.. "second-frame"u8];
         for (var i = 0; i < WarmupCount; i++)
         {
-            peer.Enqueue(AllocationFrameData.Frame(firstFrame, more: true));
+            peer.Enqueue(AllocationFrameData.Frame(firstFrame, true));
             peer.Enqueue(AllocationFrameData.Frame(secondFrame));
         }
+
         await sink.WaitForAsync(WarmupCount);
 
         GC.Collect();
@@ -146,9 +145,10 @@ public class ReceiveAllocationTests
 
         for (var i = WarmupCount; i < MessageCount; i++)
         {
-            peer.Enqueue(AllocationFrameData.Frame(firstFrame, more: true));
+            peer.Enqueue(AllocationFrameData.Frame(firstFrame, true));
             peer.Enqueue(AllocationFrameData.Frame(secondFrame));
         }
+
         await sink.WaitForAsync(MessageCount);
 
         var deltas = WindowDeltas(sink);
