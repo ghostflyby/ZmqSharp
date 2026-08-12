@@ -5,9 +5,6 @@ using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
-using ZmqSharp.Messages;
-using ZmqSharp.Sockets;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Interop;
 

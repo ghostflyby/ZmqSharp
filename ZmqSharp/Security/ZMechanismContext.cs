@@ -1,8 +1,9 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using ZmqSharp.Transports;
+using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// Connection-scoped wire view a mechanism session drives on (0016 section 3).

@@ -1,4 +1,4 @@
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp;
 
 /// <summary>Thrown on ZMTP protocol violations (bad signature, invalid frame, ERROR command, etc.).</summary>
 public class ZeroMqProtocolException : InvalidOperationException

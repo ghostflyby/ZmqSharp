@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Threading.Channels;
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 
 namespace ZmqSharp.AllocationTests;
@@ -60,6 +59,7 @@ internal sealed class AllocationFakeConnection : IZConnection
 
     private readonly Channel<byte[]> inbound =
         Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+
     private byte[]? current;
     private int currentPosition;
     private int handshakePosition;

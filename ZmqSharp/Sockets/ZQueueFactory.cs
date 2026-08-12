@@ -1,7 +1,6 @@
 using System.Threading.Channels;
-using ZmqSharp.Messages;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// Declaration-style channel construction strategy (0009), mirroring the

@@ -1,6 +1,7 @@
 using System.Text;
+using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// The PLAIN security mechanism (RFC 27): the client sends HELLO with

@@ -27,7 +27,9 @@ Engineering constraints for ZmqSharp.
 
 ## Namespaces
 
-- Organized by layer: `ZmqSharp.Messages` / `ZmqSharp.Zmtp` / `ZmqSharp.Transports` / `ZmqSharp.Patterns`.
+- The top-level `ZmqSharp` namespace holds the base public API: socket factory and surfaces, the message model, and configuration. A single `using ZmqSharp;` covers basic usage.
+- Sub-namespaces represent domain-specific feature areas: `ZmqSharp.Transports` (custom transports), `ZmqSharp.Zmtp` (ZMTP wire codec), `ZmqSharp.Security` (security mechanisms).
+- Internal API namespaces mirror the directory layout. See `docs/impl/0018-namespace-and-directory-organization.md`.
 
 ## Documents
 

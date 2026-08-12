@@ -1,4 +1,6 @@
-namespace ZmqSharp.Sockets;
+// ReSharper disable once CheckNamespace
+
+namespace ZmqSharp;
 
 /// <summary>How a received message is materialized.</summary>
 public enum ZReceiveMode

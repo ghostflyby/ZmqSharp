@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Net;
 using System.Text;
-using ZmqSharp.Messages;
+using ZmqSharp.Security;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -262,7 +262,7 @@ internal static class ZmtpTestData
         result[0] = 0xFF;
         result[9] = 0x7F;
         result[10] = 3;
-        System.Text.Encoding.ASCII.GetBytes(mechanism).AsSpan().CopyTo(result.AsSpan(12));
+        Encoding.ASCII.GetBytes(mechanism).AsSpan().CopyTo(result.AsSpan(12));
         return result;
     }
 

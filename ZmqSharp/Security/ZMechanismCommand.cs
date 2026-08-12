@@ -1,4 +1,4 @@
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// One handshake command frame read by a mechanism session: the short-string

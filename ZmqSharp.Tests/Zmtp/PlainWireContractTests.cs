@@ -6,8 +6,7 @@ using System.Text;
 using System.Threading.Channels;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Messages;
-using ZmqSharp.Sockets;
+using ZmqSharp.Security;
 using ZmqSharp.Zmtp;
 using InteropHelpers = ZmqSharp.Tests.Interop.InteropHelpers;
 
@@ -47,10 +46,10 @@ public sealed class PlainWireContractTests
         var stream = raw.GetStream();
 
         // The client's greeting advertises PLAIN with as-server = 0.
-        AssertGreeting(await ReadExactlyAsync(stream, 64, cts.Token), "PLAIN", asServer: false);
+        AssertGreeting(await ReadExactlyAsync(stream, 64, cts.Token), "PLAIN", false);
 
         // The scripted PLAIN server greets back with as-server = 1.
-        await stream.WriteAsync(BuildGreeting("PLAIN", asServer: true), cts.Token);
+        await stream.WriteAsync(BuildGreeting("PLAIN", true), cts.Token);
 
         // The client's HELLO must be byte-exact RFC 27: the short-string name
         // plus Username and Password metadata properties.
@@ -61,13 +60,13 @@ public sealed class PlainWireContractTests
         // WELCOME, then the client's READY carrying Socket-Type. The frame
         // body is [name-len]["READY"][metadata]; the metadata parser takes
         // only the property part, so strip the command name first.
-        await stream.WriteAsync(BuildFrame(ExpectedWelcomeBody(), command: true), cts.Token);
+        await stream.WriteAsync(BuildFrame(ExpectedWelcomeBody(), true), cts.Token);
         var ready = await ReadFrameAsync(stream, cts.Token);
         ready.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
         ParseReadySocketType(ready.Body).Should().Be("PAIR");
 
         // Complete the handshake, then exchange a data frame.
-        await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), command: true), cts.Token);
+        await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), true), cts.Token);
         await connectTask.WaitAsync(cts.Token);
 
         await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]), cts.Token);
@@ -98,12 +97,12 @@ public sealed class PlainWireContractTests
         var stream = raw.GetStream();
 
         // The server's greeting advertises PLAIN with as-server = 1.
-        AssertGreeting(await ReadExactlyAsync(stream, 64, cts.Token), "PLAIN", asServer: true);
+        AssertGreeting(await ReadExactlyAsync(stream, 64, cts.Token), "PLAIN", true);
 
         // The scripted PLAIN client greets back (as-server = 0) and sends
         // HELLO with the exact RFC 27 bytes.
-        await stream.WriteAsync(BuildGreeting("PLAIN", asServer: false), cts.Token);
-        await stream.WriteAsync(BuildFrame(ExpectedHelloBody("alice", "s3cret"), command: true), cts.Token);
+        await stream.WriteAsync(BuildGreeting("PLAIN", false), cts.Token);
+        await stream.WriteAsync(BuildFrame(ExpectedHelloBody("alice", "s3cret"), true), cts.Token);
 
         // The server's WELCOME must be byte-exact RFC 27.
         var welcome = await ReadFrameAsync(stream, cts.Token);
@@ -116,8 +115,8 @@ public sealed class PlainWireContractTests
         ParseReadySocketType(ready.Body).Should().Be("PAIR");
 
         // Complete the handshake, then exchange a data frame.
-        await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), command: true), cts.Token);
-        await stream.WriteAsync(BuildFrame([.. "yo"u8], command: false), cts.Token);
+        await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), true), cts.Token);
+        await stream.WriteAsync(BuildFrame([.. "yo"u8], false), cts.Token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
         message.Should().NotBeNull();
@@ -148,8 +147,8 @@ public sealed class PlainWireContractTests
         var stream = raw.GetStream();
 
         await ReadExactlyAsync(stream, 64, cts.Token); // server greeting
-        await stream.WriteAsync(BuildGreeting("PLAIN", asServer: false), cts.Token);
-        await stream.WriteAsync(BuildFrame(ExpectedHelloBody("alice", "wrong"), command: true), cts.Token);
+        await stream.WriteAsync(BuildGreeting("PLAIN", false), cts.Token);
+        await stream.WriteAsync(BuildFrame(ExpectedHelloBody("alice", "wrong"), true), cts.Token);
 
         var error = await ReadFrameAsync(stream, cts.Token);
         error.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
@@ -249,7 +248,8 @@ public sealed class PlainWireContractTests
         return frame;
     }
 
-    private static async Task<(byte[] Body, ZmtpFrameFlags Flags)> ReadFrameAsync(Stream stream, CancellationToken token)
+    private static async Task<(byte[] Body, ZmtpFrameFlags Flags)> ReadFrameAsync(Stream stream,
+        CancellationToken token)
     {
         var flags = (ZmtpFrameFlags)(await ReadExactlyAsync(stream, 1, token))[0];
         var isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);

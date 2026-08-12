@@ -1,7 +1,6 @@
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// Semantic delivery seam (0007 section 2.3): complete messages, per peer,

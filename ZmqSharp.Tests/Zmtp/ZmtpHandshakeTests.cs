@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using FluentAssertions;
 using Xunit;
+using ZmqSharp.Security;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 

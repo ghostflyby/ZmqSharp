@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Text;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Security.Curve;
@@ -50,7 +49,8 @@ public sealed class CurveMechanism : IZSecurityMechanism
         if (role == ZMechanismRole.Client)
         {
             if (clientLongTermKey is null || serverPublicKey is null)
-                throw new InvalidOperationException("a CURVE client requires a long-term key pair and the server public key");
+                throw new InvalidOperationException(
+                    "a CURVE client requires a long-term key pair and the server public key");
 
             return new ClientSession(crypto, clientLongTermKey, serverPublicKey);
         }

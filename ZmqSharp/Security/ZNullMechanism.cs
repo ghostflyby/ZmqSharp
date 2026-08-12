@@ -1,6 +1,7 @@
 using System.Text;
+using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// The NULL mechanism (0016 section 5): no authentication. The session writes

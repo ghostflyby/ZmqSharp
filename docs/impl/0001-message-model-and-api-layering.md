@@ -173,7 +173,7 @@ The authoritative list lives in AGENTS.md. Highlights: xUnit tests with FluentAs
   Rationale: the library has zero external dependencies, and a single assembly keeps AOT/trimming simplest; layering is enforced by namespaces and dependency direction.
   Split triggers: a second transport implementation (e.g. TLS/QUIC), or a second consumer of the protocol layer.
   When split: `ZmqSharp` (core: message model, session, parser, patterns) + `ZmqSharp.Transports` (implements `IZTransport`), with dependency direction Transports -> Core.
-- Namespaces by layer: `ZmqSharp.Messages` / `ZmqSharp.Zmtp` / `ZmqSharp.Transports` / `ZmqSharp.Patterns`.
+- Namespaces by layer: the top-level `ZmqSharp` namespace (base public API: messages, sockets, configuration) plus `ZmqSharp.Zmtp` (ZMTP wire codec) / `ZmqSharp.Transports` / `ZmqSharp.Security` (security mechanisms). The full organization is specified in 0018.
 
 ## 13. Follow-ups
 

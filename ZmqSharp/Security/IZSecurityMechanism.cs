@@ -1,4 +1,4 @@
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// A ZMTP security mechanism (0016 section 3): the advertised mechanism name

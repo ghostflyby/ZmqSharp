@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Collections;
 
-namespace ZmqSharp.Messages;
+namespace ZmqSharp;
 
 /// <summary>
 /// Contiguous case of a frame: one buffer plus its ownership token. The owner

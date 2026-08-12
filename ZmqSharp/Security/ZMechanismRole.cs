@@ -1,4 +1,4 @@
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// Connection role in the ZMTP handshake. The role comes from the connection

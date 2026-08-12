@@ -1,8 +1,7 @@
 using System.Collections;
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// REP request value (0010 section 3, 0007 M2): the originating peer plus the

@@ -1,6 +1,6 @@
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// What the handshake driver receives when a mechanism session completes: the

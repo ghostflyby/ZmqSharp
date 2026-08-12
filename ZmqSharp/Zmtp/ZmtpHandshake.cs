@@ -1,6 +1,6 @@
 using System.Buffers;
+using ZmqSharp.Security;
 using ZmqSharp.Transports;
-
 namespace ZmqSharp.Zmtp;
 
 /// <summary>

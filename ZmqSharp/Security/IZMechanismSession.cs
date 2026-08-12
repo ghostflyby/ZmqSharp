@@ -1,4 +1,4 @@
-namespace ZmqSharp.Zmtp;
+namespace ZmqSharp.Security;
 
 /// <summary>
 /// Per-connection mechanism handshake: runs the mechanism's command sequence

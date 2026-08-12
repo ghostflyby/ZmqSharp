@@ -1,7 +1,6 @@
-using ZmqSharp.Messages;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
-
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// XSUB composition root (0014): manual subscription frames, no inbound

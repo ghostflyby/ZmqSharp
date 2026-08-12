@@ -1,9 +1,8 @@
 using System.Buffers.Binary;
 using System.Text;
-using ZmqSharp.Messages;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
-
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// ROUTER composition root (0012): identity-aware routing. Inbound messages

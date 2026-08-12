@@ -1,7 +1,6 @@
 using System.Buffers;
-using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// Shared asynchronous lifecycle infrastructure: memory pool, background task

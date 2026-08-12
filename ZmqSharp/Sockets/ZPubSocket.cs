@@ -1,6 +1,7 @@
-using ZmqSharp.Messages;
 
-namespace ZmqSharp.Sockets;
+
+using ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// PUB composition root (0013): send-only broadcast. The message's first

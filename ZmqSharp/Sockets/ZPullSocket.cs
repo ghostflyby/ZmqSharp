@@ -1,4 +1,6 @@
-namespace ZmqSharp.Sockets;
+
+using ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// PULL composition root: receive-only, fair-queue inbound. The receive

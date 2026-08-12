@@ -15,7 +15,7 @@ libzmq-compatible socket semantics.
 ## Usage
 
 ```csharp
-using ZmqSharp.Sockets;
+using ZmqSharp;
 
 // PAIR over TCP.
 await using var server = ZSocket.CreatePair();

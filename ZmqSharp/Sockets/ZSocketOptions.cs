@@ -1,7 +1,7 @@
 using System.Buffers;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>Socket configuration (transport core).</summary>
 public sealed class ZSocketOptions

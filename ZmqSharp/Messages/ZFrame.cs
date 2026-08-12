@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Collections;
 
-namespace ZmqSharp.Messages;
+namespace ZmqSharp;
 
 /// <summary>
 /// A frame with two cases: Contiguous (one segment) or NonContiguous (a

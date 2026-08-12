@@ -1,9 +1,6 @@
 using System.Net;
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Messages;
-using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.AllocationTests;
 

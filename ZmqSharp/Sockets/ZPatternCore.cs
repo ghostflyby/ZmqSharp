@@ -1,6 +1,4 @@
-using ZmqSharp.Messages;
 using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Sockets;
 

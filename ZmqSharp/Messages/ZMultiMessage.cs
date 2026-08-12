@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace ZmqSharp.Messages;
+namespace ZmqSharp;
 
 /// <summary>Multipart message: several frames.</summary>
 public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable

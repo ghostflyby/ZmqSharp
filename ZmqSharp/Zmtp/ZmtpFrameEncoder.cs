@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using ZmqSharp.Messages;
 
 namespace ZmqSharp.Zmtp;
 

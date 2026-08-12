@@ -1,8 +1,7 @@
 using System.Buffers;
-using ZmqSharp.Messages;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
-
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// SUB composition root (0013): receive-only with a topic-prefix subscription

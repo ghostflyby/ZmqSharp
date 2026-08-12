@@ -1,7 +1,7 @@
 using System.Net;
 using ZmqSharp.Transports;
 
-namespace ZmqSharp.Sockets;
+namespace ZmqSharp;
 
 /// <summary>
 /// String-endpoint facade over the generic transport core: parses
