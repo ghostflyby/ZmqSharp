@@ -5,19 +5,20 @@ namespace ZmqSharp.Sockets;
 /// <summary>
 /// Socket factory: the queue surface is the primary path with short names;
 /// the callback surface is created through the *Callback entry points.
+/// Security options are forwarded to every socket type (0016 section 7).
 /// </summary>
 public static class ZSocket
 {
     public static ZQueueSocket<ZPairSocket> CreatePair(ZQueueSocketOptions? options = null)
     {
         return new ZQueueSocket<ZPairSocket>(
-            new ZPairSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
+            new ZPairSocket(ToSocketOptions(options)), options);
     }
 
     public static ZQueueSocket<ZDealerSocket> CreateDealer(ZQueueSocketOptions? options = null)
     {
         return new ZQueueSocket<ZDealerSocket>(
-            new ZDealerSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
+            new ZDealerSocket(ToSocketOptions(options)), options);
     }
 
     public static ZPairSocket CreatePairCallback(ZSocketOptions? options = null)
@@ -48,13 +49,13 @@ public static class ZSocket
     public static ZQueueSocket<ZPullSocket> CreatePull(ZQueueSocketOptions? options = null)
     {
         return new ZQueueSocket<ZPullSocket>(
-            new ZPullSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
+            new ZPullSocket(ToSocketOptions(options)), options);
     }
 
     public static ZQueueSocket<ZRouterSocket> CreateRouter(ZQueueSocketOptions? options = null)
     {
         return new ZQueueSocket<ZRouterSocket>(
-            new ZRouterSocket(new ZSocketOptions { Pool = options?.Pool ?? MemoryPool<byte>.Shared }), options);
+            new ZRouterSocket(ToSocketOptions(options)), options);
     }
 
     public static ZRouterSocket CreateRouterCallback(ZSocketOptions? options = null)
@@ -80,5 +81,15 @@ public static class ZSocket
     public static ZXPubSocket CreateXPub(ZSocketOptions? options = null)
     {
         return new ZXPubSocket(options ?? new ZSocketOptions());
+    }
+
+    /// <summary>Builds the socket options for the wrapped callback socket from the queue-surface options.</summary>
+    private static ZSocketOptions ToSocketOptions(ZQueueSocketOptions? options)
+    {
+        return new ZSocketOptions
+        {
+            Pool = options?.Pool ?? MemoryPool<byte>.Shared,
+            Security = options?.Security ?? ZSecurityOptions.Null
+        };
     }
 }

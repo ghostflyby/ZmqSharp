@@ -1260,18 +1260,19 @@ public sealed class ZSocketTests
         // rest are dropped and reclaimed by the channel's item-dropped hook.
         for (var i = 0; i < 10; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
 
-        // Wait until the pump has drained: the pool settles at 3 (two buffered
-        // messages plus the parser greeting scratch) once every drop has been
-        // processed. Reading earlier would race the pump and refill the queue.
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        // Wait until the pump has drained: the pool settles at 2 (the two
+        // buffered messages) once every drop has been processed. The
+        // materializer allocates each frame's buffer directly, so there is no
+        // persistent parser scratch. Reading earlier would race the pump and
+        // refill the queue.
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
         received.Should().Equal(0, 1);
 
         // The eight dropped messages were disposed by the library, never seen
-        // by the consumer (0006 section 2.2). Only the parser scratch remains
-        // until disposal.
-        pool.Outstanding.Should().Be(1);
+        // by the consumer (0006 section 2.2).
+        pool.Outstanding.Should().Be(0);
 
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
@@ -1298,16 +1299,15 @@ public sealed class ZSocketTests
         await SendAndReadBackAsync(client, server.Messages, [0, 1], cts.Token);
 
         // Fill it, wait for both items to be materialized, then overflow it.
-        // The parser greeting scratch adds one outstanding rental.
         await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         // A full queue in DropNewest mode discards the newest buffered item
         // (3) and keeps the incoming one (4) (0006 section 3.5). Settling back
-        // at 3 proves the drop ran before any read frees a slot.
+        // at 2 proves the drop ran before any read frees a slot.
         await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
         received.Should().Equal(2, 4);
@@ -1337,12 +1337,12 @@ public sealed class ZSocketTests
 
         await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         // A full queue in DropOldest mode discards the oldest buffered item
         // (2) and keeps the incoming one (4).
         await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
         received.Should().Equal(3, 4);
@@ -1372,15 +1372,15 @@ public sealed class ZSocketTests
 
         for (var i = 0; i < 4; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
 
-        // The two buffered items plus the parser greeting scratch are rented.
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        // The two buffered items are rented (the materializer allocates each
+        // frame's buffer directly; there is no persistent parser scratch).
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         await client.DisposeAsync();
         await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // OnPeerEnded drained the buffered messages through the same Dispose
-        // path a drop uses, and the peer's teardown released the parser
-        // scratch; nothing leaks (0006 section 2.2).
+        // path a drop uses; nothing leaks (0006 section 2.2).
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
 
         await server.DisposeAsync();
@@ -1406,7 +1406,7 @@ public sealed class ZSocketTests
 
         await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
+        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         // Disposing with unread buffered messages reclaims them; PeerEnded is
         // unsubscribed during disposal, so this is the only reclaim path.
@@ -1632,9 +1632,8 @@ public sealed class ZSocketTests
         for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
 
         // Capacity comfortably exceeds the send count, so the pump never
-        // blocks; wait until every message plus the parser greeting scratch
-        // is materialized.
-        await WaitUntilSettledAsync(() => pool.Outstanding, count + 1, TimeSpan.FromMilliseconds(300));
+        // blocks; wait until every message is materialized.
+        await WaitUntilSettledAsync(() => pool.Outstanding, count, TimeSpan.FromMilliseconds(300));
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -1725,6 +1724,93 @@ public sealed class ZSocketTests
 
         await server.DisposeAsync();
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+    }
+
+    // ---- Security mechanism boundary (0016) ----
+
+    [Fact]
+    public async Task ConnectAsync_ReadyMissingSocketType_Throws()
+    {
+        // READY Socket-Type metadata validation moved to the socket layer with
+        // the handshake boundary; a peer whose READY lacks Socket-Type is
+        // rejected at establishment.
+        var port = GetFreePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+        await using var client = ZSocket.CreatePair();
+
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var stream = raw.GetStream();
+        await stream.WriteAsync(ZmtpTestData.Concat(
+            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Identity", "abc"))));
+        await stream.FlushAsync();
+
+        var act = () => connectTask;
+        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+    }
+
+    [Fact]
+    public async Task ConnectAsync_ReadyInvalidSocketType_Throws()
+    {
+        var port = GetFreePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+        await using var client = ZSocket.CreatePair();
+
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var stream = raw.GetStream();
+        await stream.WriteAsync(ZmtpTestData.Concat(
+            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Socket-Type", "FOO"))));
+        await stream.FlushAsync();
+
+        var act = () => connectTask;
+        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+    }
+
+    [Fact]
+    public async Task ConnectAsync_CustomMechanism_ExchangesBeforeReady_AndCompletes()
+    {
+        // The replaceability gate (0006 section 4 / 0016 section 10): a test
+        // mechanism with a PING/PONG command pair before READY replaces NULL
+        // through explicit configuration alone - no reflection, no registry.
+        var port = GetFreePort();
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        var acceptTask = listener.AcceptTcpClientAsync();
+        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        { Security = new ZSecurityOptions { Mechanism = new TestPingPongMechanism() } });
+
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
+        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var stream = raw.GetStream();
+
+        // Server side of the TEST mechanism: complete the greeting (reading the
+        // client's TEST greeting) and answer the mechanism's command sequence.
+        var greeting = new byte[64];
+        await stream.ReadExactlyAsync(greeting).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await stream.WriteAsync(ZmtpTestData.Greeting("TEST"));
+        await stream.FlushAsync();
+
+        var serverPong = ZmtpTestData.Frame([4, (byte)'P', (byte)'O', (byte)'N', (byte)'G'], command: true);
+        var serverReady = ZmtpTestData.Ready();
+
+        // Client sends PING (2-byte header + 5-byte body), expects PONG, then
+        // exchanges READY; the server mirror responds in the same order.
+        await stream.ReadExactlyAsync(new byte[2 + 5]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await stream.WriteAsync(serverPong);
+        await stream.FlushAsync();
+
+        // The client's READY frame: 2-byte header + 26-byte body (READY name,
+        // Socket-Type property, PAIR value).
+        await stream.ReadExactlyAsync(new byte[2 + 26]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await stream.WriteAsync(serverReady);
+        await stream.FlushAsync();
+
+        await connectTask.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     private static async Task EchoAsync(ZQueueSocket<ZPairSocket> server, ChannelReader<ZMessage> messages,
@@ -1965,5 +2051,41 @@ internal sealed class SynchronousEofConnection : IZConnection
     public void Dispose()
     {
         Interlocked.Exchange(ref disposed, 1);
+    }
+}
+
+/// <summary>
+/// Test mechanism for the replaceability gate (0016 section 10): the session
+/// exchanges a PING/PONG command pair before READY, proving the boundary is
+/// not NULL-shaped.
+/// </summary>
+internal sealed class TestPingPongMechanism : IZSecurityMechanism
+{
+    public string Name => "TEST";
+
+    public IZMechanismSession CreateSession(ZMechanismRole role)
+    {
+        return new PingPongSession();
+    }
+
+    private sealed class PingPongSession : IZMechanismSession
+    {
+        public async ValueTask<ZMechanismResult?> RunAsync(ZMechanismContext context, CancellationToken token)
+        {
+            await context.WriteCommandAsync(new byte[] { 4, (byte)'P', (byte)'I', (byte)'N', (byte)'G' }, token);
+
+            var command = await context.ReadCommandAsync(token);
+            if (command is null) return null;
+            if (!command.Value.Name.Span.SequenceEqual("PONG"u8))
+                throw new ZMechanismException("expected PONG");
+
+            await context.WriteCommandAsync(context.LocalReadyBody, token);
+            var ready = await context.ReadCommandAsync(token);
+            if (ready is null) return null;
+            if (!ready.Value.Name.Span.SequenceEqual("READY"u8))
+                throw new ZMechanismException("expected READY");
+
+            return new ZMechanismResult(context.Connection, ready.Value.Arguments.ToArray());
+        }
     }
 }

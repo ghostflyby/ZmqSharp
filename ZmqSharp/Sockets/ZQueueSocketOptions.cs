@@ -52,4 +52,10 @@ public sealed class ZQueueSocketOptions
     /// injected pool regardless, ownership stays with the caller.
     /// </summary>
     public MemoryPool<byte> Pool { get; init; } = MemoryPool<byte>.Shared;
+
+    /// <summary>
+    /// ZMTP security mechanism configuration (0016 section 7); forwarded to
+    /// the wrapped socket. Defaults to the NULL mechanism.
+    /// </summary>
+    public ZSecurityOptions Security { get; init; } = ZSecurityOptions.Null;
 }

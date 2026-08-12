@@ -51,6 +51,15 @@ public sealed class ZSocketOptions
     } = 30_000;
 
     /// <summary>
+    /// ZMTP security mechanism configuration (0016 section 7). Defaults to the
+    /// NULL mechanism, preserving the current behavior; only one mechanism can
+    /// be configured per socket (ZMTP allows one mechanism per connection).
+    /// The mechanism is resolved once at socket construction, so this is safe
+    /// under Native AOT.
+    /// </summary>
+    public ZSecurityOptions Security { get; init; } = ZSecurityOptions.Null;
+
+    /// <summary>
     /// Maximum concurrently incomplete handshakes on the inbound (accepted)
     /// surface (0006 3.2). A slow-connecting flood beyond this is dropped with
     /// cancellation. Default 1024; zero disables the limit. Outbound

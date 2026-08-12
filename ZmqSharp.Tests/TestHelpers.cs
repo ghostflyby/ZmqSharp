@@ -8,14 +8,16 @@ using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
 
-/// <summary>In-memory stream; caps the chunk size to simulate partial TCP reads.</summary>
+/// <summary>In-memory stream; caps the chunk size to simulate partial TCP reads.
+/// Writes are captured (appended) so the handshake's local greeting/READY can
+/// be written into the connection during tests.</summary>
 internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : Stream
 {
     private int position;
 
     public override bool CanRead => true;
     public override bool CanSeek => false;
-    public override bool CanWrite => false;
+    public override bool CanWrite => true;
     public override long Length => data.Length;
 
     public override long Position
@@ -50,7 +52,12 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
 
     public override void Write(byte[] buffer, int offset, int count)
     {
-        throw new NotSupportedException();
+        // Writes (the local handshake) are captured and never read back.
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.CompletedTask;
     }
 
     private int ReadInternal(Span<byte> buffer)
@@ -208,34 +215,54 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
 
 internal static class ZmtpTestRunner
 {
+    /// <summary>
+    /// Completes the NULL handshake (greeting + READY) on the connection and
+    /// returns the session connection to run the traffic parser on.
+    /// </summary>
+    public static async Task<IZConnection?> EstablishAsync(IZConnection connection, string socketType = "PAIR")
+    {
+        using var handshake = new ZmtpHandshake(
+            connection,
+            ZNullMechanism.Instance,
+            ZmtpCommands.BuildReady(socketType),
+            ZmtpParser.DefaultMaxCommandSize);
+        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+        return result is { } r ? r.SessionConnection : null;
+    }
+
     public static ZmtpParser CreateParser(IZConnection connection, IZMessageSink sink)
     {
         connection.SetFrameHandler(sink.OnFrameAsync);
         return new ZmtpParser(connection);
     }
 
+    /// <summary>Completes the NULL handshake on the connection, then streams its traffic frames to the sink.</summary>
     public static async Task RunParserAsync(IZConnection connection, IZMessageSink sink)
     {
-        using var parser = CreateParser(connection, sink);
-        if (await parser.EstablishAsync()) await parser.ParseAsync();
+        var session = await EstablishAsync(connection);
+        if (session is null) return;
+
+        using var parser = CreateParser(session, sink);
+        await parser.ParseAsync();
     }
 
+    /// <summary>Runs an already-configured parser to completion.</summary>
     public static async Task RunParserAsync(ZmtpParser parser)
     {
-        if (await parser.EstablishAsync()) await parser.ParseAsync();
+        await parser.ParseAsync();
     }
 }
 
 /// <summary>ZMTP wire encoding helpers (tests only).</summary>
 internal static class ZmtpTestData
 {
-    public static byte[] Greeting()
+    public static byte[] Greeting(string mechanism = "NULL")
     {
         var result = new byte[64];
         result[0] = 0xFF;
         result[9] = 0x7F;
         result[10] = 3;
-        "NULL"u8.CopyTo(result.AsSpan(12, 4));
+        System.Text.Encoding.ASCII.GetBytes(mechanism).AsSpan().CopyTo(result.AsSpan(12));
         return result;
     }
 

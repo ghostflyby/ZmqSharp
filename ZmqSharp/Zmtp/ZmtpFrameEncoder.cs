@@ -12,43 +12,11 @@ public sealed class ZmtpFrameEncoder(Stream stream)
 {
     private readonly byte[] header = new byte[9];
 
-    /// <summary>ZMTP 3.0 greeting with the NULL mechanism; fixed wire constant.</summary>
-    private static readonly byte[] NullGreeting = BuildNullGreeting();
-
-    /// <summary>Writes the 64-byte ZMTP 3.0 greeting (NULL mechanism).</summary>
-    public async ValueTask WriteGreetingAsync(CancellationToken token = default)
-    {
-        await stream.WriteAsync(NullGreeting, token);
-    }
-
     /// <summary>
-    /// Builds the greeting plus one command frame as a single buffer, so the
-    /// handshake can be written atomically and a concurrent data frame cannot
-    /// interleave and corrupt the peer's handshake.
+    /// Writes a command frame (RFC 23 short-string command body, e.g. READY).
+    /// The greeting is written separately by the handshake driver
+    /// (<see cref="ZmtpHandshake"/>), which also matches the mechanism.
     /// </summary>
-    internal static byte[] BuildHandshake(ReadOnlyMemory<byte> commandBody)
-    {
-        var isLong = commandBody.Length > 255;
-        var headerLength = isLong ? 9 : 2;
-        var handshake = new byte[NullGreeting.Length + headerLength + commandBody.Length];
-        NullGreeting.CopyTo(handshake);
-        var header = handshake.AsSpan(NullGreeting.Length);
-        if (isLong)
-        {
-            header[0] = (byte)(ZmtpFrameFlags.Command | ZmtpFrameFlags.LongSize);
-            BinaryPrimitives.WriteInt64BigEndian(header[1..], commandBody.Length);
-        }
-        else
-        {
-            header[0] = (byte)ZmtpFrameFlags.Command;
-            header[1] = (byte)commandBody.Length;
-        }
-
-        commandBody.Span.CopyTo(handshake.AsSpan(NullGreeting.Length + headerLength));
-        return handshake;
-    }
-
-    /// <summary>Writes a command frame (RFC 23 short-string command body, e.g. READY).</summary>
     public async ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
     {
         long length = body.Length;
@@ -117,15 +85,5 @@ public sealed class ZmtpFrameEncoder(Stream stream)
             header[1] = (byte)length;
             await stream.WriteAsync(header.AsMemory(0, 2), token);
         }
-    }
-
-    private static byte[] BuildNullGreeting()
-    {
-        var greeting = new byte[64];
-        greeting[0] = 0xFF;
-        greeting[9] = 0x7F;
-        greeting[10] = 3;
-        "NULL"u8.CopyTo(greeting.AsSpan(12, 4));
-        return greeting;
     }
 }

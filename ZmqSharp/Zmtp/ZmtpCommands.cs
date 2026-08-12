@@ -3,8 +3,14 @@ using System.Text;
 
 namespace ZmqSharp.Zmtp;
 
-/// <summary>Builds ZMTP 3.0 command bodies using the RFC 23 short-string command-name format.</summary>
-internal static class ZmtpCommands
+/// <summary>
+/// Builds ZMTP 3.0 command bodies using the RFC 23 short-string command-name
+/// format. Public so custom mechanisms can construct commands their sessions
+/// send (notably the ERROR a server writes when rejecting authentication); the
+/// socket layer builds the READY body, and a mechanism usually sends it via
+/// <see cref="ZMechanismContext.LocalReadyBody"/>.
+/// </summary>
+public static class ZmtpCommands
 {
     private static readonly byte[] ReadyName = [.. "READY"u8];
     private static readonly byte[] SocketTypePropertyName = [.. "Socket-Type"u8];
