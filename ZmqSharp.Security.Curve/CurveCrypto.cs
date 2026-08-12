@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Numerics;
 using System.Security.Cryptography;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Macs;
@@ -22,7 +24,7 @@ public interface ICurveCryptoBackend
     /// <summary>Generates a fresh X25519 key pair (for the ephemeral connection keys).</summary>
     CurveKeyPair GenerateKeyPair();
 
-    /// <summary>X25519 shared secret (crypto_box_beforenm): 32 bytes.</summary>
+    /// <summary>crypto_box_beforenm: the NaCl box key, HSalsa20(X25519(...)), 32 bytes.</summary>
     byte[] DeriveSharedSecret(CurveKeyPair sender, byte[] recipientPublicKey);
 
     /// <summary>
@@ -69,13 +71,93 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         return new CurveKeyPair(pub, secret);
     }
 
+    /// <summary>
+    /// X25519 shared secret, processed through HSalsa20 exactly as NaCl's
+    /// crypto_box_beforenm does (the box key is not the raw X25519 output):
+    /// 32 bytes.
+    /// </summary>
     public byte[] DeriveSharedSecret(CurveKeyPair sender, byte[] recipientPublicKey)
     {
-        var shared = new byte[32];
-        if (!X25519.CalculateAgreement(sender.SecretKey, recipientPublicKey, shared))
+        var x25519 = new byte[32];
+        if (!X25519.CalculateAgreement(sender.SecretKey, recipientPublicKey, x25519))
             throw new CryptographicException("X25519 agreement rejected the recipient public key");
 
-        return shared;
+        return Hsalsa20(x25519);
+    }
+
+    private static byte[] Hsalsa20(byte[] x25519Shared)
+    {
+        // libsodium HSalsa20 (the NaCl crypto_box_beforenm construction):
+        // interleaved state layout
+        //   x0=sigma0, x1..x4=key[0..16), x5=sigma1, x6..x9=nonce,
+        //   x10=sigma2, x11..x14=key[16..32), x15=sigma3
+        // with serial Salsa20 quarterrounds (unlike ChaCha's parallel ones).
+        // BouncyCastle exposes XSalsa20 but not the HSalsa20 core, so the core
+        // is implemented here and locked to libsodium by the interop tests.
+        Span<uint> x =
+        [
+            0x61707865,
+            ReadLe32(x25519Shared, 0), ReadLe32(x25519Shared, 4),
+            ReadLe32(x25519Shared, 8), ReadLe32(x25519Shared, 12),
+            0x3320646e,
+            0, 0, 0, 0, // zero nonce
+            0x79622d32,
+            ReadLe32(x25519Shared, 16), ReadLe32(x25519Shared, 20),
+            ReadLe32(x25519Shared, 24), ReadLe32(x25519Shared, 28),
+            0x6b206574,
+        ];
+
+        for (var i = 0; i < 10; i++)
+        {
+            // Column round.
+            QuarterRound(x, 0, 4, 8, 12); QuarterRound(x, 5, 9, 13, 1);
+            QuarterRound(x, 10, 14, 2, 6); QuarterRound(x, 15, 3, 7, 11);
+            // Row round.
+            QuarterRound(x, 0, 1, 2, 3); QuarterRound(x, 5, 6, 7, 4);
+            QuarterRound(x, 10, 11, 8, 9); QuarterRound(x, 15, 12, 13, 14);
+        }
+
+        var output = new byte[32];
+        WriteLe32(output, 0, x[0]);
+        WriteLe32(output, 4, x[5]);
+        WriteLe32(output, 8, x[10]);
+        WriteLe32(output, 12, x[15]);
+        WriteLe32(output, 16, x[6]);
+        WriteLe32(output, 20, x[7]);
+        WriteLe32(output, 24, x[8]);
+        WriteLe32(output, 28, x[9]);
+        return output;
+    }
+
+    /// <summary>Salsa20 quarterround (serial - each step consumes the previous).</summary>
+    private static void QuarterRound(Span<uint> x, int a, int b, int c, int d)
+    {
+        var y0 = x[a];
+        var y1 = x[b];
+        var y2 = x[c];
+        var y3 = x[d];
+        var z1 = y1 ^ BitOperations.RotateLeft(y0 + y3, 7);
+        var z2 = y2 ^ BitOperations.RotateLeft(z1 + y0, 9);
+        var z3 = y3 ^ BitOperations.RotateLeft(z2 + z1, 13);
+        var z0 = y0 ^ BitOperations.RotateLeft(z3 + z2, 18);
+        x[a] = z0;
+        x[b] = z1;
+        x[c] = z2;
+        x[d] = z3;
+    }
+
+    private static uint ReadLe32(byte[] source, int offset)
+    {
+        return (uint)source[offset] | ((uint)source[offset + 1] << 8)
+               | ((uint)source[offset + 2] << 16) | ((uint)source[offset + 3] << 24);
+    }
+
+    private static void WriteLe32(byte[] target, int offset, uint value)
+    {
+        target[offset] = (byte)value;
+        target[offset + 1] = (byte)(value >> 8);
+        target[offset + 2] = (byte)(value >> 16);
+        target[offset + 3] = (byte)(value >> 24);
     }
 
     public byte[] Box(ReadOnlySpan<byte> plaintext, byte[] nonce, CurveKeyPair sender, byte[] recipientPublicKey)
