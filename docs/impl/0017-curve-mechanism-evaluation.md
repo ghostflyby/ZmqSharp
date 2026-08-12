@@ -198,8 +198,10 @@ cleanest expression of that is what this evaluation recommends:
    `ZmqSharp.Security.Curve` (project in `ZmqSharp.Security.Curve/`) -
    `CurveMechanism` (RFC 24 handshake via the public mechanism seam),
    `CurveSessionConnection` (frame-level encrypt/decrypt),
-   `ICurveCryptoBackend` + `BouncyCastleCurveCrypto`; verified end to end over
-   real sockets (auth + encrypted traffic, and a wrong-server-key rejection).
+   `ICurveCryptoBackend` + `BouncyCastleCurveCrypto`; verified end to end
+   against **real libzmq (4.3.5)** in both directions - our client and server
+   each complete the handshake and exchange encrypted messages with a pyzmq
+   peer - plus known-vector crypto tests and ZmqSharp-to-ZmqSharp e2e.
    A user opting into CURVE references this package instead of a sample.
    Two library seams were widened by it: sends route through the session
    connection the mechanism returns (`ZSocketBase`), and `ZmtpFrameFlags` is
@@ -207,11 +209,21 @@ cleanest expression of that is what this evaluation recommends:
 2. **The library's own build stays CURVE-free**: no crypto dependency, no
    change to the zero-native-dependency / AOT stance, `IsAotCompatible` and
    the trim/AOT analyzers keep passing on the library itself.
-3. **Validation**: the package is verified with the same tooling as
-   PLAIN - wire-contract tests against a scripted RFC 24 peer (0016 milestone
-   3 pattern), since NetMQ's CURVE, while implemented, is bound to the
-   unmaintained NaCl.Net and is not a trustworthy interop oracle by itself
-   (the same reason PLAIN used scripted peers).
+3. **Validation**: the package is verified against the real wire format. An
+   early hypothesis that NetMQ's CURVE is broken was investigated and
+   rejected: NetMQ's CURVE is a line-faithful port of libzmq's
+   `curve_client.cpp`/`curve_server.cpp` (PR #851), passes real native-libzmq
+   interop tests in both directions on its Windows CI, and NaCl.Net (its
+   crypto) is vector-identical to libsodium. The initial NetMQ interop
+   failures were traced to two test-harness bugs (a Python greeting
+   slice that silently grew the greeting to 65 bytes, and a `NetMQCertificate`
+   constructor that stores `(pub, secret)` in the wrong order in 4.0.4.3).
+   The genuine finding that surfaced during this is that CURVE traffic
+   frames are **plain data frames** (no Command bit) whose body begins with
+   the MESSAGE literal - our session connection first sent/required them as
+   command frames, which libzmq rejects. The final verification is against
+   real libzmq itself (pyzmq 4.3.5): both directions - our client and server
+   - complete the handshake and exchange encrypted messages.
 4. **Only if a built-in CURVE is later demanded** does the BouncyCastle
    dependency move into the core library, behind a feature flag - the package
    backend becomes the built-in backend unchanged.
@@ -225,8 +237,9 @@ by referencing the package - the "generic mechanism" route.
 - 0016 - replaceable security mechanism boundary (the seam this builds on;
   section 9: CURVE session connection).
 - RFC 24 / CurveZMQ (wire protocol: message sequence, nonce prefixes, vouch).
-- `zeromq/netmq` - maintained C# protocol reference:
-  `src/NetMQ/Core/Mechanisms/CurveMechanismBase.cs` (uses NaCl.Net).
+- `zeromq/netmq` - CURVE is a faithful port of libzmq's curve mechanisms
+  (PR #851), interop-tested against real native libzmq on its Windows CI;
+  `CurveMechanismBase.cs` is the maintained C# protocol reference.
 - `bcgit/bc-csharp` - BouncyCastle.Cryptography: `X25519Agreement`,
   `Ed25519Signer`, `XSalsa20Engine`, `Poly1305`; csproj sets
   `IsAotCompatible`; AOT issues #620/#500 closed as non-library bugs.

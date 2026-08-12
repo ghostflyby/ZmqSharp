@@ -99,7 +99,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             var session = new CurveSessionConnection(
                 context.Connection, crypto, sessionKey,
                 CurveConstants.MessagePrefixClientToServer, CurveConstants.MessagePrefixServerToClient,
-                nonce, 1);
+                nonce, 0);
             return new ZMechanismResult(session, peerMetadata);
         }
 

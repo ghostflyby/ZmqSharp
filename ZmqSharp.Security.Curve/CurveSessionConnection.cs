@@ -17,8 +17,6 @@ namespace ZmqSharp.Security.Curve;
 /// </summary>
 public sealed class CurveSessionConnection : IZConnection
 {
-    private const byte CommandFlag = 0b0100;
-
     private readonly IZConnection raw;
     private readonly ICurveCryptoBackend crypto;
     private readonly byte[] boxKey;
@@ -79,13 +77,14 @@ public sealed class CurveSessionConnection : IZConnection
     private async ValueTask<int> ReadFrameAsync(Memory<byte> buffer, CancellationToken token)
     {
         // Read one wire frame: clear header, MESSAGE body, then decrypt.
+        // libzmq carries CURVE traffic as plain data frames (no Command bit)
+        // whose body begins with the "MESSAGE" literal; read the frame
+        // regardless of flags and key on the literal.
         var flags = await ReadExactlyAsync(1, token);
         if (flags is null) return 0;
 
-        if ((flags[0] & CommandFlag) == 0)
-            throw new ZeroMqProtocolException("CURVE traffic frame is not a MESSAGE command frame");
-        if ((flags[0] & 0b0001) != 0)
-            throw new ZeroMqProtocolException("CURVE traffic frame carries the MORE flag");
+        if ((flags[0] & 0b1111_1000) != 0)
+            throw new ZeroMqProtocolException("reserved ZMTP frame flag bits are set");
 
         var isLong = (flags[0] & 0b0010) != 0;
         var sizeBytes = await ReadExactlyAsync(isLong ? 8 : 1, token);
@@ -224,7 +223,9 @@ public sealed class CurveSessionConnection : IZConnection
 
         var isLong = body.Length > 255;
         var wire = new byte[(isLong ? 9 : 2) + body.Length];
-        wire[0] = (byte)(CommandFlag | (isLong ? 0b0010 : 0));
+        // libzmq carries CURVE traffic as plain data frames (no Command bit);
+        // the "MESSAGE" literal inside the body is what identifies it.
+        wire[0] = (byte)(isLong ? 0b0010 : 0);
         if (isLong) BinaryPrimitives.WriteInt64BigEndian(wire.AsSpan(1), body.Length);
         else wire[1] = (byte)body.Length;
         body.CopyTo(wire.AsSpan(isLong ? 9 : 2));
