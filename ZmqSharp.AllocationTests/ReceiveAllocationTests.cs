@@ -12,11 +12,17 @@ namespace ZmqSharp.AllocationTests;
 /// pump thread itself. The old in-suite receive test read GC counters on the
 /// test thread, which never sees the pump thread's allocations; these tests
 /// capture the counter inside the semantic seam (0007 2.3) that the pump
-/// thread executes synchronously, so a delta between consecutive same-thread
-/// deliveries is exactly one message's parse + materialize + deliver
-/// allocation. Each test runs in a dedicated xunit collection (configured
-/// non-parallel), so no other test's allocations pollute the process-wide
-/// counter.
+/// thread executes synchronously. Each test runs in a dedicated xunit
+/// collection (configured non-parallel), so no other test's allocations
+/// pollute the process-wide counter.
+///
+/// The measured window is single-threaded by construction, not by luck: the
+/// enqueue loop never awaits, so when the pump wakes the channel is already
+/// fully buffered and every read completes synchronously - the pump cannot
+/// migrate threads mid-window (the migration that follows the forced GC falls
+/// on the warm-up boundary and is excluded). A thread-id invariant asserts
+/// this, so the thread-local GC counter is used inside a provably one-thread
+/// window rather than by assumption.
 ///
 /// Measured reality: a pooled 1-byte frame costs a fixed ~216 bytes per
 /// message on the pump thread (one MemoryPool rent + its owner wrapper per
@@ -55,11 +61,10 @@ public class ReceiveAllocationTests
             peer.Enqueue(AllocationFrameData.Frame([(byte)i]));
         await sink.WaitForAsync(MessageCount);
 
-        // Drop warm-up and any cross-thread boundary samples: the GC counter
-        // is thread-local, so a delta between two different threads is
-        // meaningless (the pump may resume on a new thread after the forced
-        // collection).
-        var deltas = SameThreadDeltas(sink);
+        // The measured window is single-threaded by construction (see the
+        // class doc): WindowDeltas asserts the invariant instead of silently
+        // dropping cross-thread samples.
+        var deltas = WindowDeltas(sink);
 
         // The counter on one thread is monotonic while this test owns it.
         deltas.Min().Should().BeGreaterThanOrEqualTo(0);
@@ -146,7 +151,7 @@ public class ReceiveAllocationTests
         }
         await sink.WaitForAsync(MessageCount);
 
-        var deltas = SameThreadDeltas(sink);
+        var deltas = WindowDeltas(sink);
         deltas.Min().Should().BeGreaterThanOrEqualTo(0);
 #if !DEBUG
         // ~2 pooled rents per two-frame message; absolute gates are Release
@@ -158,16 +163,25 @@ public class ReceiveAllocationTests
 #endif
     }
 
-    private static long[] SameThreadDeltas(MeasuringSink sink)
+    /// <summary>
+    /// Deltas across the measured window with the single-thread invariant
+    /// asserted, not filtered: the enqueue loop never awaits, so the pump
+    /// drains the fully-buffered channel with synchronously completing reads
+    /// and cannot migrate threads mid-window. A migration would make the
+    /// thread-local GC counter meaningless, so it must fail the test loudly
+    /// instead of silently skewing the deltas.
+    /// </summary>
+    private static long[] WindowDeltas(MeasuringSink sink)
     {
-        var deltas = new List<long>(MessageCount - WarmupCount);
-        for (var i = WarmupCount; i < sink.Samples.Length; i++)
-        {
-            if (sink.ThreadIds[i] != sink.ThreadIds[i - 1]) continue;
-            deltas.Add(sink.Samples[i] - sink.Samples[i - 1]);
-        }
+        var windowThreads = sink.ThreadIds[WarmupCount..].Distinct().ToArray();
+        windowThreads.Should().ContainSingle(
+            "the measured window must run on a single pump thread for the thread-local deltas to be valid");
 
-        return [.. deltas];
+        var deltas = new long[MessageCount - WarmupCount - 1];
+        for (var i = WarmupCount + 1; i < MessageCount; i++)
+            deltas[i - WarmupCount - 1] = sink.Samples[i] - sink.Samples[i - 1];
+
+        return deltas;
     }
 
     private static long Median(long[] values)
