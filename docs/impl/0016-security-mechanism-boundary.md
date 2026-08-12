@@ -415,6 +415,10 @@ needs it.
 - **NetMQ PLAIN interop** (extends the 0006 section 5 matrix, both
   directions): ZmqSharp PLAIN client to NetMQ PLAIN server
   (`PlainServer = true`) and the reverse (`PlainUsername`/`PlainPassword`).
+  Note: NetMQ 4.0.4.3 (and master) does not implement PLAIN - the greeting
+  branch errors with "Not yet supported" and no PLAIN options exist - so
+  this bullet is superseded by the scripted wire-contract peer of
+  `PlainWireContractTests` (RFC 27 byte-exact, both roles plus rejection).
 - **AOT**: no reflection anywhere; the mechanism seam and the authenticator
   delegate keep the existing AOT analyzers clean.
 
@@ -424,7 +428,7 @@ needs it.
 |---|-----------|------|-------|
 | 1 | Mechanism boundary + NULL extraction | Medium | **Implemented** (this revision): 0006 section 4 gate met; parser slims to traffic; `ZmtpHandshake` + `ZmtpCommandCodec` + `ZmtpGreeting`; READY Socket-Type validation moved to the socket layer; codec made public and the PLAIN-style mechanism verified end to end against the public surface only |
 | 2 | PLAIN mechanism | Small | **Implemented** (this revision): `ZPlainMechanism` + `ZPlainAuthenticator`, pure command frames, no crypto (0015 section 3.3); built only against the public mechanism surface and verified by wire fixtures plus end-to-end real-socket handshakes incl. an authentication rejection |
-| 3 | NetMQ PLAIN interop | Small | Extends the existing interop harness; deferred to its own slice |
+| 3 | PLAIN wire contract | Small | **Implemented** (this revision) as a *scripted* raw-TCP peer: NetMQ implements no PLAIN (4.0.4.3 and master both error at the greeting with "Not yet supported" and expose no PlainServer/PlainUsername/PlainPassword options), so no NetMQ PLAIN peer exists. `PlainWireContractTests` speak RFC 27 byte-for-byte from the spec - HELLO/WELCOME/ERROR bodies and the as-server bit - and assert what our library sends and accepts, in both roles plus the rejection path. The ZMTP framing/command layers they build on are already locked by the NetMQ NULL interop suite. A NetMQ PLAIN peer would require upstream NetMQ work; revisit if NetMQ lands one |
 | 4 | CURVE (managed X25519 AOT evaluation first) | Large | Own tracked item; deferred |
 
 The security boundary depends on nothing else in 0015, so slice 1 can land in
