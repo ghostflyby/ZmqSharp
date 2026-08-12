@@ -193,6 +193,14 @@ cleanest expression of that is what this evaluation recommends:
    `ICurveCryptoBackend` contract, with a **BouncyCastle-based backend** as
    the default sample. This is the "user picks their crypto library" story:
    the protocol is done once, the user only supplies the four primitives.
+   **Implemented** (this revision): `samples/ZmqSharp.Samples.Curve` -
+   `CurveMechanism` (RFC 24 handshake via the public mechanism seam),
+   `CurveSessionConnection` (frame-level encrypt/decrypt),
+   `ICurveCryptoBackend` + `BouncyCastleCurveCrypto`; verified end to end over
+   real sockets (auth + encrypted traffic, and a wrong-server-key rejection).
+   Two library seams were widened by it: sends route through the session
+   connection the mechanism returns (`ZSocketBase`), and `ZmtpFrameFlags` is
+   public for frame-wrapping session connections.
 2. **The library's own build stays CURVE-free**: no crypto dependency, no
    change to the zero-native-dependency / AOT stance, `IsAotCompatible` and
    the trim/AOT analyzers keep passing on the library itself.

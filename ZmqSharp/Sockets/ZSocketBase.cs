@@ -23,6 +23,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// </summary>
     private volatile IZConnection[] peerSnapshot = [];
 
+    /// <summary>
+    /// Per-peer session connection: after the mechanism handshake, sends route
+    /// through the session connection the mechanism returned (0016 section 9) -
+    /// a CURVE session wraps the raw connection to encrypt on write. The peer
+    /// identity for routing, gates, and PeerEnded stays the raw connection.
+    /// </summary>
+    private readonly Dictionary<IZConnection, IZConnection> sessionConnections = [];
+
     /// <summary>Per-connection endpoint, used only by the rare DisconnectAsync lookup.</summary>
     private readonly Dictionary<IZConnection, object?> endpoints = [];
 
@@ -340,9 +348,21 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private async ValueTask SendToPeerAsync(IZConnection connection, ZMessage message, CancellationToken token)
     {
         await WaitUntilEstablishedAsync(connection, token);
+
+        // Sends go through the mechanism's session connection (the CURVE
+        // encrypting wrapper); the peer snapshot keeps the raw connection as
+        // the identity (0016 section 9). A read-only lookup with no
+        // allocation on the hot path.
+        var peer = connection;
+        lock (StateLock)
+        {
+            sessionConnections.TryGetValue(connection, out peer);
+        }
+
+        peer ??= connection;
         try
         {
-            await connection.SendAsync(message, token);
+            await peer.SendAsync(message, token);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or IOException or SocketException)
         {
@@ -472,6 +492,10 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 ? BorrowedSink(parser)
                 : MessageSinkHandler(connection, parser, materializer);
             connection.SetFrameHandler((frame, _) => trafficHandler(frame, Cts.Token));
+            lock (StateLock)
+            {
+                sessionConnections[connection] = result.Value.SessionConnection;
+            }
 
             established.TrySetResult();
             await parser.ParseAsync(attemptToken);
@@ -514,6 +538,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 PublishRemove(connection);
                 establishedGates.Remove(connection);
                 attemptTokens.Remove(connection);
+                sessionConnections.Remove(connection);
                 incompleteHandshakes--;
                 if (accumulators.Remove(connection, out var accumulator))
                     // The peer ended mid-message: owning frames accumulated for

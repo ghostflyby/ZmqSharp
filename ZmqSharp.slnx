@@ -2,4 +2,6 @@
     <Project Path="ZmqSharp/ZmqSharp.csproj"/>
     <Project Path="ZmqSharp.Tests/ZmqSharp.Tests.csproj"/>
     <Project Path="ZmqSharp.AllocationTests/ZmqSharp.AllocationTests.csproj"/>
+    <Project Path="samples/ZmqSharp.Samples.Curve/ZmqSharp.Samples.Curve.csproj"/>
+    <Project Path="samples/ZmqSharp.Samples.Curve.Tests/ZmqSharp.Samples.Curve.Tests.csproj"/>
 </Solution>
