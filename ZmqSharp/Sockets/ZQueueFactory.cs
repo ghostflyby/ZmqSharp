@@ -46,7 +46,7 @@ public abstract class ZQueueFactory : IZQueueFactory
 
 /// <summary>
 /// Bounded channel factory (configured by <see cref="BoundedChannelOptions"/>):
-/// capacity is the HWM, so a full queue drops or backpressures per the
+/// capacity is the HWM, so a full queue drops or backpressure per the
 /// configured mode. Constructed from <see cref="BoundedChannelOptions"/>,
 /// which is copied at construction and fixed: later mutation of the original
 /// options instance does not affect this factory.
