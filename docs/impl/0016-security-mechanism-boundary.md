@@ -373,8 +373,10 @@ trimming analyzers, which are already enabled with warnings as errors.
 
 CURVE is not part of this phase (0015 section 3.3): it requires X25519, a
 managed implementation must be evaluated for AOT compatibility and audited
-separately, and it is its own tracked item. The boundary is ready for it in
-two ways:
+separately, and it is its own tracked item. The evaluation is documented in
+0017 - its conclusion is that CURVE ships as an example mechanism with a
+user-supplied crypto backend (BouncyCastle for pure managed / AOT), not as a
+library built-in. The boundary is ready for it in two ways:
 
 - `ZMechanismResult.SessionConnection` may be a wrapper of the raw
   connection that decrypts on read / encrypts on write; the parser and the
@@ -429,7 +431,7 @@ needs it.
 | 1 | Mechanism boundary + NULL extraction | Medium | **Implemented** (this revision): 0006 section 4 gate met; parser slims to traffic; `ZmtpHandshake` + `ZmtpCommandCodec` + `ZmtpGreeting`; READY Socket-Type validation moved to the socket layer; codec made public and the PLAIN-style mechanism verified end to end against the public surface only |
 | 2 | PLAIN mechanism | Small | **Implemented** (this revision): `ZPlainMechanism` + `ZPlainAuthenticator`, pure command frames, no crypto (0015 section 3.3); built only against the public mechanism surface and verified by wire fixtures plus end-to-end real-socket handshakes incl. an authentication rejection |
 | 3 | PLAIN wire contract | Small | **Implemented** (this revision) as a *scripted* raw-TCP peer: NetMQ implements no PLAIN (4.0.4.3 and master both error at the greeting with "Not yet supported" and expose no PlainServer/PlainUsername/PlainPassword options), so no NetMQ PLAIN peer exists. `PlainWireContractTests` speak RFC 27 byte-for-byte from the spec - HELLO/WELCOME/ERROR bodies and the as-server bit - and assert what our library sends and accepts, in both roles plus the rejection path. The ZMTP framing/command layers they build on are already locked by the NetMQ NULL interop suite. A NetMQ PLAIN peer would require upstream NetMQ work; revisit if NetMQ lands one |
-| 4 | CURVE (managed X25519 AOT evaluation first) | Large | Own tracked item; deferred |
+| 4 | CURVE (example mechanism, user crypto backend) | Large | **Evaluated in 0017**: not a built-in; ships as a protocol-skeleton example over a user-chosen X25519 backend |
 
 The security boundary depends on nothing else in 0015, so slice 1 can land in
 parallel with 0015 item 1 (dispatch/type split) and item 3 (write-path
