@@ -8,14 +8,14 @@ using ZmqSharp.Messages;
 using ZmqSharp.Sockets;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Samples.Curve.Tests;
+namespace ZmqSharp.Security.Curve.Tests;
 
 /// <summary>
-/// End-to-end CURVE tests: two ZmqSharp sockets configured with the sample
-/// mechanism authenticate and then exchange encrypted messages over TCP. The
-/// example uses the BouncyCastle backend, but the mechanism composes any
-/// <see cref="ICurveCryptoBackend"/> - swapping the backend is the only change
-/// needed to use a different crypto library.
+/// End-to-end CURVE tests: two ZmqSharp sockets configured with the optional
+/// <see cref="CurveMechanism"/> authenticate and then exchange encrypted
+/// messages over TCP. The package's default BouncyCastle backend is used, but
+/// the mechanism composes any <see cref="ICurveCryptoBackend"/> - swapping the
+/// backend is the only change needed to use a different crypto library.
 /// </summary>
 public sealed class CurveEndToEndTests
 {

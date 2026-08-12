@@ -6,7 +6,7 @@ using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math.EC.Rfc7748;
 using Org.BouncyCastle.Security;
 
-namespace ZmqSharp.Samples.Curve;
+namespace ZmqSharp.Security.Curve;
 
 /// <summary>An X25519 key pair; keys are 32-byte big-endian scalars/points.</summary>
 public sealed record CurveKeyPair(byte[] PublicKey, byte[] SecretKey);

@@ -188,35 +188,37 @@ Because CURVE must interoperate with libzmq, its crypto is fixed and cannot
 be an abstraction over the *protocol* - only over the *primitives*. The
 cleanest expression of that is what this evaluation recommends:
 
-1. **Ship CURVE as an example mechanism** (a `samples/` or `docs/` code
-   example): the protocol skeleton from section 2 plus an
-   `ICurveCryptoBackend` contract, with a **BouncyCastle-based backend** as
-   the default sample. This is the "user picks their crypto library" story:
-   the protocol is done once, the user only supplies the four primitives.
-   **Implemented** (this revision): `samples/ZmqSharp.Samples.Curve` -
+1. **Ship CURVE as a separately distributed, optional package**: the protocol
+   skeleton from section 2 plus an `ICurveCryptoBackend` contract, with a
+   **BouncyCastle-based backend** as the default implementation. This is the
+   "user picks their crypto library" story: the protocol is done once, the
+   user only supplies the four primitives - or just takes the BouncyCastle
+   backend.
+   **Implemented** (this revision): the standalone NuGet package
+   `ZmqSharp.Security.Curve` (project in `ZmqSharp.Security.Curve/`) -
    `CurveMechanism` (RFC 24 handshake via the public mechanism seam),
    `CurveSessionConnection` (frame-level encrypt/decrypt),
    `ICurveCryptoBackend` + `BouncyCastleCurveCrypto`; verified end to end over
    real sockets (auth + encrypted traffic, and a wrong-server-key rejection).
+   A user opting into CURVE references this package instead of a sample.
    Two library seams were widened by it: sends route through the session
    connection the mechanism returns (`ZSocketBase`), and `ZmtpFrameFlags` is
    public for frame-wrapping session connections.
 2. **The library's own build stays CURVE-free**: no crypto dependency, no
    change to the zero-native-dependency / AOT stance, `IsAotCompatible` and
    the trim/AOT analyzers keep passing on the library itself.
-3. **Validation**: the example mechanism is verified with the same tooling as
+3. **Validation**: the package is verified with the same tooling as
    PLAIN - wire-contract tests against a scripted RFC 24 peer (0016 milestone
    3 pattern), since NetMQ's CURVE, while implemented, is bound to the
    unmaintained NaCl.Net and is not a trustworthy interop oracle by itself
    (the same reason PLAIN used scripted peers).
 4. **Only if a built-in CURVE is later demanded** does the BouncyCastle
-   dependency move into the library, behind a feature flag - the example
+   dependency move into the core library, behind a feature flag - the package
    backend becomes the built-in backend unchanged.
 
-Open question for the user: whether the example lives in a `samples/` repo
-folder (compiled, referenced by a small test project) or as a documented code
-walkthrough in this design doc. The compiled-sample route reuses the
-extensibility probe pattern from 0016 and is recommended.
+Resolved (this revision): the example lives as a standalone package
+(`ZmqSharp.Security.Curve`) rather than a `samples/` folder, so users opt in
+by referencing the package - the "generic mechanism" route.
 
 ## 5. References
 

@@ -4,7 +4,7 @@ using ZmqSharp.Messages;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Samples.Curve;
+namespace ZmqSharp.Security.Curve;
 
 /// <summary>
 /// Frame-level encrypt-on-write / decrypt-on-read session connection returned

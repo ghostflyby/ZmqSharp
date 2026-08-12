@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using ZmqSharp.Zmtp;
 
-namespace ZmqSharp.Samples.Curve;
+namespace ZmqSharp.Security.Curve;
 
 /// <summary>
 /// The ZMTP CURVE mechanism (RFC 24 / CurveZMQ), written as an example against
