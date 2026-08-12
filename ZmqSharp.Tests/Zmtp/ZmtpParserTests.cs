@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Messages;
@@ -7,6 +6,11 @@ using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Zmtp;
 
+/// <summary>
+/// Traffic-only parser tests (0016 section 10): the fixture streams include
+/// the peer greeting + READY, consumed by the NULL handshake before the
+/// parser runs. Handshake validation lives in ZmtpHandshakeTests.
+/// </summary>
 public sealed class ZmtpParserTests
 {
     private static byte[] Payload(int length)
@@ -104,9 +108,10 @@ public sealed class ZmtpParserTests
 
             return true;
         });
-        using var parser = ZmtpTestRunner.CreateParser(connection, recorder);
+        var session = await ZmtpTestRunner.EstablishAsync(connection);
+        using var parser = ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"), recorder);
 
-        var parseTask = ZmtpTestRunner.RunParserAsync(parser);
+        var parseTask = parser.ParseAsync().AsTask();
         await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         frames.Should().HaveCount(1);
         parseTask.IsCompleted.Should().BeFalse();
@@ -140,9 +145,10 @@ public sealed class ZmtpParserTests
 
             return true;
         });
-        var parser = ZmtpTestRunner.CreateParser(connection, sink);
+        var session = await ZmtpTestRunner.EstablishAsync(connection);
+        var parser = ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"), sink);
 
-        var parseTask = ZmtpTestRunner.RunParserAsync(parser);
+        var parseTask = parser.ParseAsync().AsTask();
         await firstSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
         frames.Should().HaveCount(1);
         parseTask.IsCompleted.Should().BeFalse();
@@ -151,39 +157,6 @@ public sealed class ZmtpParserTests
         await parseTask.WaitAsync(TimeSpan.FromSeconds(5));
         frames.Should().HaveCount(2);
         frames[1].Should().Equal([.. "two"u8]);
-    }
-
-    [Fact]
-    public async Task BadGreetingSignature_Throws()
-    {
-        var greeting = ZmtpTestData.Greeting();
-        greeting[0] = 0x00;
-        using var connection = new ZConnection(new ChunkedMemoryStream(greeting));
-        using var parser = new ZmtpParser(connection);
-        Func<Task> act = () => parser.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
-    }
-
-    [Fact]
-    public async Task UnsupportedVersion_Throws()
-    {
-        var greeting = ZmtpTestData.Greeting();
-        greeting[10] = 2;
-        using var connection = new ZConnection(new ChunkedMemoryStream(greeting));
-        using var parser = new ZmtpParser(connection);
-        Func<Task> act = () => parser.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
-    }
-
-    [Fact]
-    public async Task UnsupportedMechanism_Throws()
-    {
-        var greeting = ZmtpTestData.Greeting();
-        "CURVE"u8.CopyTo(greeting.AsSpan(12, 5));
-        using var connection = new ZConnection(new ChunkedMemoryStream(greeting));
-        using var parser = new ZmtpParser(connection);
-        Func<Task> act = () => parser.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
     [Fact]
@@ -204,17 +177,6 @@ public sealed class ZmtpParserTests
         using var connection = new ZConnection(source);
         var act = () => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
-    }
-
-    [Fact]
-    public async Task ErrorCommandInHandshake_Throws()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
-        using var connection = new ZConnection(source);
-        using var parser = new ZmtpParser(connection);
-        Func<Task> act = () => parser.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>()
-            .WithMessage("*boom*");
     }
 
     [Fact]
@@ -271,165 +233,6 @@ public sealed class ZmtpParserTests
     }
 
     [Fact]
-    public async Task ReadyWithSocketTypeMetadata_CompletesHandshake()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([.. "ok"u8])));
-        using var connection = new ZConnection(source);
-        var recorder = new FrameRecorder();
-
-        await ZmtpTestRunner.RunParserAsync(connection, recorder);
-
-        recorder.Frames.Should().HaveCount(1);
-        recorder.Frames[0].Should().Equal([.. "ok"u8]);
-    }
-
-    [Fact]
-    public async Task CommandName_ZeroLength_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([0]);
-    }
-
-    [Fact]
-    public async Task CommandName_Truncated_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([10, (byte)'R', (byte)'E']);
-    }
-
-    [Fact]
-    public async Task CommandName_NonAlphabetic_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([1, (byte)'1']);
-    }
-
-    [Fact]
-    public async Task CommandName_MissingLengthPrefix_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([.. "READY\0"u8]);
-    }
-
-    [Fact]
-    public async Task UnknownCommandDuringHandshake_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([4, (byte)'P', (byte)'I', (byte)'N', (byte)'G']);
-    }
-
-    [Fact]
-    public async Task Metadata_EmptyPropertyName_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([5, (byte)'R', (byte)'E', (byte)'A', (byte)'D', (byte)'Y', 0]);
-    }
-
-    [Fact]
-    public async Task Metadata_InvalidPropertyNameCharacter_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([
-            5, (byte)'R', (byte)'E', (byte)'A', (byte)'D', (byte)'Y', 1, (byte)'!', 0, 0, 0, 0
-        ]);
-    }
-
-    [Fact]
-    public async Task Metadata_TruncatedPropertyValueLength_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([
-            5, (byte)'R', (byte)'E', (byte)'A', (byte)'D', (byte)'Y', 1, (byte)'X', 0, 0
-        ]);
-    }
-
-    [Fact]
-    public async Task Metadata_NegativePropertyValueLength_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([
-            5, (byte)'R', (byte)'E', (byte)'A', (byte)'D', (byte)'Y', 1, (byte)'X', 0xFF, 0xFF, 0xFF, 0xFF
-        ]);
-    }
-
-    [Fact]
-    public async Task Metadata_MissingSocketType_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync(ZmtpTestData.ReadyBodyWithProperties(("Identity", "")));
-    }
-
-    [Fact]
-    public async Task Metadata_DuplicateSocketType_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync(ZmtpTestData.ReadyBodyWithProperties(
-            ("Socket-Type", "PAIR"), ("socket-type", "PAIR")));
-    }
-
-    [Fact]
-    public async Task Metadata_InvalidSocketTypeValue_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync(ZmtpTestData.ReadyBodyWithProperties(("Socket-Type", "FOO")));
-    }
-
-    [Fact]
-    public async Task Metadata_SocketTypePropertyNameCaseInsensitive_CompletesHandshake()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("socket-type", "PAIR"))));
-        using var connection = new ZConnection(source);
-        var recorder = new FrameRecorder();
-
-        await ZmtpTestRunner.RunParserAsync(connection, recorder);
-
-        recorder.Frames.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task Metadata_HugeValueLength_ThrowsProtocolError()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithRawProperty("Socket-Type"u8, int.MaxValue)));
-        using var connection = new ZConnection(source);
-
-        var act = () => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
-    }
-
-    [Fact]
-    public async Task ReadyWithAdditionalMetadata_CompletesHandshake()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(),
-            ZmtpTestData.ReadyWithProperties(("Socket-Type", "PAIR"), ("Identity", "abc")),
-            ZmtpTestData.Frame([.. "ok"u8])));
-        using var connection = new ZConnection(source);
-        var recorder = new FrameRecorder();
-
-        await ZmtpTestRunner.RunParserAsync(connection, recorder);
-
-        recorder.Frames.Should().HaveCount(1);
-        recorder.Frames[0].Should().Equal([.. "ok"u8]);
-    }
-
-    [Fact]
-    public async Task ErrorCommand_EmptyReason_ThrowsProtocolException()
-    {
-        await AssertHandshakeCommandRejectedAsync([5, (byte)'E', (byte)'R', (byte)'R', (byte)'O', (byte)'R', 0]);
-    }
-
-    [Fact]
-    public async Task ErrorCommand_MissingReasonLength_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([5, (byte)'E', (byte)'R', (byte)'R', (byte)'O', (byte)'R']);
-    }
-
-    [Fact]
-    public async Task ErrorCommand_ReasonLengthMismatch_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([
-            5, (byte)'E', (byte)'R', (byte)'R', (byte)'O', (byte)'R', 3, (byte)'x'
-        ]);
-    }
-
-    [Fact]
-    public async Task ErrorCommand_ReasonWithNonVisibleCharacter_Throws()
-    {
-        await AssertHandshakeCommandRejectedAsync([5, (byte)'E', (byte)'R', (byte)'R', (byte)'O', (byte)'R', 1, 0x08]);
-    }
-
-    [Fact]
     public async Task CommandFrameInTraffic_MalformedCommandName_Throws()
     {
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
@@ -449,47 +252,6 @@ public sealed class ZmtpParserTests
 
         var act = () => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
         await act.Should().ThrowAsync<ZeroMqProtocolException>().WithMessage("*terminate*");
-    }
-
-    [Fact]
-    public async Task CommandFrame_AtMaxCommandSize_IsNotRejectedBySizeCheck()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), CommandFrameHeader(1 << 20)));
-        using var connection = new ZConnection(source);
-
-        // No body follows the header, so the handshake ends at EOF; the size
-        // check must not reject the boundary value itself.
-        await ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
-    }
-
-    [Fact]
-    public async Task CommandFrame_OnePastMaxCommandSize_ThrowsBeforeBodyRead()
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), CommandFrameHeader((1 << 20) + 1)));
-        using var connection = new ZConnection(source);
-
-        var act = () => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
-        await act.Should().ThrowAsync<ZeroMqProtocolException>().WithMessage("*exceeds maximum size*");
-    }
-
-    private static byte[] CommandFrameHeader(long size)
-    {
-        var header = new byte[9];
-        header[0] = (byte)(ZmtpFrameFlags.Command | ZmtpFrameFlags.LongSize);
-        BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1), size);
-        return header;
-    }
-
-    private static async Task AssertHandshakeCommandRejectedAsync(byte[] body)
-    {
-        var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.Frame(body, command: true)));
-        using var connection = new ZConnection(source);
-
-        var act = () => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder());
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
     /// <summary>Sink with an async frame handler, for pending-ValueTask backpressure tests.</summary>

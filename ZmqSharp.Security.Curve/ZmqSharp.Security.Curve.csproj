@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsAotCompatible>true</IsAotCompatible>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <IsPackable>true</IsPackable>
+        <PackageId>ZmqSharp.Security.Curve</PackageId>
+        <Version>0.1.0</Version>
+        <Authors>ZmqSharp contributors</Authors>
+        <Description>Optional CURVE security mechanism (RFC 24 / CurveZMQ) for ZmqSharp, built on the public mechanism seam with a pluggable crypto backend (BouncyCastle).</Description>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <RepositoryType>git</RepositoryType>
+        <RepositoryUrl>https://github.com/ghostflyby/ZmqSharp</RepositoryUrl>
+        <PackageTags>zmq;zmtp;zeromq;security;curve;networking;messaging</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../ZmqSharp/ZmqSharp.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="../README.md" Pack="true" PackagePath="/"/>
+        <None Include="../NOTICE" Pack="true" PackagePath="/"/>
+        <None Include="../LICENSE" Pack="true" PackagePath="/"/>
+    </ItemGroup>
+
+</Project>

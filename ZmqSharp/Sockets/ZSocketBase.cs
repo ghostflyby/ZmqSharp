@@ -23,6 +23,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// </summary>
     private volatile IZConnection[] peerSnapshot = [];
 
+    /// <summary>
+    /// Per-peer session connection: after the mechanism handshake, sends route
+    /// through the session connection the mechanism returned (0016 section 9) -
+    /// a CURVE session wraps the raw connection to encrypt on write. The peer
+    /// identity for routing, gates, and PeerEnded stays the raw connection.
+    /// </summary>
+    private readonly Dictionary<IZConnection, IZConnection> sessionConnections = [];
+
     /// <summary>Per-connection endpoint, used only by the rare DisconnectAsync lookup.</summary>
     private readonly Dictionary<IZConnection, object?> endpoints = [];
 
@@ -36,6 +44,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     private readonly int maxCommandSize;
     private readonly IPatternCore core;
+    private readonly IZSecurityMechanism mechanism;
     private readonly int handshakeTimeoutMs;
     private readonly int maxIncompleteHandshakes;
     private int incompleteHandshakes;
@@ -59,6 +68,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         ArgumentNullException.ThrowIfNull(core);
         this.core = core;
         maxCommandSize = options.MaxCommandSize;
+        mechanism = options.Security.Mechanism;
         handshakeTimeoutMs = options.HandshakeTimeoutMs;
         maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
     }
@@ -192,7 +202,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     {
         ThrowIfClosed();
         var connection = await TTransport.ConnectAsync(endpoint, new ZTransportOptions(), token);
-        var established = AddConnection(connection, endpoint, token);
+        var established = AddConnection(connection, endpoint, ZMechanismRole.Client, token);
         await established.Task.WaitAsync(token);
     }
 
@@ -301,15 +311,20 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// <summary>
     /// Establishes the ZMTP handshake within <c>HandshakeTimeoutMs</c> (0006
     /// 3.2); a timed-out handshake faults the establishment with a
-    /// <see cref="TimeoutException"/>.
+    /// <see cref="TimeoutException"/>. The handshake covers the greeting and
+    /// the whole mechanism command sequence, so a peer that stalls mid-handshake
+    /// faults exactly as before (0016 section 8).
     /// </summary>
-    private async Task<bool> EstablishWithTimeoutAsync(ZmtpParser parser, CancellationToken token)
+    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(
+        ZmtpHandshake handshake,
+        ZMechanismRole role,
+        CancellationToken token)
     {
         if (handshakeTimeoutMs > 0)
-            return await parser.EstablishAsync(token).AsTask().WaitAsync(
+            return await handshake.EstablishAsync(role, token).AsTask().WaitAsync(
                 TimeSpan.FromMilliseconds(handshakeTimeoutMs), token);
 
-        return await parser.EstablishAsync(token);
+        return await handshake.EstablishAsync(role, token);
     }
 
     /// <summary>
@@ -333,9 +348,21 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private async ValueTask SendToPeerAsync(IZConnection connection, ZMessage message, CancellationToken token)
     {
         await WaitUntilEstablishedAsync(connection, token);
+
+        // Sends go through the mechanism's session connection (the CURVE
+        // encrypting wrapper); the peer snapshot keeps the raw connection as
+        // the identity (0016 section 9). A read-only lookup with no
+        // allocation on the hot path.
+        var peer = connection;
+        lock (StateLock)
+        {
+            sessionConnections.TryGetValue(connection, out peer);
+        }
+
+        peer ??= connection;
         try
         {
-            await connection.SendAsync(message, token);
+            await peer.SendAsync(message, token);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or IOException or SocketException)
         {
@@ -358,12 +385,12 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 
     private ValueTask AcceptConnection(IZConnection connection, CancellationToken token)
     {
-        AddConnection(connection, null);
+        AddConnection(connection, null, ZMechanismRole.Server);
         return ValueTask.CompletedTask;
     }
 
     private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint,
-        CancellationToken token = default)
+        ZMechanismRole role = ZMechanismRole.Client, CancellationToken token = default)
     {
         ReceiveMaterializer? materializer = null;
         ZFrameAllocator? allocator = null;
@@ -407,55 +434,71 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             peerConnected?.Invoke(connection);
         }
 
-        var parser = new ZmtpParser(connection, allocator, Pool, maxCommandSize);
-        var handler = messageSink is null ? BorrowedSink(parser) : MessageSinkHandler(connection, parser, materializer);
-        connection.SetFrameHandler((frame, _) => handler(frame, Cts.Token));
-
         var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(Cts.Token, token);
         lock (StateLock)
         {
             attemptTokens[connection] = attemptCts;
         }
 
-        var pump = RunConnectionAsync(connection, parser, established, attemptCts);
+        var pump = RunConnectionAsync(connection, established, role, allocator, materializer, attemptCts);
         TrackBackground(pump);
         return established;
     }
 
     private async Task RunConnectionAsync(
         IZConnection connection,
-        ZmtpParser parser,
         TaskCompletionSource established,
+        ZMechanismRole role,
+        ZFrameAllocator? allocator,
+        ReceiveMaterializer? materializer,
         CancellationTokenSource attemptCts)
     {
         Exception? failure = null;
         var attemptToken = attemptCts.Token;
+        ZmtpParser? parser = null;
         try
         {
-            await connection.WriteAsync(
-                ZmtpFrameEncoder.BuildHandshake(ZmtpCommands.BuildReady(core.SocketTypeName)),
-                attemptToken);
-            if (await EstablishWithTimeoutAsync(parser, attemptToken))
-            {
-                var peerType = parser.PeerSocketType;
-                if (peerType is null || !IsCompatibleSocketType(core.SocketTypeName, peerType))
-                {
-                    // RFC 23: on socket-type validation failure, return an
-                    // ERROR command before disconnecting the peer.
-                    await connection.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), attemptToken);
-                    throw new ZeroMqProtocolException(
-                        $"peer socket type '{peerType}' is not compatible with local socket type '{core.SocketTypeName}'");
-                }
-
-                established.TrySetResult();
-                await parser.ParseAsync(attemptToken);
-            }
-            else
+            // The handshake writes the greeting, matches the mechanism, and
+            // runs its command sequence; the socket-type policy then validates
+            // the peer's READY (0015 section 2.4). The parser is traffic-only
+            // and starts on the session connection the mechanism returns.
+            using var handshake = new ZmtpHandshake(
+                connection,
+                mechanism,
+                ZmtpCommands.BuildReady(core.SocketTypeName),
+                maxCommandSize,
+                Pool);
+            var result = await EstablishWithTimeoutAsync(handshake, role, attemptToken);
+            if (result is null)
             {
                 var eof = new IOException("peer closed during ZMTP handshake");
                 failure = eof;
                 established.TrySetException(eof);
+                return;
             }
+
+            var peerType = ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody);
+            if (peerType is null || !IsCompatibleSocketType(core.SocketTypeName, peerType))
+            {
+                // RFC 23: on socket-type validation failure, return an
+                // ERROR command before disconnecting the peer.
+                await connection.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), attemptToken);
+                throw new ZeroMqProtocolException(
+                    $"peer socket type '{peerType}' is not compatible with local socket type '{core.SocketTypeName}'");
+            }
+
+            parser = new ZmtpParser(result.Value.SessionConnection, allocator, Pool, maxCommandSize);
+            var trafficHandler = messageSink is null
+                ? BorrowedSink(parser)
+                : MessageSinkHandler(connection, parser, materializer);
+            connection.SetFrameHandler((frame, _) => trafficHandler(frame, Cts.Token));
+            lock (StateLock)
+            {
+                sessionConnections[connection] = result.Value.SessionConnection;
+            }
+
+            established.TrySetResult();
+            await parser.ParseAsync(attemptToken);
         }
         catch (OperationCanceledException)
         {
@@ -495,6 +538,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 PublishRemove(connection);
                 establishedGates.Remove(connection);
                 attemptTokens.Remove(connection);
+                sessionConnections.Remove(connection);
                 incompleteHandshakes--;
                 if (accumulators.Remove(connection, out var accumulator))
                     // The peer ended mid-message: owning frames accumulated for
@@ -511,7 +555,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             }
             finally
             {
-                parser.Dispose();
+                parser?.Dispose();
                 connection.Dispose();
                 attemptCts.Dispose();
             }
