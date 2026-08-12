@@ -74,11 +74,15 @@ internal sealed class ZmtpHandshake : IDisposable
 
     private async ValueTask<string?> ReadPeerMechanismAsync(CancellationToken token)
     {
-        using var owner = pool.Rent(64);
-        var greeting = owner.Memory[..64];
+        // The greeting is a fixed 64-byte, once-per-connection read on the
+        // cold establishment path, so it uses a plain array instead of a pool
+        // rent: the socket pool is then rented exactly once during the
+        // handshake (by the mechanism context), keeping the measured receive
+        // path's per-connection baseline stable (AllocationTests).
+        var greeting = new byte[64];
         if (!await TryReadExactlyAsync(greeting, token)) return null;
 
-        return ZmtpGreeting.ParseMechanism(greeting.Span);
+        return ZmtpGreeting.ParseMechanism(greeting);
     }
 
     private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)

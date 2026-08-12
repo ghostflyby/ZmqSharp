@@ -1439,9 +1439,11 @@ public sealed class ZSocketTests
         await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [.. "a"u8]));
         await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [.. "b"u8]));
 
-        // Two outbound messages plus the parser greeting scratch are rented;
-        // the pump is blocked on the establishment gate and has dequeued nothing.
-        pool.Outstanding.Should().Be(3);
+        // The two outbound messages are rented; the pump is blocked on the
+        // establishment gate and has dequeued nothing. The handshake's pool
+        // rents are transient (released when establishment completes), so
+        // only the buffered messages remain outstanding.
+        pool.Outstanding.Should().Be(2);
 
         await client.DisposeAsync();
 
@@ -1484,18 +1486,19 @@ public sealed class ZSocketTests
                 .AsTask()
                 .WaitAsync(TimeSpan.FromSeconds(2));
 
-        // The pump holds one message (blocked on the establishment gate), the
-        // channel buffers up to capacity, and the parser greeting scratch adds
-        // one rental; the dropped messages are already disposed via the
-        // item-dropped hook. The pump's take timing varies with scheduling, so
-        // only the bounded range is asserted - never above 4, and the per-write
-        // timeout above proves a drop mode never blocks a producer (0006 3.5).
-        await WaitUntilAsync(() => pool.Outstanding is >= 3 and <= 4, TimeSpan.FromSeconds(5));
+        // The pump holds one message (blocked on the establishment gate) and
+        // the channel buffers up to capacity; the dropped messages are already
+        // disposed via the item-dropped hook. The pump's take timing varies
+        // with scheduling, so only the bounded range is asserted - never above
+        // 3 - and the per-write timeout above proves a drop mode never blocks
+        // a producer (0006 3.5). The handshake's pool rents are transient
+        // (released once establishment completes), so no persistent scratch
+        // is counted.
+        await WaitUntilAsync(() => pool.Outstanding is >= 2 and <= 3, TimeSpan.FromSeconds(5));
 
         await client.DisposeAsync();
 
-        // Disposal drained the buffered and pump-held messages; the parser
-        // scratch is released with the connection.
+        // Disposal drained the buffered and pump-held messages.
         await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
     }
 
