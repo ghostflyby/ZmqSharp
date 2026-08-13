@@ -61,8 +61,12 @@ public sealed class CustomSocketTypeTests
         // Both peers reject each other. Either the local rejection surfaces as
         // ZeroMqProtocolException, or the peer's rejection wins the race and
         // closes first, so the local ERROR write faults with an IO error
-        // (broken pipe on ipc, buffered write on tcp).
+        // (broken pipe on ipc, buffered write on tcp). When the protocol
+        // rejection is the one that surfaces, its semantics must still name
+        // the socket-type mismatch.
         (failure is ZeroMqProtocolException or IOException or SocketException).Should().BeTrue();
+        if (failure is ZeroMqProtocolException)
+            failure.Message.Should().Contain("not accepted by local socket type");
     }
 
     /// <summary>

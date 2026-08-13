@@ -47,15 +47,16 @@ two schemes:
 - `ipc://path` - a `UnixDomainSocketEndPoint`. An absolute path keeps its
   leading slash (`ipc:///tmp/foo` -> `/tmp/foo`); a relative path
   (`ipc://my.sock`) resolves against `Path.GetTempPath()`, mirroring libzmq's
-  default IPC directory. The URI host-slot fallback covers relative forms,
-  which the URI parser places in `Authority` rather than `PathAndQuery`.
+  default IPC directory. The URI parser splits the two forms: an absolute
+  form lands in `AbsolutePath` (query excluded), while a relative form places
+  the path in `Host` with `AbsolutePath` at `/` - the parser falls back to
+  `Host` in that case. Verified against the real URI parser.
 
 Windows absolute paths round-trip through the URI parser as well: the parser
 normalizes backslashes to forward slashes and drops the authority, so
 `ipc://C:\Users\app\foo.sock` parses to `C:/Users/app/foo.sock`, and
-`Path.Combine` keeps it unchanged because the drive-qualified path is fully
-qualified. Verified with a URI probe on the development platform (URI
-parsing is platform-independent).
+`Path.Combine` keeps it unchanged (on Windows the drive-qualified path is
+fully qualified). URI parsing itself is platform-independent.
 
 Unknown schemes keep throwing `NotSupportedException`. The generic transport
 dispatch (`ConnectAsync<EndPoint, SocketTransport>`) already existed and is

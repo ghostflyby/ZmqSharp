@@ -49,11 +49,30 @@ public sealed class ZSocketIpcTests
     {
         await using var client = ZSocket.CreatePairCallback();
 
-        var act = async () => await client.ConnectAsync($"ipc://{path}");
-
-        var failure = await Record.ExceptionAsync(() => act().WaitAsync(TimeSpan.FromSeconds(5)));
+        var failure = await Record.ExceptionAsync(
+            () => client.ConnectAsync($"ipc://{path}").WaitAsync(TimeSpan.FromSeconds(5)));
         failure.Should().NotBeNull();
         (failure is SocketException or IOException).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Bind_RelativePath_ResolvesToTempDirectory()
+    {
+        // The URI parser puts a relative form such as "ipc://name.sock" in the
+        // host slot; it must resolve against the system temp directory instead
+        // of the filesystem root (0020 section 3).
+        var name = $"zmqsharp-rel-{Guid.NewGuid().ToString("N")[..8]}.sock";
+        var socket = ZSocket.CreatePairCallback();
+        await socket.BindAsync($"ipc://{name}");
+        try
+        {
+            File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeTrue(
+                "a relative ipc path resolves against the system temp directory");
+        }
+        finally
+        {
+            await socket.DisposeAsync();
+        }
     }
 
     [Theory]

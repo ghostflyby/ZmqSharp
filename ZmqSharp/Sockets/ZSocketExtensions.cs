@@ -68,11 +68,12 @@ public static class ZSocketExtensions
     /// </summary>
     private static UnixDomainSocketEndPoint ParseIpc(Uri uri)
     {
-        // A relative form such as "ipc://my.sock" puts the path in the host
-        // slot (PathAndQuery is empty); an absolute form such as
-        // "ipc:///tmp/foo.sock" keeps it in the path.
-        var path = uri.PathAndQuery;
-        if (path.Length == 0) path = uri.Authority;
+        // The URI parser splits the two forms differently: an absolute form
+        // such as "ipc:///tmp/foo.sock" lands in AbsolutePath ("/tmp/foo.sock",
+        // query excluded), while a relative form such as "ipc://my.sock" puts
+        // the path in Host and leaves AbsolutePath at "/".
+        var path = uri.AbsolutePath;
+        if ((path.Length == 0 || path == "/") && uri.Host.Length > 0) path = uri.Host;
 
         if (!path.StartsWith('/'))
             path = Path.Combine(Path.GetTempPath(), path);
