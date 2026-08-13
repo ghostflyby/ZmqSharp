@@ -117,6 +117,18 @@ public sealed class ZReqRepTests
     }
 
     [Fact]
+    public async Task Req_GenericSend_WithoutInFlightRequest_Throws()
+    {
+        // REQ sends only through RequestAsync; the current-connection dispatch
+        // rejects the generic send path when no request is in flight.
+        await using var req = ZSocket.CreateReq();
+        Func<Task> act = () => req.SendAsync(ZMessage.FromOwned([.. "x"u8])).AsTask();
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("RequestAsync");
+    }
+
+    [Fact]
     public async Task Rep_RoutesReplyToOriginatingPeer_WithTwoPeers()
     {
         await using var rep = ZSocket.CreateRep();

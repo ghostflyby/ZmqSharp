@@ -1,6 +1,7 @@
-using System.Buffers;
+using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
+
 namespace ZmqSharp;
 
 /// <summary>
@@ -9,20 +10,29 @@ namespace ZmqSharp;
 /// first frame (the topic) starts with a subscribed prefix. Subscriptions are
 /// propagated to connected publishers using libzmq's wire convention: a
 /// message whose first frame is <c>0x01</c> + topic subscribes, <c>0x00</c> +
-/// topic unsubscribes (so a NetMQ/libzmq publisher starts sending).
+/// topic unsubscribes (so a NetMQ/libzmq publisher starts sending). The
+/// subscription set lives in a <see cref="ZTopicFilter"/>; SUB composes a
+/// filter inbound policy, XSUB composes pass-through.
 /// </summary>
 public class ZSubSocket : ZSocketBase
 {
-    private readonly List<byte[]> subscriptions = [];
+    private readonly ZTopicFilter filter;
 
     public ZSubSocket(ZSocketOptions options)
-        : this(options, new ZSubCore())
+        : this(options, ZSocketTypes.Sub, new ZTopicFilter(), true)
     {
     }
 
-    internal ZSubSocket(ZSocketOptions options, ZSubCore core)
-        : base(options, core)
+    internal ZSubSocket(ZSocketOptions options, ZSocketType type)
+        : this(options, type, new ZTopicFilter(), false)
     {
+    }
+
+    private ZSubSocket(ZSocketOptions options, ZSocketType type, ZTopicFilter filter, bool filterInbound)
+        : base(options, new ZNoDispatch("SUB is receive-only"), type,
+            filterInbound ? new ZTopicFilterPolicy(filter) : ZInboundPolicy.PassThrough)
+    {
+        this.filter = filter;
         SetPeerConnectedHandler(SendSubscriptionsTo);
     }
 
@@ -30,11 +40,7 @@ public class ZSubSocket : ZSocketBase
     public void Subscribe(byte[] topic)
     {
         ArgumentNullException.ThrowIfNull(topic);
-        lock (StateLock)
-        {
-            subscriptions.Add(topic);
-        }
-
+        filter.Add(topic);
         BroadcastSubscription(0x01, topic);
     }
 
@@ -42,28 +48,8 @@ public class ZSubSocket : ZSocketBase
     public void Unsubscribe(byte[] topic)
     {
         ArgumentNullException.ThrowIfNull(topic);
-        lock (StateLock)
-        {
-            subscriptions.RemoveAll(subscription => subscription.AsSpan().SequenceEqual(topic));
-        }
-
+        filter.RemoveAll(topic);
         BroadcastSubscription(0x00, topic);
-    }
-
-    /// <summary>Drops messages whose topic frame does not match any subscribed prefix.</summary>
-    protected override ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message)
-    {
-        var topic = message[0].ToSequence();
-        lock (StateLock)
-        {
-            foreach (var subscription in subscriptions)
-                if (subscription.Length <= topic.Length
-                    && topic.Slice(0, subscription.Length).ToArray().AsSpan().SequenceEqual(subscription))
-                    return message;
-        }
-
-        message.Dispose();
-        return null;
     }
 
     /// <summary>libzmq wire convention: first frame 0x01 subscribes, 0x00 unsubscribes.</summary>
@@ -82,13 +68,7 @@ public class ZSubSocket : ZSocketBase
 
     private void SendSubscriptionsTo(IZConnection peer)
     {
-        byte[][] snapshot;
-        lock (StateLock)
-        {
-            snapshot = [.. subscriptions];
-        }
-
-        foreach (var topic in snapshot)
+        foreach (var topic in filter.Snapshot())
         {
             var payload = new byte[1 + topic.Length];
             payload[0] = 0x01;

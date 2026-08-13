@@ -1,19 +1,14 @@
-using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
+using ZmqSharp.Patterns;
+
 namespace ZmqSharp;
 
 /// <summary>
 /// XSUB composition root (0014): manual subscription frames, no inbound
 /// filter. <see cref="Subscribe"/> / <see cref="Unsubscribe"/> send the libzmq
 /// wire frames (0x01/0x00 + topic) to every connected peer; every inbound
-/// message reaches the bound sink.
+/// message reaches the bound sink (pass-through inbound, unlike SUB).
 /// </summary>
 // ReSharper disable once InconsistentNaming
-public sealed class ZXSubSocket(ZSocketOptions options) : ZSubSocket(options, new ZXSubCore())
+public sealed class ZXSubSocket(ZSocketOptions options) : ZSubSocket(options, ZSocketTypes.XSub)
 {
-    /// <summary>XSUB delivers every inbound message unfiltered.</summary>
-    protected override ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message)
-    {
-        return message;
-    }
 }

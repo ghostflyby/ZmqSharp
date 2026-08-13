@@ -1,8 +1,8 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using ZmqSharp.Patterns;
 using ZmqSharp.Security;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -13,8 +13,11 @@ namespace ZmqSharp;
 /// Pattern-agnostic transport core (0007 section 2.1): calls the transport,
 /// stores connections, drives the handshake externally, aggregates messages
 /// for a bound <see cref="IPatternSink"/>, and delivers borrowed frames to the
-/// raw OnFrame callback. Pattern semantics live in a composed
-/// <see cref="IPatternCore"/>; socket types are thin composition roots.
+/// raw OnFrame callback. Behavior is composed as three independent seams
+/// (0015 section 2.1 / 0019): outbound selection (<see cref="IZDispatchPolicy"/>),
+/// inbound processing (<see cref="IZInboundPolicy"/>), and the advertised
+/// socket identity (<see cref="ZSocketType"/>); socket types are thin
+/// composition roots over the protected constructor.
 /// </summary>
 public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
 {
@@ -45,7 +48,9 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly Dictionary<IZConnection, PeerAccumulator> accumulators = [];
 
     private readonly int maxCommandSize;
-    private readonly IPatternCore core;
+    private readonly IZDispatchPolicy dispatch;
+    private readonly ZSocketType type;
+    private readonly IZInboundPolicy inbound;
     private readonly IZSecurityMechanism mechanism;
     private readonly int handshakeTimeoutMs;
     private readonly int maxIncompleteHandshakes;
@@ -63,23 +68,41 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private int maxFramesPerMessage = int.MaxValue;
     private long receiveRejections;
 
-    internal ZSocketBase(ZSocketOptions options, IPatternCore core)
+    /// <summary>
+    /// The socket composition face (0019 section 2): outbound dispatch, socket
+    /// identity, and inbound processing. <paramref name="inbound"/> defaults to
+    /// pass-through delivery, so sockets that only route outbound (single-peer,
+    /// round-robin, broadcast) declare nothing inbound.
+    /// </summary>
+    protected ZSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
+        IZInboundPolicy? inbound = null)
         : base(options.Pool)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(core);
-        this.core = core;
+        ArgumentNullException.ThrowIfNull(dispatch);
+        ArgumentNullException.ThrowIfNull(type);
+        this.dispatch = dispatch;
+        this.type = type;
+        this.inbound = inbound ?? ZInboundPolicy.PassThrough;
         maxCommandSize = options.MaxCommandSize;
         mechanism = options.Security.Mechanism;
         handshakeTimeoutMs = options.HandshakeTimeoutMs;
         maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
     }
 
-    /// <summary>The composed pattern core (composition roots access it for pattern operations).</summary>
-    internal IPatternCore Core => core;
-
-    /// <summary>The routable-peer snapshot (pattern cores read it for outbound selection).</summary>
+    /// <summary>The routable-peer snapshot (dispatch policies read it for outbound selection).</summary>
     internal IZConnection[] PeerSnapshot => peerSnapshot;
+
+    /// <summary>The composed inbound policy (protocol sockets hold it to route consume decisions).</summary>
+    internal IZInboundPolicy InboundPolicy => inbound;
+
+    /// <summary>
+    /// True when inbound messages must be aggregated into complete messages:
+    /// a sink is bound, or the composed inbound policy is not the pass-through
+    /// default (protocol sockets such as REQ/REP consume on the aggregated
+    /// tier without a public sink). The borrowed frame tier runs otherwise.
+    /// </summary>
+    private bool NeedsAggregation => messageSink is not null || !ReferenceEquals(inbound, ZInboundPolicy.PassThrough);
 
     public event ZFrameHandler? OnFrame
     {
@@ -88,10 +111,18 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             lock (StateLock)
             {
                 // Exactly one consumer of the delivery stream (0007 section 1):
-                // a message sink is mutually exclusive with the raw frame
-                // surface on the same instance.
+                // a message sink and a composed inbound policy are mutually
+                // exclusive with the raw frame surface on the same instance.
+                // Sockets with a non-default inbound policy (ROUTER, SUB, XPUB,
+                // REQ, REP) always aggregate, so their delivery stream is
+                // consumed by the policy; subscribing to OnFrame on them fails
+                // loudly instead of silently receiving nothing.
                 if (messageSink is not null)
                     throw new InvalidOperationException("cannot subscribe to OnFrame after a message sink is bound");
+
+                if (!ReferenceEquals(inbound, ZInboundPolicy.PassThrough))
+                    throw new InvalidOperationException(
+                        "cannot subscribe to OnFrame on a socket with a composed inbound policy; bind a message sink");
 
                 onFrame += value;
             }
@@ -271,25 +302,20 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         await AwaitBackgroundAsync();
     }
 
-    /// <summary>Broadcasts a message to every peer; the message is disposed once after the loop.</summary>
-    internal async ValueTask BroadcastAsync(IZConnection[] peers, ZMessage message, CancellationToken token)
-    {
-        try
-        {
-            foreach (var peer in peers) await SendToPeerAsync(peer, message, token);
-        }
-        finally
-        {
-            message.Dispose();
-        }
-    }
-
-    public virtual async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
+    /// <summary>
+    /// Selective send (0015 section 2.1): the dispatch policy is the sole
+    /// decision maker - it selects zero or more targets from the routable
+    /// peer set, and the message is sent to exactly those peers, once each.
+    /// Caller-addressed sends (ROUTER identity, REP replies) bypass this path
+    /// through <see cref="SendToAsync"/>. The message is disposed once after
+    /// the loop, in <see cref="SendAsync"/>.
+    /// </summary>
+    public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
     {
         ThrowIfClosed();
         try
         {
-            await SendToTargetAsync(message, token);
+            await SendToTargetsAsync(message, token);
         }
         finally
         {
@@ -297,17 +323,22 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
     }
 
-    private async ValueTask SendToTargetAsync(ZMessage message, CancellationToken token)
+    private async ValueTask SendToTargetsAsync(ZMessage message, CancellationToken token)
     {
-        var connection = SelectTarget(message);
-        if (connection is null) return;
-
-        await SendToPeerAsync(connection, message, token);
-    }
-
-    private IZConnection? SelectTarget(ZMessage message)
-    {
-        return core.RouteOutbound(message, peerSnapshot.AsSpan());
+        var peers = peerSnapshot;
+        // The policy may select up to every peer; the target buffer is rented
+        // so the steady-state path stays GC-allocation-free (ArrayPool reuses
+        // the array, 0006 3.6).
+        var targets = ArrayPool<IZConnection>.Shared.Rent(peers.Length);
+        try
+        {
+            var count = dispatch.SelectTargets(message, peers, targets.AsSpan(0, peers.Length));
+            for (var i = 0; i < count; i++) await SendToPeerAsync(targets[i], message, token);
+        }
+        finally
+        {
+            ArrayPool<IZConnection>.Shared.Return(targets);
+        }
     }
 
     /// <summary>
@@ -336,13 +367,16 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// </summary>
     internal async ValueTask SendToAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
     {
-        ThrowIfClosed();
         try
         {
+            ThrowIfClosed();
             await SendToPeerAsync(peer, message, token);
         }
         finally
         {
+            // The message is disposed even when the send races socket closure
+            // (ThrowIfClosed throws before the send; the caller must never
+            // leak it, e.g. XPUB's fire-and-forget subscription forwards).
             message.Dispose();
         }
     }
@@ -461,13 +495,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         try
         {
             // The handshake writes the greeting, matches the mechanism, and
-            // runs its command sequence; the socket-type policy then validates
-            // the peer's READY (0015 section 2.4). The parser is traffic-only
-            // and starts on the session connection the mechanism returns.
+            // runs its command sequence; the socket-type predicate then
+            // validates the peer's READY (0015 section 2.4). The parser is
+            // traffic-only and starts on the session connection the mechanism
+            // returns.
             using var handshake = new ZmtpHandshake(
                 connection,
                 mechanism,
-                ZmtpCommands.BuildReady(core.SocketTypeName),
+                ZmtpCommands.BuildReady(type.Name),
                 maxCommandSize,
                 Pool);
             var result = await EstablishWithTimeoutAsync(handshake, role, attemptToken);
@@ -480,19 +515,22 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             }
 
             var peerType = ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody);
-            if (peerType is null || !IsCompatibleSocketType(core.SocketTypeName, peerType))
+            if (!type.AcceptsPeer(peerType))
             {
                 // RFC 23: on socket-type validation failure, return an
                 // ERROR command before disconnecting the peer.
                 await connection.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), attemptToken);
                 throw new ZeroMqProtocolException(
-                    $"peer socket type '{peerType}' is not compatible with local socket type '{core.SocketTypeName}'");
+                    $"peer socket type '{peerType}' is not accepted by local socket type '{type.Name}'");
             }
 
             parser = new ZmtpParser(result.Value.SessionConnection, allocator, Pool, maxCommandSize);
-            var trafficHandler = messageSink is null
-                ? BorrowedSink(parser)
-                : MessageSinkHandler(connection, parser, materializer);
+            // Aggregation runs when a sink is bound or the composed inbound
+            // policy needs complete messages (protocol sockets such as REQ/REP
+            // consume on the aggregated tier without a public sink).
+            var trafficHandler = NeedsAggregation
+                ? MessageSinkHandler(connection, parser, materializer)
+                : BorrowedSink(parser);
             connection.SetFrameHandler((frame, _) => trafficHandler(frame, Cts.Token));
             lock (StateLock)
             {
@@ -552,7 +590,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             try
             {
                 connection.OnConnectionEnded();
-                OnPatternPeerEnded(connection);
                 RaisePeerEnded(connection, failure);
             }
             finally
@@ -562,34 +599,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 attemptCts.Dispose();
             }
         }
-    }
-
-    /// <summary>
-    /// Pattern hook on peer teardown: a pattern core releases per-connection
-    /// state (ROUTER drops its identity mapping). Runs before the connection
-    /// is disposed and before <c>PeerEnded</c> is raised.
-    /// </summary>
-    protected virtual void OnPatternPeerEnded(IZConnection peer)
-    {
-    }
-
-    private static bool IsCompatibleSocketType(string localType, string peerType)
-    {
-        return localType switch
-        {
-            "PAIR" => peerType == "PAIR",
-            "DEALER" => peerType is "DEALER" or "REP" or "ROUTER",
-            "ROUTER" => peerType is "DEALER" or "REQ" or "ROUTER",
-            "REQ" => peerType == "REP",
-            "REP" => peerType is "REQ" or "DEALER",
-            "PUSH" => peerType == "PULL",
-            "PULL" => peerType == "PUSH",
-            "PUB" => peerType == "SUB",
-            "SUB" => peerType == "PUB",
-            "XPUB" => peerType is "SUB" or "XSUB" or "XPUB",
-            "XSUB" => peerType is "PUB" or "XPUB" or "XSUB",
-            _ => true
-        };
     }
 
     private async ValueTask WaitUntilEstablishedAsync(IZConnection connection, CancellationToken token)
@@ -693,25 +702,23 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         var message = BuildMessage(accumulator.Frames);
         accumulator.Frames.Clear();
         accumulator.Materializer?.Reset();
-        var prepared = PrepareInboundForSink(connection, message);
-        if (prepared is null)
-            // The pattern filtered the message (e.g. SUB topic mismatch); the
-            // filter disposed it. The peer's pump continues.
+        var decision = await inbound.DecideAsync(connection, message, token);
+        if (decision.Action != ZInboundAction.Deliver)
+            // Drop and Consumed own the message (0019 section 3); the pump
+            // continues. The peer's pump stays alive.
             return true;
 
-        await messageSink!.OnMessageAsync(connection, prepared.Value, token);
-        return true;
-    }
+        var toDeliver = decision.Message ?? message;
+        if (messageSink is null)
+        {
+            // A non-default inbound policy delivering without a bound sink
+            // (the aggregated tier has no consumer): drop the message.
+            toDeliver.Dispose();
+            return true;
+        }
 
-    /// <summary>
-    /// Pattern hook on the semantic seam (0007 2.2): a pattern core may frame
-    /// (ROUTER identity prefix) or filter (SUB topic match) inbound messages
-    /// before they reach the sink. A null return drops the message - the
-    /// override must dispose it. The default passes the message through.
-    /// </summary>
-    protected virtual ZMessage? PrepareInboundForSink(IZConnection peer, ZMessage message)
-    {
-        return message;
+        await messageSink.OnMessageAsync(connection, toDeliver, token);
+        return true;
     }
 
     private static ZMessage BuildMessage(List<ZFrame> frames)

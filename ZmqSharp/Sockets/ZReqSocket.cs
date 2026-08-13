@@ -1,23 +1,32 @@
+using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp;
 
 /// <summary>
-/// REQ composition root (0010 section 4): strict single in-flight request
-/// over a round-robin peer selection, replies accepted only from the current
-/// peer. Sends go through <see cref="RequestAsync"/>; the generic base send
-/// path is rejected.
+/// REQ composition root (0010 section 4; 0019): strict single in-flight
+/// request over a round-robin peer selection, replies accepted only from the
+/// current peer. The current connection is owned by the composed
+/// <see cref="ZCurrentPeerDispatch"/>; the request send routes through it and
+/// the reply intake is the consume arm of the composed inbound policy (the
+/// <see cref="ZReqCore"/>), so a bound <see cref="BindMessageSink"/> consumer
+/// is never hijacked by the protocol. Sends go through
+/// <see cref="RequestAsync"/>; the generic base send path is rejected when no
+/// request is in flight.
 /// </summary>
-public sealed class ZReqSocket : ZSocketBase, IPatternSink
+public sealed class ZReqSocket : ZSocketBase
 {
     private readonly ZReqCore core;
 
     public ZReqSocket(ZSocketOptions options)
-        : base(options, new ZReqCore())
+        : this(options, new ZCurrentPeerDispatch())
     {
-        core = (ZReqCore)Core;
-        BindMessageSink(this);
+    }
+
+    private ZReqSocket(ZSocketOptions options, ZCurrentPeerDispatch dispatch)
+        : base(options, dispatch, ZSocketTypes.Req, new ZReqCore(dispatch))
+    {
+        core = (ZReqCore)InboundPolicy;
         PeerEnded += (peer, _) => core.OnPeerEnded(peer);
     }
 
@@ -30,10 +39,5 @@ public sealed class ZReqSocket : ZSocketBase, IPatternSink
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token = default)
     {
         return core.RequestAsync(this, message, token);
-    }
-
-    public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
-    {
-        return core.OnMessageAsync(this, peer, message, token);
     }
 }

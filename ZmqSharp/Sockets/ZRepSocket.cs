@@ -1,22 +1,31 @@
+using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
+
 namespace ZmqSharp;
 
 /// <summary>
-/// REP composition root (0010 section 4): fair intake of requests serialized
-/// across peers (one at a time, strict alternation), delivered as a
-/// <see cref="ZRequestContext"/>; replies route back to the originating peer.
+/// REP composition root (0010 section 4; 0019): fair intake of requests
+/// serialized across peers (one at a time, strict alternation), delivered as
+/// a <see cref="ZRequestContext"/>; replies route back to the originating
+/// peer. The request intake is the consume arm of the composed inbound policy
+/// (the <see cref="ZRepCore"/>), so a bound <see cref="BindMessageSink"/>
+/// consumer is never hijacked by the protocol.
 /// </summary>
-public sealed class ZRepSocket : ZSocketBase, IPatternSink
+public sealed class ZRepSocket : ZSocketBase
 {
     private readonly ZRepCore core;
     private Func<ZRequestContext, CancellationToken, ValueTask>? requestHandler;
 
     public ZRepSocket(ZSocketOptions options)
-        : base(options, new ZRepCore())
+        : this(options, new ZRepCore())
     {
-        core = (ZRepCore)Core;
-        BindMessageSink(this);
+    }
+
+    private ZRepSocket(ZSocketOptions options, ZRepCore core)
+        : base(options, new ZNoDispatch("REP replies through SendReplyAsync, not SendAsync"), ZSocketTypes.Rep, core)
+    {
+        this.core = core;
+        core.Attach(this);
     }
 
     /// <summary>
@@ -53,10 +62,5 @@ public sealed class ZRepSocket : ZSocketBase, IPatternSink
         }
 
         return handler?.Invoke(context, token) ?? ValueTask.CompletedTask;
-    }
-
-    public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
-    {
-        return core.OnMessageAsync(this, peer, message, token);
     }
 }
