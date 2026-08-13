@@ -82,11 +82,23 @@ A single `using ZmqSharp;` covers all basic usage:
   mechanism author also imports `ZmqSharp.Zmtp` for the shared wire rules
   (`ZmtpCommandCodec`, `ZmtpCommands`) - the codec is de-facto mechanism
   infrastructure.
+- `ZmqSharp.Patterns` (new): the socket-composition seams (0015 section 2.1 /
+  0019) - `IZDispatchPolicy` and the `Z*Dispatch` policies,
+  `IZInboundPolicy` with `ZInboundAction` / `ZInboundDecision` /
+  `ZInboundDecide` / `ZDelegateInboundPolicy` / `ZInboundPolicy`, and the
+  socket identity `ZSocketType` / `ZSocketTypes` (`ForCustom`). These are the
+  extension face for custom socket types: a developer subclassing
+  `ZSocketBase` (in `ZmqSharp`) imports `ZmqSharp.Patterns` for the
+  constructor's seam arguments, mirroring how a mechanism author imports
+  `ZmqSharp.Security`. Factory users never write these types and do not pay
+  the import.
 
 ### Internal API - namespaces match the directory layout
 
-- `ZmqSharp.Sockets` (internal): `IPatternCore` and the `Z*Core` pattern
-  objects in `Sockets/ZPatternCore.cs`.
+- `ZmqSharp.Sockets` (internal): the pattern-assembly helpers
+  `ZDelimiterFraming` (REQ/REP delimiter wire format), `ZTopicFilter` /
+  `ZTopicFilterPolicy` (SUB subscriptions), and the REQ/REP consume cores
+  `ZReqCore` / `ZRepCore`.
 - `ZmqSharp.Zmtp` (internal): `ZmtpHandshake`, `ZmtpGreeting`.
 - `ZmqSharp.Transports` (internal): `ZConnection`.
 - Internal helpers mixed into files with public types (`ZSequence`,
@@ -98,7 +110,8 @@ A single `using ZmqSharp;` covers all basic usage:
 ```
 ZmqSharp/
 ├── Messages/       (ZMessage, ZFrame, ZSegment, ...)
-├── Sockets/        (public socket types, options, pattern cores)
+├── Patterns/       (dispatch/inbound/type seams for custom sockets)
+├── Sockets/        (public socket types, options, pattern assembly)
 ├── Transports/     (IZTransport, SocketTransport, ZConnection)
 ├── Zmtp/           (ZmtpParser, ZmtpFrameEncoder, handshake internals)
 └── Security/       (mechanism seam: IZSecurityMechanism, PLAIN, NULL)
@@ -113,6 +126,11 @@ place.
 - **Security mechanisms split into `ZmqSharp.Security`** (0016 section 13
   open question, now resolved): mechanisms are a replaceable extension seam
   with their own audience; `ZmqSharp.Zmtp` keeps only the wire codec.
+- **The socket-composition seams split into `ZmqSharp.Patterns`** (0015
+  section 2.1 / 0019 open question, now resolved): dispatch, inbound, and
+  socket-type seams are the extension face for custom socket types, a
+  distinct audience from factory users; the extension author pays the extra
+  import, exactly as a mechanism author imports `ZmqSharp.Security`.
 - **Receive/queue tuning types stay in the top-level `ZmqSharp`**: they are
   configuration for `ZQueueSocketOptions` and are needed by the same import.
 - **No behavior changes**: this is a pure structural reorganization; socket
@@ -120,8 +138,7 @@ place.
 
 ## 6. Out of scope
 
-- The 0015 evolution work items (`IPatternCore` -> `IZDispatchPolicy` +
-  `ZSocketType` split, `ipc://`, write-path cluster) may choose their own
-  namespaces when they land - dispatch policies can be re-evaluated as a
-  candidate sub-namespace.
+- The remaining 0015 evolution work items (`ipc://`, write-path cluster) may
+  choose their own namespaces when they land. The dispatch/type/inbound
+  split is resolved (section 5): the seams landed in `ZmqSharp.Patterns`.
 - No docs/ reorganization (0006 section 7.1 remains separate).

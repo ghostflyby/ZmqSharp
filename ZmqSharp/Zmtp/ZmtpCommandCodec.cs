@@ -49,14 +49,17 @@ public static class ZmtpCommandCodec
 
     /// <summary>
     /// Parses the peer's READY metadata arguments and returns the Socket-Type
-    /// property value; a missing or invalid Socket-Type is a protocol error
-    /// (RFC 23 / 0015 section 2.4). Property names compare case-insensitively
-    /// and duplicates are rejected.
+    /// property value; a missing or empty Socket-Type is a protocol error
+    /// (RFC 23 / 0015 section 2.4). The value is not validated against the
+    /// built-in names: custom socket types interoperate between ZmqSharp
+    /// endpoints (0015 section 2.3), so an unknown name is accepted here and
+    /// decided by the local socket's <see cref="ZSocketType.AcceptsPeer"/>
+    /// predicate at connection time.
     /// </summary>
     public static string ParseReadySocketType(ReadOnlySpan<byte> metadata)
     {
         var properties = ParseMetadata(metadata);
-        if (!properties.TryGetValue("Socket-Type", out var peerType) || !IsValidSocketType(peerType))
+        if (!properties.TryGetValue("Socket-Type", out var peerType) || peerType.Length == 0)
             throw new ZeroMqProtocolException("READY is missing a valid Socket-Type property");
 
         return peerType;
@@ -174,11 +177,5 @@ public static class ZmtpCommandCodec
                || c == (byte)'_'
                || c == (byte)'.'
                || c == (byte)'+';
-    }
-
-    private static bool IsValidSocketType(string socketType)
-    {
-        return socketType is
-            "REQ" or "REP" or "DEALER" or "ROUTER" or "PUB" or "XPUB" or "SUB" or "XSUB" or "PUSH" or "PULL" or "PAIR";
     }
 }

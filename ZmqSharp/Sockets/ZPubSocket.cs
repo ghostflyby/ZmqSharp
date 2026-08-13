@@ -1,37 +1,23 @@
+using ZmqSharp.Patterns;
 
-
-using ZmqSharp.Sockets;
 namespace ZmqSharp;
 
 /// <summary>
 /// PUB composition root (0013): send-only broadcast. The message's first
-/// frame is the topic; every connected peer receives the full message.
-/// Non-sealed with an internal core-taking constructor so XPUB can reuse the
-/// broadcast send.
+/// frame is the topic; every connected peer receives the full message via the
+/// base selective send path, driven by <see cref="ZBroadcastDispatch"/>.
+/// Non-sealed with an internal type/inbound-taking constructor so XPUB can
+/// reuse the broadcast send.
 /// </summary>
 public class ZPubSocket : ZSocketBase
 {
     public ZPubSocket(ZSocketOptions options)
-        : this(options, new ZPubCore())
+        : this(options, ZSocketTypes.Pub)
     {
     }
 
-    internal ZPubSocket(ZSocketOptions options, ZPubCore core)
-        : base(options, core)
+    internal ZPubSocket(ZSocketOptions options, ZSocketType type, IZInboundPolicy? inbound = null)
+        : base(options, new ZBroadcastDispatch(), type, inbound)
     {
-    }
-
-    /// <summary>Broadcasts the message (topic = first frame) to every peer; the message is disposed once.</summary>
-    public override async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-    {
-        ThrowIfClosed();
-        var peers = PeerSnapshot;
-        if (peers.Length == 0)
-        {
-            message.Dispose();
-            return;
-        }
-
-        await BroadcastAsync(peers, message, token);
     }
 }

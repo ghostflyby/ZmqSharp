@@ -18,6 +18,8 @@ public sealed class ZmtpHandshakeTests
 {
     private const int MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
 
+    private static ReadOnlySpan<byte> ReadyName => "READY"u8;
+
     [Fact]
     public async Task GreetingWithNullMechanism_Completes_AndYieldsPeerReady()
     {
@@ -42,6 +44,33 @@ public sealed class ZmtpHandshakeTests
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody).Should().Be("DEALER");
+    }
+
+    [Fact]
+    public async Task PeerSocketType_UnknownName_IsReturnedByCodec()
+    {
+        // Custom socket types interoperate between ZmqSharp endpoints (0015
+        // section 2.3): the codec must not reject an unknown Socket-Type -
+        // acceptance is decided by the local socket's predicate, not the wire
+        // codec.
+        using var connection = NewConnection(ZmtpTestData.Concat(
+            ZmtpTestData.Greeting(), ZmtpTestData.Ready("CUSTOM")));
+        using var handshake = NewHandshake(connection);
+
+        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+
+        result.Should().NotBeNull();
+        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody).Should().Be("CUSTOM");
+    }
+
+    [Fact]
+    public void ParseReadySocketType_MissingSocketType_Throws()
+    {
+        var body = ZmtpTestData.ReadyBodyWithProperties(("Identity", "abc"));
+
+        var act = () => ZmtpCommandCodec.ParseReadySocketType(body.AsSpan()[(1 + ReadyName.Length)..]);
+
+        act.Should().Throw<ZeroMqProtocolException>().WithMessage("*missing a valid Socket-Type*");
     }
 
     [Fact]

@@ -55,10 +55,13 @@ Five observations from the current implementation converge on one direction:
 `IPatternCore` becomes two independent seams:
 
 ```csharp
-// Outbound selection only: a reusable, neutral policy.
+// Outbound selection only: a reusable, neutral policy that is the primary
+// decision maker on the selective send path. It selects zero or more
+// connections from the routable peer set; the socket sends to exactly the
+// selected peers, once each. Zero = drop the message.
 public interface IZDispatchPolicy
 {
-    IZConnection? RouteOutbound(ZMessage message, ReadOnlySpan<IZConnection> peers);
+    int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets);
 }
 
 // Identity only: the advertised Socket-Type and the peer-accept predicate.
@@ -69,15 +72,28 @@ public sealed class ZSocketType
 }
 ```
 
+A policy selects more than one target only when every selected peer must
+receive the message (broadcast); single-target policies select exactly one.
+Caller-addressed sends (ROUTER identity addressing, REP replies) resolve their
+target from per-call context and bypass the policy.
+
 Concrete dispatch policies are named for what they do, not for one socket
 type:
 
 - `ZRoundRobinDispatch` - DEALER, PUSH (and REQ's fair-queue send across
-  connections, where the current-connection gate applies).
-- `ZSinglePeerDispatch` - PAIR.
-- `ZBroadcastDispatch` - PUB, XPUB.
-- `ZIdentityDispatch` - ROUTER.
-- `ZCurrentPeerDispatch` - REQ's single current connection.
+  connections, where the current-connection gate applies); selects one target.
+- `ZSinglePeerDispatch` - PAIR; selects the single peer.
+- `ZBroadcastDispatch` - PUB, XPUB; selects every peer, so the generic send
+  path broadcasts.
+- `ZIdentityDispatch` - ROUTER; owns the identity-to-connection routing table
+  (identity assignment on inbound, resolution for the directed identity send,
+  teardown release) - the socket delegates to it. The generic path is
+  rejected: the routing identity is caller-supplied, separate from the
+  message, so the message alone cannot be routed.
+- `ZCurrentPeerDispatch` - REQ; owns the in-flight current connection and
+  routes the request send through it - the fair-queue selection made under
+  the in-flight gate is the single source of REQ's routing. The generic path
+  is rejected when no request is in flight.
 
 ### 2.2 Compatibility is per-endpoint, not derived
 
