@@ -5,17 +5,23 @@ namespace ZmqSharp.Transports;
 
 /// <summary>
 /// Socket-based transport: ConnectAsync yields a connected connection; BindAsync
-/// yields a listening transport that reports accepted peers via OnAccept.
+/// yields listening transport that reports accepted peers via OnAccept.
+/// The transport is endpoint-agnostic (0015 section 5.1): the socket is constructed
+/// from the endpoint's address family, so both TCP (<see cref="IPEndPoint"/>) and
+/// Unix domain (ipc, <see cref="UnixDomainSocketEndPoint"/>) endpoints flow
+/// through the same transport.
 /// </summary>
 public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 {
     private readonly Socket socket;
+    private readonly string? boundPath;
     private Func<IZConnection, CancellationToken, ValueTask>? onAccept;
     private int closed;
 
-    private SocketTransport(Socket socket)
+    private SocketTransport(Socket socket, string? boundPath = null)
     {
         this.socket = socket;
+        this.boundPath = boundPath;
     }
 
     public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
@@ -29,11 +35,11 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
         ZTransportOptions options,
         CancellationToken token = default)
     {
-        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        var socket = CreateSocket(endpoint);
         try
         {
             await socket.ConnectAsync(endpoint, token);
-            socket.NoDelay = true;
+            SetTcpOptions(socket, endpoint);
             return new ZConnection(new NetworkStream(socket, true));
         }
         catch
@@ -48,10 +54,15 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
         ZTransportOptions options,
         CancellationToken token = default)
     {
-        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        var socket = CreateSocket(endpoint);
         socket.Bind(endpoint);
         socket.Listen();
-        return ValueTask.FromResult(new SocketTransport(socket));
+        // net10 UnixDomainSocketEndPoint exposes no Path/FilePath property;
+        // ToString() is the public way to get the bound path back to
+        // unlink on dispose (verified for non-abstract paths, which is all the
+        // ipc facade produces).
+        var boundPath = endpoint is UnixDomainSocketEndPoint ? endpoint.ToString() : null;
+        return ValueTask.FromResult(new SocketTransport(socket, boundPath));
     }
 
     public async ValueTask StartAsync(CancellationToken token = default)
@@ -74,7 +85,7 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
             try
             {
-                accepted.NoDelay = true;
+                SetTcpOptions(accepted, accepted.RemoteEndPoint ?? socket.LocalEndPoint);
                 var connection = new ZConnection(new NetworkStream(accepted, true));
                 if (onAccept is not null)
                     await onAccept(connection, token);
@@ -92,6 +103,27 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref closed, 1) == 0) socket.Dispose();
+        if (Interlocked.Exchange(ref closed, 1) != 0) return;
+
+        socket.Dispose();
+        // Unix domain bind creates a filesystem entry for the path; remove it
+        // so a later bind of the same path succeeds (0015 section 5.2).
+        if (boundPath is not null) File.Delete(boundPath);
+    }
+
+    /// <summary>
+    /// Constructs the socket from the endpoint's address family instead of
+    /// hard-coding TCP: InterNetwork endpoints keep the previous behavior, and
+    /// Unix endpoints (ipc) get an AF_UNIX stream socket.
+    /// </summary>
+    private static Socket CreateSocket(EndPoint endpoint)
+    {
+        return new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
+    }
+
+    /// <summary>TCP-only tuning: NoDelay is not valid on a Unix domain socket.</summary>
+    private static void SetTcpOptions(Socket socket, EndPoint? endpoint)
+    {
+        if (endpoint is not null && endpoint.AddressFamily != AddressFamily.Unix) socket.NoDelay = true;
     }
 }

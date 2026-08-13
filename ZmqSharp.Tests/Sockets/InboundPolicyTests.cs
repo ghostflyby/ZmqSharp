@@ -1,6 +1,4 @@
 using System.Buffers;
-using System.Net;
-using System.Net.Sockets;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
@@ -68,13 +66,14 @@ public sealed class InboundPolicyTests
         type.AcceptsPeer("PAIR").Should().BeFalse();
     }
 
-    [Fact]
-    public async Task CustomTransformInbound_DeliversReplacedMessage()
+    [Theory]
+    [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
+    public async Task CustomTransformInbound_DeliversReplacedMessage(TransportKind kind)
     {
         // A custom inbound policy drives the aggregated tier: the delivered
         // message is the policy's replacement (frames moved, 0019 section 3).
         // The socket reuses the PAIR identity, so a built-in pair connects.
-        var port = GetFreePort();
+        var endpoint = TestTransports.GetEndpoint(kind);
         await using var server = new CustomTransformSocket();
         await using var client = ZSocket.CreatePairCallback();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -82,8 +81,8 @@ public sealed class InboundPolicyTests
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
 
-        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await server.BindAsync(endpoint, cts.Token);
+        await client.ConnectAsync(endpoint, cts.Token);
         await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), cts.Token);
 
         var message = await received.Task.WaitAsync(cts.Token);
@@ -95,20 +94,21 @@ public sealed class InboundPolicyTests
         message.Dispose();
     }
 
-    [Fact]
-    public async Task CustomConsumeInbound_ConsumesWithoutASink()
+    [Theory]
+    [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
+    public async Task CustomConsumeInbound_ConsumesWithoutASink(TransportKind kind)
     {
         // A consume-style socket (custom REQ-like) aggregates without a bound
         // sink (0019 section 4): every message is consumed by the policy and
         // the peer's pump stays alive.
-        var port = GetFreePort();
+        var endpoint = TestTransports.GetEndpoint(kind);
         var inbound = new ConsumeInbound();
         await using var server = new ConsumeSocket(inbound);
         await using var client = ZSocket.CreatePairCallback();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await server.BindAsync(endpoint, cts.Token);
+        await client.ConnectAsync(endpoint, cts.Token);
         await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
 
@@ -226,15 +226,6 @@ public sealed class InboundPolicyTests
 
         public void Dispose()
             => throw new NotSupportedException();
-    }
-
-    private static int GetFreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     private static async Task WaitUntilAsync<T>(Func<T> getValue, Func<T, bool> condition, TimeSpan timeout)

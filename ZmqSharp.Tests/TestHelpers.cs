@@ -1,12 +1,86 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
+
+/// <summary>
+/// The endpoint transports the real-socket test suites run over (0015 section
+/// 5.4).
+/// Tcp runs everywhere; Ipc (Unix domain sockets) is supported on every
+/// platform by ZmqSharp, but only discovered on non-Windows so Windows CI
+/// stays free of AF_UNIX-specific behavior.
+/// Public because theory methods
+/// take it as a parameter.
+/// </summary>
+public enum TransportKind
+{
+    Tcp,
+    Ipc
+}
+
+internal static class TestTransports
+{
+    /// <summary>
+    /// Theory data for transport parameterization: Tcp always, Ipc only when
+    /// the platform supports the Unix domain socket suite (Windows is
+    /// excluded at discovery, so no skips are needed at runtime).
+    /// </summary>
+    public static TheoryData<TransportKind> TransportKinds()
+    {
+        var data = new TheoryData<TransportKind> { TransportKind.Tcp };
+        if (!OperatingSystem.IsWindows()) data.Add(TransportKind.Ipc);
+
+        return data;
+    }
+
+    /// <summary>Builds a fresh string endpoint for the transport kind.</summary>
+    public static string GetEndpoint(TransportKind kind)
+    {
+        return kind == TransportKind.Ipc
+            ? $"ipc://{IpcSocketPath("zmqsharp-test-")}"
+            : $"tcp://127.0.0.1:{GetFreePort()}";
+    }
+
+    /// <summary>
+    /// Fresh Unix domain socket paths for the ipc-specific lifecycle tests;
+    /// discovered only on non-Windows (Windows AF_UNIX filesystem semantics
+    /// are not asserted by this suite).
+    /// </summary>
+    public static TheoryData<string> IpcPaths()
+    {
+        var data = new TheoryData<string>();
+        if (!OperatingSystem.IsWindows()) data.Add(IpcSocketPath("zmqsharp-test-"));
+
+        return data;
+    }
+
+    /// <summary>
+    /// A fresh Unix domain socket path under the system temp directory.
+    /// The filename stays short: macOS limits sun_path to 104 bytes, and long
+    /// temp directories plus a 32-char guid would exceed it.
+    /// </summary>
+    public static string IpcSocketPath(string prefix)
+    {
+        var id = Guid.NewGuid().ToString("N")[..12];
+        return Path.Combine(Path.GetTempPath(), $"{prefix}{id}.sock");
+    }
+
+    private static int GetFreePort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+}
 
 /// <summary>In-memory stream; caps the chunk size to simulate partial TCP reads.
 /// Writes are captured (appended) so the handshake's local greeting/READY can
@@ -427,7 +501,7 @@ internal sealed class EstablishedFakeConnection : IZConnection
         // Park the pump on a read that only cancellation completes, so the
         // peer stays established and routable for the duration of the test.
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        token.Register(static state => ((TaskCompletionSource<int>)state!).TrySetCanceled(), tcs);
+        token.Register(static state => (state as TaskCompletionSource<int>)?.TrySetCanceled(), tcs);
         return new ValueTask<int>(tcs.Task);
     }
 
