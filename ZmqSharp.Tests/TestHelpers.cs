@@ -30,7 +30,7 @@ internal static class TestTransports
     /// </summary>
     public static TheoryData<TransportKind> TransportKinds()
     {
-        return new TheoryData<TransportKind> { TransportKind.Tcp, TransportKind.Ipc };
+        return [TransportKind.Tcp, TransportKind.Ipc];
     }
 
     /// <summary>Builds a fresh string endpoint for the transport kind.</summary>
@@ -47,7 +47,7 @@ internal static class TestTransports
     /// </summary>
     public static TheoryData<string> IpcPaths()
     {
-        return new TheoryData<string> { IpcSocketPath("zmqsharp-test-") };
+        return [IpcSocketPath("zmqsharp-test-")];
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ internal static class TestTransports
     /// </summary>
     public static TheoryData<string> AbstractNames()
     {
-        return new TheoryData<string> { $"zmqsharp-abs-{Guid.NewGuid().ToString("N")[..8]}" };
+        return [$"zmqsharp-abs-{Guid.NewGuid().ToString("N")[..8]}"];
     }
 
     private static int GetFreePort()
@@ -287,6 +287,30 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
     }
 }
 
+/// <summary>
+/// Captures every logical write the encoder hands to a sink, preserving the
+/// per-write segment structure (0015 section 6.1). Used to assert that a frame
+/// is written as one logical write of header + all segments.
+/// </summary>
+internal sealed class CaptureSink : IZWriteSink
+{
+    public List<ReadOnlyMemory<byte>[]> Writes { get; } = [];
+
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    {
+        Writes.Add([bytes.ToArray()]);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask WriteAsync(ReadOnlySequence<byte> sequence, CancellationToken token = default)
+    {
+        var segments = new List<ReadOnlyMemory<byte>>();
+        foreach (var memory in sequence) segments.Add(memory.ToArray());
+        Writes.Add([.. segments]);
+        return ValueTask.CompletedTask;
+    }
+}
+
 internal static class ZmtpTestRunner
 {
     /// <summary>
@@ -483,7 +507,7 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
 internal sealed class EstablishedFakeConnection : IZConnection
 {
-    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
+    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
     private int position;
     private int disposed;
 

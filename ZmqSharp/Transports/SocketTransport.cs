@@ -9,7 +9,8 @@ namespace ZmqSharp.Transports;
 /// The transport is endpoint-agnostic (0015 section 5.1): the socket is constructed
 /// from the endpoint's address family, so both TCP (<see cref="IPEndPoint"/>) and
 /// Unix domain (ipc, <see cref="UnixDomainSocketEndPoint"/>) endpoints flow
-/// through the same transport.
+/// through the same transport. Connections are <see cref="ZSocketConnection"/>
+/// instances reading directly from the socket (0015 section 4).
 /// </summary>
 public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 {
@@ -40,7 +41,7 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
         {
             await socket.ConnectAsync(endpoint, token);
             SetTcpOptions(socket, endpoint);
-            return new ZConnection(new NetworkStream(socket, true));
+            return new ZSocketConnection(socket);
         }
         catch
         {
@@ -86,7 +87,7 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
             try
             {
                 SetTcpOptions(accepted, accepted.RemoteEndPoint ?? socket.LocalEndPoint);
-                var connection = new ZConnection(new NetworkStream(accepted, true));
+                var connection = new ZSocketConnection(accepted);
                 if (onAccept is not null)
                     await onAccept(connection, token);
                 else
