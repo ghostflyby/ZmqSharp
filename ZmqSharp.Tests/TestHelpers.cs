@@ -1,12 +1,86 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests;
+
+/// <summary>
+/// The endpoint transports the real-socket test suites run over (0015 section
+/// 5.4). Tcp and Ipc (Unix domain sockets) both run on every platform:
+/// ZmqSharp's ipc is real AF_UNIX on Windows 10 1803+ as well (0020). Public
+/// because theory methods take it as a parameter.
+/// </summary>
+public enum TransportKind
+{
+    Tcp,
+    Ipc
+}
+
+internal static class TestTransports
+{
+    /// <summary>
+    /// Theory data for transport parameterization: both transports run on
+    /// every platform (ipc is real AF_UNIX on Windows too, 0020).
+    /// </summary>
+    public static TheoryData<TransportKind> TransportKinds()
+    {
+        return new TheoryData<TransportKind> { TransportKind.Tcp, TransportKind.Ipc };
+    }
+
+    /// <summary>Builds a fresh string endpoint for the transport kind.</summary>
+    public static string GetEndpoint(TransportKind kind)
+    {
+        return kind == TransportKind.Ipc
+            ? $"ipc://{IpcSocketPath("zmqsharp-test-")}"
+            : $"tcp://127.0.0.1:{GetFreePort()}";
+    }
+
+    /// <summary>
+    /// Fresh Unix domain socket paths for the ipc-specific lifecycle tests;
+    /// discovered on every platform (Windows AF_UNIX is real, 0020).
+    /// </summary>
+    public static TheoryData<string> IpcPaths()
+    {
+        return new TheoryData<string> { IpcSocketPath("zmqsharp-test-") };
+    }
+
+    /// <summary>
+    /// A fresh Unix domain socket path under the system temp directory.
+    /// The filename stays short: macOS limits sun_path to 104 bytes, and long
+    /// temp directories plus a 32-char guid would exceed it.
+    /// </summary>
+    public static string IpcSocketPath(string prefix)
+    {
+        var id = Guid.NewGuid().ToString("N")[..12];
+        return Path.Combine(Path.GetTempPath(), $"{prefix}{id}.sock");
+    }
+
+    /// <summary>
+    /// Names for the Linux abstract-namespace tests (ipc://@name, 0020). The
+    /// data source stays non-empty on every platform (an empty TheoryData
+    /// fails discovery); the tests skip at runtime off Linux, where the
+    /// abstract namespace does not exist.
+    /// </summary>
+    public static TheoryData<string> AbstractNames()
+    {
+        return new TheoryData<string> { $"zmqsharp-abs-{Guid.NewGuid().ToString("N")[..8]}" };
+    }
+
+    private static int GetFreePort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+}
 
 /// <summary>In-memory stream; caps the chunk size to simulate partial TCP reads.
 /// Writes are captured (appended) so the handshake's local greeting/READY can
@@ -427,7 +501,7 @@ internal sealed class EstablishedFakeConnection : IZConnection
         // Park the pump on a read that only cancellation completes, so the
         // peer stays established and routable for the duration of the test.
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        token.Register(static state => ((TaskCompletionSource<int>)state!).TrySetCanceled(), tcs);
+        token.Register(static state => (state as TaskCompletionSource<int>)?.TrySetCanceled(), tcs);
         return new ValueTask<int>(tcs.Task);
     }
 

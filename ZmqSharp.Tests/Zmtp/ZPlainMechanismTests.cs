@@ -1,7 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Net;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
 using FluentAssertions;
@@ -137,8 +135,9 @@ public sealed class ZPlainMechanismTests
         act.Should().Throw<InvalidOperationException>();
     }
 
-    [Fact]
-    public async Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes()
+    [Theory]
+    [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
+    public async Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes(TransportKind kind)
     {
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
@@ -156,9 +155,9 @@ public sealed class ZPlainMechanismTests
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var endpoint = TestTransports.GetEndpoint(kind);
+        await server.BindAsync(endpoint, cts.Token);
+        await client.ConnectAsync(endpoint, cts.Token);
 
         await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), cts.Token);
         var echo = await TryReadAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
@@ -167,8 +166,9 @@ public sealed class ZPlainMechanismTests
         echo.Value.Dispose();
     }
 
-    [Fact]
-    public async Task PlainMechanism_BadPassword_FaultsClientConnect()
+    [Theory]
+    [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
+    public async Task PlainMechanism_BadPassword_FaultsClientConnect(TransportKind kind)
     {
         await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
         {
@@ -185,11 +185,10 @@ public sealed class ZPlainMechanismTests
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "wrong"u8) }
         });
 
-        var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var endpoint = TestTransports.GetEndpoint(kind);
+        await server.BindAsync(endpoint);
 
-        var act = async () => await client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        await act.Should().ThrowAsync<ZMechanismException>()
+        await FluentActions.Awaiting(() => client.ConnectAsync(endpoint)).Should().ThrowAsync<ZMechanismException>()
             .WithMessage("*Invalid username or password*");
     }
 
@@ -235,15 +234,6 @@ public sealed class ZPlainMechanismTests
         body[0] = 7;
         "WELCOME"u8.CopyTo(body.AsSpan(1));
         return ZmtpTestData.Frame(body, command: true);
-    }
-
-    private static int GetFreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     private static async Task<ZMessage?> TryReadAsync(

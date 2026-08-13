@@ -1,6 +1,4 @@
 using System.Buffers;
-using System.Net;
-using System.Net.Sockets;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
@@ -169,15 +167,16 @@ public sealed class DispatchPolicyTests
         policy.TryResolve(identity, out resolved).Should().BeFalse();
     }
 
-    [Fact]
-    public async Task CustomMultiSelectPolicy_DeliversToEverySelectedPeer()
+    [Theory]
+    [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
+    public async Task CustomMultiSelectPolicy_DeliversToEverySelectedPeer(TransportKind kind)
     {
         // The policy is the primary decision maker on the selective send path:
         // a custom policy that selects every peer drives the base send, and
         // every selected peer receives the message exactly once. The route is
         // the policy's contract, not a socket override.
-        var portA = GetFreePort();
-        var portB = GetFreePort();
+        var endpointA = TestTransports.GetEndpoint(kind);
+        var endpointB = TestTransports.GetEndpoint(kind);
         await using var sender = new MultiSelectSocket();
         await using var receiverA = ZSocket.CreatePairCallback();
         await using var receiverB = ZSocket.CreatePairCallback();
@@ -188,10 +187,10 @@ public sealed class DispatchPolicyTests
         receiverA.BindMessageSink(new TestSink(message => receivedA.TrySetResult(message)));
         receiverB.BindMessageSink(new TestSink(message => receivedB.TrySetResult(message)));
 
-        await receiverA.BindAsync($"tcp://127.0.0.1:{portA}", cts.Token);
-        await receiverB.BindAsync($"tcp://127.0.0.1:{portB}", cts.Token);
-        await sender.ConnectAsync($"tcp://127.0.0.1:{portA}", cts.Token);
-        await sender.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
+        await receiverA.BindAsync(endpointA, cts.Token);
+        await receiverB.BindAsync(endpointB, cts.Token);
+        await sender.ConnectAsync(endpointA, cts.Token);
+        await sender.ConnectAsync(endpointB, cts.Token);
 
         // The custom policy selects both established peers.
         await sender.SendAsync(ZMessage.FromOwned([.. "both"u8]), cts.Token);
@@ -266,14 +265,5 @@ public sealed class DispatchPolicyTests
 
         public void Dispose()
             => throw new NotSupportedException();
-    }
-
-    private static int GetFreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

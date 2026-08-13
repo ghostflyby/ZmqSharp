@@ -7,6 +7,10 @@ libzmq-compatible socket semantics.
   per-message allocations on the hot path.
 - **All 11 libzmq socket types**: PAIR, PUSH, PULL, PUB, SUB, REQ, REP, DEALER, ROUTER, XPUB, XSUB, each verified
   against the NetMQ (libzmq-compatible) implementation over TCP in both directions.
+- **TCP and ipc (Unix domain socket) transports** with a single string-endpoint facade (`tcp://host:port`,
+  `ipc://path`). libzmq supports ipc on Unix only, and NetMQ's `ipc://` is a TCP hash rather than a Unix domain
+  socket; ZmqSharp offers true `ipc://` Unix domain sockets on every platform, including Windows — a concrete
+  differentiator (0015 section 5.3, 0020 section 7/8).
 - **Per-peer bounded queues** with configurable full modes (Wait, DropWrite, DropNewest, DropOldest) and mandatory
   reclamation of dropped messages.
 - **Copy-on-write peer snapshots**: zero-allocation send and receive hot paths in optimized builds.
@@ -25,6 +29,15 @@ await client.ConnectAsync("tcp://127.0.0.1:5555");
 
 await client.SendAsync("hello"u8.ToArray());
 var message = await server.Messages.ReadAsync();
+
+// PAIR over ipc (Unix domain socket): an absolute path, a relative one
+// resolved against the system temp directory, or - on Linux - an abstract
+// namespace name (libzmq's ipc://@name convention) that creates no
+// filesystem entry.
+await using var ipcServer = ZSocket.CreatePair();
+await using var ipcClient = ZSocket.CreatePair();
+await ipcServer.BindAsync("ipc:///tmp/zmqsharp.sock");
+await ipcClient.ConnectAsync("ipc:///tmp/zmqsharp.sock");
 ```
 
 REQ/REP (operation-oriented):
