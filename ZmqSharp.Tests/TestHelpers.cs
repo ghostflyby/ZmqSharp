@@ -287,6 +287,30 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
     }
 }
 
+/// <summary>
+/// Captures every logical write the encoder hands to a sink, preserving the
+/// per-write segment structure (0015 section 6.1). Used to assert that a frame
+/// is written as one logical write of header + all segments.
+/// </summary>
+internal sealed class CaptureSink : IZWriteSink
+{
+    public List<ReadOnlyMemory<byte>[]> Writes { get; } = [];
+
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    {
+        Writes.Add([bytes.ToArray()]);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask WriteAsync(ReadOnlySequence<byte> sequence, CancellationToken token = default)
+    {
+        var segments = new List<ReadOnlyMemory<byte>>();
+        foreach (var memory in sequence) segments.Add(memory.ToArray());
+        Writes.Add([.. segments]);
+        return ValueTask.CompletedTask;
+    }
+}
+
 internal static class ZmtpTestRunner
 {
     /// <summary>
