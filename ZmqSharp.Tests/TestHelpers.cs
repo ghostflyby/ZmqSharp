@@ -30,7 +30,7 @@ internal static class TestTransports
     /// </summary>
     public static TheoryData<TransportKind> TransportKinds()
     {
-        return new TheoryData<TransportKind> { TransportKind.Tcp, TransportKind.Ipc };
+        return [TransportKind.Tcp, TransportKind.Ipc];
     }
 
     /// <summary>Builds a fresh string endpoint for the transport kind.</summary>
@@ -47,7 +47,7 @@ internal static class TestTransports
     /// </summary>
     public static TheoryData<string> IpcPaths()
     {
-        return new TheoryData<string> { IpcSocketPath("zmqsharp-test-") };
+        return [IpcSocketPath("zmqsharp-test-")];
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ internal static class TestTransports
     /// </summary>
     public static TheoryData<string> AbstractNames()
     {
-        return new TheoryData<string> { $"zmqsharp-abs-{Guid.NewGuid().ToString("N")[..8]}" };
+        return [$"zmqsharp-abs-{Guid.NewGuid().ToString("N")[..8]}"];
     }
 
     private static int GetFreePort()
@@ -340,7 +340,7 @@ internal static class ZmtpTestData
         return result;
     }
 
-    public static byte[] Ready(string socketType = "PAIR")
+    public static byte[] Ready(string socketType)
     {
         return Frame(ReadyBody(socketType), command: true);
     }
@@ -483,7 +483,7 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
 internal sealed class EstablishedFakeConnection : IZConnection
 {
-    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
+    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
     private int position;
     private int disposed;
 
