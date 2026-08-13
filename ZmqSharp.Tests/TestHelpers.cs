@@ -340,7 +340,7 @@ internal static class ZmtpTestData
         return result;
     }
 
-    public static byte[] Ready(string socketType)
+    public static byte[] Ready(string socketType = "PAIR")
     {
         return Frame(ReadyBody(socketType), command: true);
     }
