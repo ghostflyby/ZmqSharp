@@ -10,10 +10,8 @@ namespace ZmqSharp.Tests.Sockets;
 /// bind-path unlink on dispose, rebinding a freed path, connecting to a
 /// missing path, and multi-peer fan-out. The transport behavior itself is
 /// covered by the transport-parameterized suites (0015 section 5.4); these
-/// cover the ipc-specific surface. Discovered only on non-Windows: the
-/// parameterized suites keep AF_UNIX cases off Windows CI, and Windows
-/// AF_UNIX filesystem semantics (socket entry visibility, unlink, rebind)
-/// are not asserted here.
+/// cover the ipc-specific surface. They run on every platform: ZmqSharp's
+/// ipc is real AF_UNIX on Windows 10 1803+ too (0020).
 /// </summary>
 public sealed class ZSocketIpcTests
 {

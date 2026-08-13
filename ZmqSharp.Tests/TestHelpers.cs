@@ -12,12 +12,9 @@ namespace ZmqSharp.Tests;
 
 /// <summary>
 /// The endpoint transports the real-socket test suites run over (0015 section
-/// 5.4).
-/// Tcp runs everywhere; Ipc (Unix domain sockets) is supported on every
-/// platform by ZmqSharp, but only discovered on non-Windows so Windows CI
-/// stays free of AF_UNIX-specific behavior.
-/// Public because theory methods
-/// take it as a parameter.
+/// 5.4). Tcp and Ipc (Unix domain sockets) both run on every platform:
+/// ZmqSharp's ipc is real AF_UNIX on Windows 10 1803+ as well (0020). Public
+/// because theory methods take it as a parameter.
 /// </summary>
 public enum TransportKind
 {
@@ -28,16 +25,12 @@ public enum TransportKind
 internal static class TestTransports
 {
     /// <summary>
-    /// Theory data for transport parameterization: Tcp always, Ipc only when
-    /// the platform supports the Unix domain socket suite (Windows is
-    /// excluded at discovery, so no skips are needed at runtime).
+    /// Theory data for transport parameterization: both transports run on
+    /// every platform (ipc is real AF_UNIX on Windows too, 0020).
     /// </summary>
     public static TheoryData<TransportKind> TransportKinds()
     {
-        var data = new TheoryData<TransportKind> { TransportKind.Tcp };
-        if (!OperatingSystem.IsWindows()) data.Add(TransportKind.Ipc);
-
-        return data;
+        return new TheoryData<TransportKind> { TransportKind.Tcp, TransportKind.Ipc };
     }
 
     /// <summary>Builds a fresh string endpoint for the transport kind.</summary>
@@ -50,15 +43,11 @@ internal static class TestTransports
 
     /// <summary>
     /// Fresh Unix domain socket paths for the ipc-specific lifecycle tests;
-    /// discovered only on non-Windows (Windows AF_UNIX filesystem semantics
-    /// are not asserted by this suite).
+    /// discovered on every platform (Windows AF_UNIX is real, 0020).
     /// </summary>
     public static TheoryData<string> IpcPaths()
     {
-        var data = new TheoryData<string>();
-        if (!OperatingSystem.IsWindows()) data.Add(IpcSocketPath("zmqsharp-test-"));
-
-        return data;
+        return new TheoryData<string> { IpcSocketPath("zmqsharp-test-") };
     }
 
     /// <summary>
