@@ -61,6 +61,17 @@ internal static class TestTransports
         return Path.Combine(Path.GetTempPath(), $"{prefix}{id}.sock");
     }
 
+    /// <summary>
+    /// Names for the Linux abstract-namespace tests (ipc://@name, 0020). The
+    /// data source stays non-empty on every platform (an empty TheoryData
+    /// fails discovery); the tests skip at runtime off Linux, where the
+    /// abstract namespace does not exist.
+    /// </summary>
+    public static TheoryData<string> AbstractNames()
+    {
+        return new TheoryData<string> { $"zmqsharp-abs-{Guid.NewGuid().ToString("N")[..8]}" };
+    }
+
     private static int GetFreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

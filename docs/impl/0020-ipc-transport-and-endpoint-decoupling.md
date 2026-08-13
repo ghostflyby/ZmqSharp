@@ -51,6 +51,14 @@ two schemes:
   form lands in `AbsolutePath` (query excluded), while a relative form places
   the path in `Host` with `AbsolutePath` at `/` - the parser falls back to
   `Host` in that case. Verified against the real URI parser.
+- `ipc://@name` - the Linux abstract namespace, using libzmq's `@`-prefix
+  convention. The URI parser would eat the `@` as userinfo, so the abstract
+  form is detected on the raw string before parsing and mapped to a leading
+  null byte (`UnixDomainSocketEndPoint("\0name")`), which is how the BCL
+  represents an abstract address. Abstract addresses live in the kernel
+  namespace: they create no filesystem entry and are cleaned up when the
+  socket closes (no unlink needed). They exist only on Linux - off Linux the
+  `@` form is treated as a literal path.
 
 Windows absolute paths round-trip through the URI parser as well: the parser
 normalizes backslashes to forward slashes and drops the authority, so
@@ -67,7 +75,9 @@ unchanged.
 A Unix domain `Bind` creates a filesystem entry for the path. libzmq semantics
 treat a stale entry as reusable: `SocketTransport` records the bound path and
 `File.Delete`s it on dispose, so a later bind of the same path succeeds
-instead of failing with EADDRINUSE. TCP binds record no path and do nothing.
+instead of failing with EADDRINUSE. Abstract-namespace addresses (section 3,
+displayed with a leading `@`) have no filesystem entry, so the unlink is
+skipped for them. TCP binds record no path and do nothing.
 
 ## 5. Transport parameterized suites
 

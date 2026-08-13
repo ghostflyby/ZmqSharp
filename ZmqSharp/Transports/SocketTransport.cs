@@ -108,7 +108,11 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
         socket.Dispose();
         // Unix domain bind creates a filesystem entry for the path; remove it
         // so a later bind of the same path succeeds (0015 section 5.2).
-        if (boundPath is not null) File.Delete(boundPath);
+        // Abstract-namespace addresses (displayed with a leading '@', libzmq's
+        // convention, 0020) have no filesystem entry - they are cleaned up
+        // when the socket closes, and a File.Delete would target a wrong path
+        // (a file literally named "@...") at best.
+        if (boundPath is not null && !boundPath.StartsWith('@')) File.Delete(boundPath);
     }
 
     /// <summary>

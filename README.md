@@ -30,8 +30,10 @@ await client.ConnectAsync("tcp://127.0.0.1:5555");
 await client.SendAsync("hello"u8.ToArray());
 var message = await server.Messages.ReadAsync();
 
-// PAIR over ipc (Unix domain socket): an absolute path, or a relative one
-// resolved against the system temp directory.
+// PAIR over ipc (Unix domain socket): an absolute path, a relative one
+// resolved against the system temp directory, or - on Linux - an abstract
+// namespace name (libzmq's ipc://@name convention) that creates no
+// filesystem entry.
 await using var ipcServer = ZSocket.CreatePair();
 await using var ipcClient = ZSocket.CreatePair();
 await ipcServer.BindAsync("ipc:///tmp/zmqsharp.sock");

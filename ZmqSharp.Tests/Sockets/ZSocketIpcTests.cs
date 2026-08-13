@@ -1,7 +1,10 @@
+using System.Buffers;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using FluentAssertions;
 using Xunit;
+using ZmqSharp.Patterns;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Tests.Sockets;
 
@@ -128,6 +131,46 @@ public sealed class ZSocketIpcTests
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(TestTransports.AbstractNames), MemberType = typeof(TestTransports))]
+    public async Task AbstractNamespace_RoundTripsWithoutFilesystemEntry(string name)
+    {
+        // The Linux abstract namespace (libzmq's ipc://@name convention, 0020):
+        // the address lives in the kernel namespace, creates no filesystem
+        // entry, and is cleaned up when the socket closes - no unlink needed.
+        // It exists only on Linux; off Linux the '@' form is a literal path
+        // and the scenario does not apply.
+        if (!OperatingSystem.IsLinux()) return;
+
+        var endpoint = $"ipc://@{name}";
+        var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = ZSocket.CreatePairCallback();
+        server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
+        await server.BindAsync(endpoint);
+
+        File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeFalse(
+            "an abstract namespace bind creates no filesystem entry");
+
+        await using var client = ZSocket.CreatePairCallback();
+        await client.ConnectAsync(endpoint);
+        await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]));
+
+        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        message[0].ToSequence().ToArray().Should().Equal([.. "hi"u8]);
+        message.Dispose();
+
+        // Disposing the bound socket cleans up the abstract address implicitly.
+    }
+
+    private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink
+    {
+        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        {
+            onMessage(message);
+            return ValueTask.CompletedTask;
         }
     }
 
