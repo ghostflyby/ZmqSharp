@@ -5,33 +5,31 @@ using System.Security.Cryptography;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math.EC.Rfc7748;
-using Org.BouncyCastle.Security;
 
 namespace ZmqSharp.Security.Curve;
 
 /// <summary>
-/// A 32-byte key stored inline as a value type (explicit layout, AOT-safe):
-/// the CURVE long-term and per-connection ephemeral keys no longer cost two
-/// heap arrays each. The struct and its fields are deliberately mutable: the
-/// span views are built over the storage, and a readonly struct would force a
+/// A 32-byte key stored inline as a value type (AOT-safe): the CURVE
+/// long-term and per-connection ephemeral keys no longer cost two heap
+/// arrays each. The storage is an inline array
+/// (<see cref="System.Runtime.CompilerServices.InlineArrayAttribute"/>),
+/// so the span views are zero-copy over the actual bytes. The struct and its
+/// storage are deliberately mutable: a readonly struct would force a
 /// defensive copy on every field access, silently returning stale bytes
-/// (0023).
+/// (0023 D2).
 /// </summary>
-[StructLayout(LayoutKind.Sequential, Size = 32)]
+[InlineArray(32)]
 public struct Key32 : IEquatable<Key32>
 {
-    private ulong w0;
-    private ulong w1;
-    private ulong w2;
-    private ulong w3;
+    private byte _element0;
 
     /// <summary>The 32 key bytes as a read-only span, without a copy.</summary>
     public readonly ReadOnlySpan<byte> Span =>
-        MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in w0), 4));
+        MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in _element0), 32);
 
     /// <summary>Writable view for construction; never exposed publicly.</summary>
     private readonly Span<byte> WritableSpan =>
-        MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref Unsafe.AsRef(in w0), 4));
+        MemoryMarshal.CreateSpan(ref Unsafe.AsRef(in _element0), 32);
 
     public static Key32 From(ReadOnlySpan<byte> source)
     {
@@ -52,14 +50,19 @@ public struct Key32 : IEquatable<Key32>
         return Span.SequenceEqual(other.Span);
     }
 
-    public override readonly bool Equals(object? obj)
+    public readonly override bool Equals(object? obj)
     {
         return obj is Key32 other && Equals(other);
     }
 
-    public override readonly int GetHashCode()
+    public readonly override int GetHashCode()
     {
-        return HashCode.Combine(w0, w1, w2, w3);
+        var span = Span;
+        return HashCode.Combine(
+            MemoryMarshal.Read<ulong>(span),
+            MemoryMarshal.Read<ulong>(span[8..]),
+            MemoryMarshal.Read<ulong>(span[16..]),
+            MemoryMarshal.Read<ulong>(span[24..]));
     }
 
     public static bool operator ==(Key32 left, Key32 right)
@@ -518,17 +521,35 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
 
         // Fully carry h, then compute h + (2^130 - 5) and select the reduced
         // value (the reference poly1305 finish: g = h + -p, pick by borrow).
-        ulong c = h1 >> 26; h1 &= mask; h2 += c;
-        c = h2 >> 26; h2 &= mask; h3 += c;
-        c = h3 >> 26; h3 &= mask; h4 += c;
-        c = h4 >> 26; h4 &= mask; h0 += c * 5;
-        c = h0 >> 26; h0 &= mask; h1 += c;
+        var c = h1 >> 26;
+        h1 &= mask;
+        h2 += c;
+        c = h2 >> 26;
+        h2 &= mask;
+        h3 += c;
+        c = h3 >> 26;
+        h3 &= mask;
+        h4 += c;
+        c = h4 >> 26;
+        h4 &= mask;
+        h0 += c * 5;
+        c = h0 >> 26;
+        h0 &= mask;
+        h1 += c;
 
-        ulong g0 = h0 + 5; c = g0 >> 26; g0 &= mask;
-        ulong g1 = h1 + c; c = g1 >> 26; g1 &= mask;
-        ulong g2 = h2 + c; c = g2 >> 26; g2 &= mask;
-        ulong g3 = h3 + c; c = g3 >> 26; g3 &= mask;
-        ulong g4 = h4 + c - (1UL << 26);
+        var g0 = h0 + 5;
+        c = g0 >> 26;
+        g0 &= mask;
+        var g1 = h1 + c;
+        c = g1 >> 26;
+        g1 &= mask;
+        var g2 = h2 + c;
+        c = g2 >> 26;
+        g2 &= mask;
+        var g3 = h3 + c;
+        c = g3 >> 26;
+        g3 &= mask;
+        var g4 = h4 + c - (1UL << 26);
         g4 &= 0xffffffff; // the borrow test works on the low 32 bits
 
         var select = (g4 >> 31) - 1; // all ones when h >= p (pick h + -p), 0 when h < p
@@ -552,9 +573,12 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
 
         // mac = (h + pad) % 2^128; the 2^128 carry is dropped.
         h0 += ReadLe32(key, 16);
-        h1 += ReadLe32(key, 20) + (h0 >> 32); h0 &= 0xffffffff;
-        h2 += ReadLe32(key, 24) + (h1 >> 32); h1 &= 0xffffffff;
-        h3 += ReadLe32(key, 28) + (h2 >> 32); h2 &= 0xffffffff;
+        h1 += ReadLe32(key, 20) + (h0 >> 32);
+        h0 &= 0xffffffff;
+        h2 += ReadLe32(key, 24) + (h1 >> 32);
+        h1 &= 0xffffffff;
+        h3 += ReadLe32(key, 28) + (h2 >> 32);
+        h2 &= 0xffffffff;
         h3 &= 0xffffffff;
 
         WriteLe32(tag, 0, (uint)h0);
@@ -576,11 +600,23 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         var d3 = h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * s4;
         var d4 = h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0;
 
-        ulong c = d0 >> 26; h0 = d0 & mask; d1 += c;
-        c = d1 >> 26; h1 = d1 & mask; d2 += c;
-        c = d2 >> 26; h2 = d2 & mask; d3 += c;
-        c = d3 >> 26; h3 = d3 & mask; d4 += c;
-        c = d4 >> 26; h4 = d4 & mask; h0 += c * 5;
-        c = h0 >> 26; h0 &= mask; h1 += c;
+        var c = d0 >> 26;
+        h0 = d0 & mask;
+        d1 += c;
+        c = d1 >> 26;
+        h1 = d1 & mask;
+        d2 += c;
+        c = d2 >> 26;
+        h2 = d2 & mask;
+        d3 += c;
+        c = d3 >> 26;
+        h3 = d3 & mask;
+        d4 += c;
+        c = d4 >> 26;
+        h4 = d4 & mask;
+        h0 += c * 5;
+        c = h0 >> 26;
+        h0 &= mask;
+        h1 += c;
     }
 }

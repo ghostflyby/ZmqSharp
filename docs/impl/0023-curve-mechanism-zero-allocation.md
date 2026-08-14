@@ -58,14 +58,17 @@ caller always knows the exact size. The library has never shipped, so this is
 a straight re-shape, not an additive overload.
 
 **D2 - `CurveKeyPair(byte[], byte[])` becomes a `Key32` value type.** A
-32-byte key stored as four `ulong` fields (explicit layout), with span views
-for the crypto primitives. The per-connection ephemeral key pair and the
-per-socket long-term key pair stop being two heap arrays each. `Key32` is
-AOT-safe: no reflection, no dynamic codegen, plain value semantics.
-The struct and its fields are deliberately **mutable** (the span views are
-built over the storage): a readonly struct would force a defensive copy on
-every field access, silently returning stale bytes whenever the write is not
-inlined - a real failure mode this implementation hit and fixed.
+32-byte key stored inline as a value type, with zero-copy span views over
+the storage for the crypto primitives. The per-connection ephemeral key pair
+and the per-socket long-term key pair stop being two heap arrays each.
+`Key32` is AOT-safe: no reflection, no dynamic codegen, plain value
+semantics. The storage is an inline array
+(`[InlineArray(32)]`, .NET 8+), so the span views are over the actual
+bytes - no explicit layout, no padding guarantees to hand-roll. The struct
+and its storage are deliberately **mutable**: a readonly struct would force
+a defensive copy on every field access, silently returning stale bytes
+whenever the write is not inlined - a real failure mode this implementation
+hit and fixed.
 
 **D3 - The session connection reuses per-connection buffers.** `SealFrame`
 and the read path keep a small set of buffers rented once per connection
