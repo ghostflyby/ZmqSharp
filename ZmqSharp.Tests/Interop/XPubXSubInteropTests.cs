@@ -72,7 +72,6 @@ public sealed class XPubXSubInteropTests
             .WaitAsync(TimeSpan.FromSeconds(5));
         message[0].ToSequence().ToArray().Should().Equal(payload);
         message.Dispose();
-        await xsub.DisposeAsync();
     }
 
     private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink

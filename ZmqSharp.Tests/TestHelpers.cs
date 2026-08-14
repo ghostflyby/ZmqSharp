@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Channels;
 using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
@@ -151,9 +152,52 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
 internal sealed class CountingMemoryPool : MemoryPool<byte>
 {
     private readonly MemoryPool<byte> inner = Shared;
+    private readonly Lock gate = new();
     private int outstanding;
+    private TaskCompletionSource released = CreateReleasedGate();
+    private TaskCompletionSource changed = CreateChangedGate();
 
     public int Outstanding => Volatile.Read(ref outstanding);
+
+    /// <summary>
+    /// Completes when the outstanding rental count drops to
+    /// <paramref name="count"/>; completing synchronously when already reached.
+    /// State-based completion for tests that must observe the pool settle
+    /// (e.g. disposal reclaiming every buffer) without polling.
+    /// </summary>
+    public Task WaitForOutstandingAsync(int count, TimeSpan timeout)
+    {
+        lock (gate)
+        {
+            if (Volatile.Read(ref outstanding) <= count) return Task.CompletedTask;
+
+            released = CreateReleasedGate();
+            return released.Task.WaitAsync(timeout);
+        }
+    }
+
+    /// <summary>
+    /// Completes when the outstanding rental count reaches at least
+    /// <paramref name="count"/> (for monotonic fills with no consumer). Waits
+    /// on the pool's change signal instead of polling; the check-and-arm runs
+    /// under the gate so a change between the two cannot be missed.
+    /// </summary>
+    public async Task WaitForOutstandingAtLeastAsync(int count, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        while (true)
+        {
+            Task signal;
+            lock (gate)
+            {
+                if (Volatile.Read(ref outstanding) >= count) return;
+                changed = CreateChangedGate();
+                signal = changed.Task;
+            }
+
+            await signal.WaitAsync(cts.Token);
+        }
+    }
 
     public override int MaxBufferSize => inner.MaxBufferSize;
 
@@ -161,12 +205,36 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
     {
         var owner = inner.Rent(minimumBufferSize);
         Interlocked.Increment(ref outstanding);
+        lock (gate)
+        {
+            changed.TrySetResult();
+        }
+
         return new TrackingOwner(this, owner);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing) inner.Dispose();
+    }
+
+    private void OnReleased()
+    {
+        lock (gate)
+        {
+            changed.TrySetResult();
+            if (Volatile.Read(ref outstanding) == 0) released.TrySetResult();
+        }
+    }
+
+    private static TaskCompletionSource CreateReleasedGate()
+    {
+        return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private static TaskCompletionSource CreateChangedGate()
+    {
+        return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed class TrackingOwner(CountingMemoryPool pool, IMemoryOwner<byte> inner) : IMemoryOwner<byte>
@@ -180,9 +248,64 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
             if (Interlocked.Exchange(ref disposed, 1) == 0)
             {
                 Interlocked.Decrement(ref pool.outstanding);
+                pool.OnReleased();
                 inner.Dispose();
             }
         }
+    }
+}
+
+/// <summary>
+/// Bounded receive-queue factory that counts and signals drops (test seam).
+/// The library wires <c>itemDropped</c> to <c>message.Dispose</c>, so a drop
+/// here is the precise "frame handled and its buffer reclaimed" signal -
+/// tests wait on the drop count instead of settling on a pool counter that
+/// transiently dips during the drop path (0023 test-hardening).
+/// </summary>
+internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullMode mode) : ZQueueFactory
+{
+    private readonly Lock gate = new();
+    private int drops;
+    private TaskCompletionSource changed = CreateChangedGate();
+
+    public int Drops => Volatile.Read(ref drops);
+
+    public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
+    {
+        return Channel.CreateBounded<ZMessage>(
+            new BoundedChannelOptions(capacity) { FullMode = mode, SingleWriter = true },
+            message =>
+            {
+                itemDropped(message);
+                Interlocked.Increment(ref drops);
+                lock (gate)
+                {
+                    changed.TrySetResult();
+                }
+            });
+    }
+
+    /// <summary>Completes when at least <paramref name="count"/> frames have been dropped.</summary>
+    public async Task WaitForDropsAsync(int count, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        while (true)
+        {
+            Task signal;
+            lock (gate)
+            {
+                if (Volatile.Read(ref drops) >= count) return;
+                changed = CreateChangedGate();
+                signal = changed.Task;
+            }
+
+            await signal.WaitAsync(cts.Token);
+        }
+    }
+
+    private static TaskCompletionSource CreateChangedGate()
+    {
+        return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
 
@@ -270,15 +393,22 @@ internal static class MessageFactory
 /// <summary>Captures streamed frames (copied, since frames are borrowed).</summary>
 internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFrame = null) : IZMessageSink
 {
+    private readonly TaskCompletionSource firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public List<byte[]> Frames { get; } = [];
 
     public List<bool> MoreFlags { get; } = [];
+
+    /// <summary>Completes when the first frame arrives, so tests wait on the
+    /// state instead of polling the frame count.</summary>
+    public Task FirstFrameAsync => firstFrame.Task;
 
     public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
     {
         frame.TryGetValue(out ZSegment segment);
         Frames.Add(segment.Memory.ToArray());
         MoreFlags.Add(frame.More);
+        firstFrame.TrySetResult();
         return ValueTask.FromResult(onFrame?.Invoke(frame, token) ?? true);
     }
 

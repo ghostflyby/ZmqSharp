@@ -60,6 +60,10 @@ internal sealed class AllocationFakeConnection : IZConnection
     private readonly Channel<byte[]> inbound =
         Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
 
+    private readonly Lock gateLock = new();
+    private TaskCompletionSource pumpIdle = CreateGate();
+    private TaskCompletionSource pumpRelease = CreateCompletedGate();
+
     private byte[]? current;
     private int currentPosition;
     private int handshakePosition;
@@ -70,6 +74,39 @@ internal sealed class AllocationFakeConnection : IZConnection
     public void Enqueue(byte[] chunk)
     {
         inbound.Writer.TryWrite(chunk);
+    }
+
+    /// <summary>
+    /// Test seam (mock surface): arms a deterministic pumping window. The pump
+    /// parks before awaiting an empty channel; with the gate closed it blocks
+    /// there, so a test can wait until the pump is parked
+    /// (<see cref="WaitUntilPumpIdleAsync"/>), enqueue every measured frame,
+    /// and only then release (<see cref="ReleasePump"/>). The pump then drains
+    /// the fully-buffered channel in one continuation on one thread - the
+    /// thread-local GC window the allocation tests measure (0008). The pump
+    /// may already be blocked on the channel read when the test arms (e.g.
+    /// after warm-up), so the test wakes it with one sentinel frame before
+    /// waiting for it to park.
+    /// </summary>
+    public void ArmSynchronousWindow()
+    {
+        lock (gateLock)
+        {
+            pumpIdle = CreateGate();
+            pumpRelease = CreateGate();
+        }
+    }
+
+    /// <summary>Test seam: completes when the pump is parked at the window gate.</summary>
+    public Task WaitUntilPumpIdleAsync()
+    {
+        lock (gateLock) return pumpIdle.Task;
+    }
+
+    /// <summary>Test seam: releases the parked pump; the buffered frames then drain synchronously.</summary>
+    public void ReleasePump()
+    {
+        lock (gateLock) pumpRelease.TrySetResult();
     }
 
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
@@ -98,9 +135,32 @@ internal sealed class AllocationFakeConnection : IZConnection
                 return count;
             }
 
+            // Park before awaiting an empty channel: announce the state so a
+            // test can wait for it, then block on the release gate (a no-op
+            // when the gate is open, as during the handshake and warm-up).
+            TaskCompletionSource release;
+            lock (gateLock)
+            {
+                pumpIdle.TrySetResult();
+                release = pumpRelease;
+            }
+
+            await release.Task;
             current = await inbound.Reader.ReadAsync(token);
             currentPosition = 0;
         }
+    }
+
+    private static TaskCompletionSource CreateGate()
+    {
+        return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private static TaskCompletionSource CreateCompletedGate()
+    {
+        var gate = CreateGate();
+        gate.TrySetResult();
+        return gate;
     }
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)

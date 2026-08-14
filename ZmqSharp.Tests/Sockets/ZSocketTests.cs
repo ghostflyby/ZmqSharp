@@ -465,15 +465,14 @@ public sealed class ZSocketTests
         await firstStream.WriteAsync(ZmtpTestData.Greeting());
         await firstStream.FlushAsync();
 
-        // The second accepted connection exceeds the cap and is dropped.
+        // The second accepted connection exceeds the cap and is dropped. The
+        // rejection is observable as the server closing the connection, so
+        // wait for that state (the read returns 0 / EOF) instead of a fixed
+        // delay - the server's rejection is the state, not elapsed time.
         using var second = new TcpClient();
         await second.ConnectAsync(IPAddress.Loopback, port);
         var secondStream = second.GetStream();
-        // Give the server time to accept and reject the second peer.
-        await Task.Delay(300);
-        // The second peer's greeting never receives a READY back; the socket
-        // read eventually returns 0 (EOF) once the server closes it.
-        var probe = await secondStream.ReadAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+        var probe = await secondStream.ReadAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         probe.Should().Be(0);
     }
 
@@ -611,11 +610,10 @@ public sealed class ZSocketTests
     {
         // The raw frame surface and the message sink are mutually exclusive
         // (0007 section 1): exactly one consumer of the delivery stream.
-        var socket = new ZPairSocket();
+        await using var socket = new ZPairSocket();
         socket.BindMessageSink(new TestMessageSink(_ => { }));
         var act = () => socket.OnFrame += (_, _) => true;
         act.Should().Throw<InvalidOperationException>();
-        await socket.DisposeAsync();
     }
 
     [Theory]
@@ -1086,7 +1084,8 @@ public sealed class ZSocketTests
     public async Task OverLimitFrame_DoesNotRentFromPool(TransportKind kind)
     {
         using var pool = new ProbingMemoryPool();
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
+        var inner = new ZPairSocket(new ZSocketOptions { Pool = pool });
+        await using var server = new ZQueueSocket<ZPairSocket>(inner, new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             MaxFrameLength = 4
@@ -1106,11 +1105,14 @@ public sealed class ZSocketTests
         pool.Rentals.Should().BeGreaterThan(0);
 
         // The over-limit frame is rejected before any allocation; wait for the
-        // deterministic rejection signal instead of sleeping, then prove the
-        // pool was never touched.
+        // deterministic rejection signal (the materializer's internal event)
+        // instead of sleeping or polling, then prove the pool was never
+        // touched.
+        var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        inner.MaterializerRejected += () => rejected.TrySetResult();
         pool.Reset();
         await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
-        await WaitUntilAsync(() => server.ReceiveRejections, value => value >= 1, TimeSpan.FromSeconds(5));
+        await rejected.Task.WaitAsync(TimeSpan.FromSeconds(5));
         pool.Rentals.Should().Be(0);
     }
 
@@ -1225,9 +1227,10 @@ public sealed class ZSocketTests
     public async Task DropWriteMode_KeepsFirstMessages_AndReturnsPoolOnDispose(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
+        var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropWrite);
         await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropWrite },
+            ReceiveQueueFactory = dropTracking,
         });
         await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -1238,14 +1241,13 @@ public sealed class ZSocketTests
 
         // Ten messages against a capacity-2 queue: the first two stay, the
         // rest are dropped and reclaimed by the channel's item-dropped hook.
+        // The drop callback is the library's mandatory reclamation signal, so
+        // waiting for all eight drops is the deterministic completion - no
+        // settling on a pool counter that transiently dips during the drop
+        // path (0006 section 2.2).
         for (var i = 0; i < 10; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
 
-        // Wait until the pump has drained: the pool settles at 2 (the two
-        // buffered messages) once every drop has been processed. The
-        // materializer allocates each frame's buffer directly, so there is no
-        // persistent parser scratch. Reading earlier would race the pump and
-        // refill the queue.
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        await dropTracking.WaitForDropsAsync(8, TimeSpan.FromSeconds(5));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
         received.Should().Equal(0, 1);
@@ -1263,9 +1265,10 @@ public sealed class ZSocketTests
     public async Task DropNewestMode_KeepsOldestAndIncoming(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
+        var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropNewest);
         await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropNewest },
+            ReceiveQueueFactory = dropTracking,
         });
         await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -1277,16 +1280,18 @@ public sealed class ZSocketTests
         // Drain the queue so each later step starts from empty.
         await SendAndReadBackAsync(client, server.Messages, [0, 1], cts.Token);
 
-        // Fill it, wait for both items to be materialized, then overflow it.
+        // Fill it; nothing consumes and nothing drops, so the two frames are
+        // materialized and the pool count climbs monotonically to 2.
         await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        await pool.WaitForOutstandingAtLeastAsync(2, TimeSpan.FromSeconds(5));
 
         // A full queue in DropNewest mode discards the newest buffered item
-        // (3) and keeps the incoming one (4) (0006 section 3.5). Settling back
-        // at 2 proves the drop ran before any read frees a slot.
+        // (3) and keeps the incoming one (4) (0006 section 3.5). The drop
+        // callback is the deterministic signal that the discard ran before
+        // any read frees a slot.
         await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        await dropTracking.WaitForDropsAsync(1, TimeSpan.FromSeconds(5));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
         received.Should().Equal(2, 4);
@@ -1300,9 +1305,10 @@ public sealed class ZSocketTests
     public async Task DropOldestMode_KeepsNewestMessages(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
+        var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropOldest);
         await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropOldest },
+            ReceiveQueueFactory = dropTracking,
         });
         await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -1315,12 +1321,13 @@ public sealed class ZSocketTests
 
         await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        await pool.WaitForOutstandingAtLeastAsync(2, TimeSpan.FromSeconds(5));
 
         // A full queue in DropOldest mode discards the oldest buffered item
-        // (2) and keeps the incoming one (4).
+        // (2) and keeps the incoming one (4); the drop callback signals the
+        // discard deterministically.
         await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        await dropTracking.WaitForDropsAsync(1, TimeSpan.FromSeconds(5));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
         received.Should().Equal(3, 4);
@@ -1358,7 +1365,7 @@ public sealed class ZSocketTests
 
         // OnPeerEnded drained the buffered messages through the same Dispose
         // path a drop uses; nothing leaks (0006 section 2.2).
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
 
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
@@ -1387,7 +1394,7 @@ public sealed class ZSocketTests
         // Disposing with unread buffered messages reclaims them; PeerEnded is
         // unsubscribed during disposal, so this is the only reclaim path.
         await server.DisposeAsync();
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -1424,7 +1431,7 @@ public sealed class ZSocketTests
 
         // The pump reclaimed the dequeued message on cancellation and disposal
         // drained the buffered one; both buffers are returned.
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
     [Theory]
@@ -1473,7 +1480,7 @@ public sealed class ZSocketTests
         await client.DisposeAsync();
 
         // Disposal drained the buffered and pump-held messages.
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -1521,26 +1528,26 @@ public sealed class ZSocketTests
         // the producer surface with the failure. The establishment failure is
         // deterministic (the gate faults when the READY exchange rejects the
         // socket type), and OnPeerEnded completes the outbound channel with it
-        // once the last peer ends, so a later producer is guaranteed to see
-        // the failure (0006 3.5). Wait for it, then prove the cause.
+        // once the last peer ends. WaitToWriteAsync is the deterministic
+        // completion signal: on a completed channel it resolves immediately,
+        // surfacing the completion error (0006 3.5).
         var connectFailure = await Record.ExceptionAsync(() => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
         connectFailure.Should().BeOfType<ZeroMqProtocolException>();
 
-        await WaitUntilAsync(async () =>
-        {
-            var probe = MessageFactory.PooledSingleFrame(pool, [.. "probe"u8]);
-            var failure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
-            if (failure is not null)
-                // The channel is closed, so the probe was never accepted; it
-                // must not leak. On the accepted path the pump or the disposal
-                // drain reclaims it, so it is only disposed here on failure.
-                probe.Dispose();
+        var waitFailure = await Record.ExceptionAsync(
+            () => outbound.WaitToWriteAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        waitFailure.Should().BeOfType<ZeroMqProtocolException>();
 
-            return failure is ChannelClosedException { InnerException: ZeroMqProtocolException };
-        }, TimeSpan.FromSeconds(15));
+        // The completion is a terminal state, so a single write now fails
+        // deterministically with the channel-closed failure.
+        var probe = MessageFactory.PooledSingleFrame(pool, [.. "probe"u8]);
+        var completedWriteFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
+        completedWriteFailure.Should().BeOfType<ChannelClosedException>();
+        completedWriteFailure.As<ChannelClosedException>().InnerException.Should().BeOfType<ZeroMqProtocolException>();
+        probe.Dispose(); // never accepted: the channel is completed, so it must not leak
 
         await client.DisposeAsync();
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -1611,9 +1618,11 @@ public sealed class ZSocketTests
         const int count = 1000;
         for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
 
-        // Capacity comfortably exceeds the send count, so the pump never
-        // blocks; wait until every message is materialized.
-        await WaitUntilSettledAsync(() => pool.Outstanding, count, TimeSpan.FromMilliseconds(300));
+        // Capacity comfortably exceeds the send count and nothing consumes,
+        // so Outstanding climbs monotonically to count; wait for it directly
+        // instead of a settle window (each send is fully materialized and no
+        // drop or drain can transiently dip the counter).
+        await pool.WaitForOutstandingAtLeastAsync(count, TimeSpan.FromSeconds(5));
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -1708,7 +1717,7 @@ public sealed class ZSocketTests
         failures.Should().BeEmpty();
 
         await server.DisposeAsync();
-        await WaitUntilAsync(() => pool.Outstanding, value => value == 0, TimeSpan.FromSeconds(5));
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
     // ---- Security mechanism boundary (0016) ----

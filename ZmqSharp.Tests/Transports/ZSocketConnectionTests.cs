@@ -35,7 +35,7 @@ public sealed class ZSocketConnectionTests
 
             await client.SendFrameAsync("hello"u8.ToArray(), more: false);
 
-            await WaitUntilAsync(() => recorder.Frames.Count, count => count >= 1, TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().Equal([.. "hello"u8]);
         }
@@ -59,7 +59,7 @@ public sealed class ZSocketConnectionTests
             using var message = MessageFactory.SegmentedFrame([.. "hel"u8], [.. "lo"u8], [.. "!"u8]);
             await client.SendAsync(message);
 
-            await WaitUntilAsync(() => recorder.Frames.Count, count => count >= 1, TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().Equal([.. "hello!"u8]);
         }
@@ -81,7 +81,7 @@ public sealed class ZSocketConnectionTests
             var payload = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
             await client.SendFrameAsync(payload, more: false);
 
-            await WaitUntilAsync(() => recorder.Frames.Count, count => count >= 1, TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().Equal(payload);
         }
@@ -122,7 +122,7 @@ public sealed class ZSocketConnectionTests
 
             await client.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false);
 
-            await WaitUntilAsync(() => recorder.Frames.Count, count => count >= 1, TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().BeEmpty();
         }
@@ -138,18 +138,5 @@ public sealed class ZSocketConnectionTests
         var serverSocket = await listener.AcceptSocketAsync();
         listener.Stop();
         return (new ZSocketConnection(clientSocket), new ZSocketConnection(serverSocket));
-    }
-
-    private static async Task WaitUntilAsync<T>(Func<T> readValue, Func<T, bool> predicate, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            if (predicate(readValue())) return;
-
-            await Task.Delay(10);
-        }
-
-        throw new TimeoutException($"condition not met within {timeout}");
     }
 }
