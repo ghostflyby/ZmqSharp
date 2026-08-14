@@ -168,16 +168,13 @@ As implemented:
 ## 8. Socket Types
 
 ```csharp
-public static class ZSocket
-{
-    // Queue surface (main path, short names).
-    public static ZQueueSocket<ZPairSocket> CreatePair(ZQueueSocketOptions? options = null);
-    public static ZQueueSocket<ZDealerSocket> CreateDealer(ZQueueSocketOptions? options = null);
+// Queue surface: wrap a callback socket in the channel surface.
+var pair = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
+var dealer = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket());
 
-    // Callback surface (suffixed).
-    public static ZPairSocket CreatePairCallback(ZSocketOptions? options = null);
-    public static ZDealerSocket CreateDealerCallback(ZSocketOptions? options = null);
-}
+// Callback surface: construct the composition root directly.
+ZPairSocket pairCallback = new();
+ZDealerSocket dealerCallback = new();
 ```
 
 Internally every type is a subtype of `ZSocketBase` overriding
@@ -186,10 +183,11 @@ Internally every type is a subtype of `ZSocketBase` overriding
 `Push`, `Pull`, each adding its own outbound selection and inbound
 aggregation (0004 section 1 table).
 
-The queue surface is the primary path with short factory names; the callback
-surface is created through `*Callback` entries. Each factory constructs a
-socket type subtype and, for the queue surface, wraps it in
-`ZQueueSocket<TSocket>` (0004).
+The queue surface wraps a callback socket in `ZQueueSocket<TSocket>`; the
+callback surface is the composition root itself. Construction is direct
+(0022): set-once configuration lives in `ZSocketOptions` / `ZQueueSocketOptions`
+as `init` properties, and endpoint binding/connection is the only repeatable
+surface (`BindAsync` / `ConnectAsync`, repeatable).
 
 ## 9. Decisions
 

@@ -11,8 +11,8 @@ namespace ZmqSharp;
 /// </summary>
 public class ZPubSocket : ZSocketBase
 {
-    public ZPubSocket(ZSocketOptions options)
-        : this(options, ZSocketTypes.Pub)
+    public ZPubSocket(ZSocketOptions? options = null)
+        : this(options ?? new ZSocketOptions(), ZSocketTypes.Pub)
     {
     }
 

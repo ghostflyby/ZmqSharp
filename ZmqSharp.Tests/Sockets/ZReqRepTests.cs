@@ -19,7 +19,7 @@ public sealed class ZReqRepTests
     public async Task ReqRep_RoundTripsRequestAndReply(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var rep = ZSocket.CreateRep();
+        await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint);
         rep.BindRequestHandler(async (context, token) =>
         {
@@ -28,7 +28,7 @@ public sealed class ZReqRepTests
             await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), token);
         });
 
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         await req.ConnectAsync(endpoint);
         var reply = await req.RequestAsync(ZMessage.FromOwned([.. "ping"u8]));
 
@@ -42,7 +42,7 @@ public sealed class ZReqRepTests
     public async Task ReqRep_MultipartRequestAndReply(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var rep = ZSocket.CreateRep();
+        await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint);
         rep.BindRequestHandler((context, token) =>
         {
@@ -50,7 +50,7 @@ public sealed class ZReqRepTests
             return rep.SendReplyAsync(context, MessageFactory.Multipart([.. "x"u8], [.. "y"u8]), token);
         });
 
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         await req.ConnectAsync(endpoint);
         var reply = await req.RequestAsync(MessageFactory.Multipart([.. "a"u8], [.. "b"u8]));
 
@@ -66,7 +66,7 @@ public sealed class ZReqRepTests
     {
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var rep = ZSocket.CreateRep();
+        await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint);
         rep.BindRequestHandler(async (context, token) =>
         {
@@ -74,7 +74,7 @@ public sealed class ZReqRepTests
             await rep.SendReplyAsync(context, ZMessage.FromOwned([.. "ok"u8]), token);
         });
 
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         await req.ConnectAsync(endpoint);
 
         var first = req.RequestAsync(ZMessage.FromOwned([.. "1"u8]));
@@ -96,12 +96,12 @@ public sealed class ZReqRepTests
     public async Task Req_PeerClosesBeforeReply_FaultsRequestAndFreesGate(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var rep = ZSocket.CreateRep();
+        await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint);
         // No handler bound: requests arrive and are dropped, so the reply
         // never comes and the peer stays alive until we close it.
 
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         await req.ConnectAsync(endpoint);
         var requestTask = req.RequestAsync(ZMessage.FromOwned([.. "1"u8]));
 
@@ -117,7 +117,7 @@ public sealed class ZReqRepTests
     [Fact]
     public async Task Req_NoPeer_Throws()
     {
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         await FluentActions.Awaiting(() => req.RequestAsync(ZMessage.FromOwned([.. "x"u8])))
             .Should().ThrowAsync<InvalidOperationException>();
     }
@@ -127,7 +127,7 @@ public sealed class ZReqRepTests
     {
         // REQ sends only through RequestAsync; the current-connection dispatch
         // rejects the generic send path when no request is in flight.
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         (await FluentActions.Awaiting(() => req.SendAsync(ZMessage.FromOwned([.. "x"u8])).AsTask())
                 .Should().ThrowAsync<InvalidOperationException>())
             .WithMessage("*RequestAsync*");
@@ -138,7 +138,7 @@ public sealed class ZReqRepTests
     public async Task Rep_RoutesReplyToOriginatingPeer_WithTwoPeers(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var rep = ZSocket.CreateRep();
+        await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint);
         rep.BindRequestHandler(async (context, token) =>
         {
@@ -146,8 +146,8 @@ public sealed class ZReqRepTests
             await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), token);
         });
 
-        await using var reqA = ZSocket.CreateReq();
-        await using var reqB = ZSocket.CreateReq();
+        await using var reqA = new ZReqSocket();
+        await using var reqB = new ZReqSocket();
         await reqA.ConnectAsync(endpoint);
         await reqB.ConnectAsync(endpoint);
 
@@ -166,8 +166,8 @@ public sealed class ZReqRepTests
     {
         var endpointA = TestTransports.GetEndpoint(kind);
         var endpointB = TestTransports.GetEndpoint(kind);
-        await using var repA = ZSocket.CreateRep();
-        await using var repB = ZSocket.CreateRep();
+        await using var repA = new ZRepSocket();
+        await using var repB = new ZRepSocket();
         await repA.BindAsync(endpointA);
         await repB.BindAsync(endpointB);
         var countA = 0;
@@ -183,7 +183,7 @@ public sealed class ZReqRepTests
             return repB.SendReplyAsync(context, ZMessage.FromOwned([.. "b"u8]), token);
         });
 
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         await req.ConnectAsync(endpointA);
         await req.ConnectAsync(endpointB);
 

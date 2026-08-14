@@ -23,19 +23,20 @@ public sealed class CurveEndToEndTests
         var serverKeys = crypto.GenerateKeyPair();
         var clientKeys = crypto.GenerateKeyPair();
 
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys) } }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys) }
         });
 
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
             Security = new ZSecurityOptions
             {
                 Mechanism = new CurveMechanism(crypto, clientKeys, serverKeys.PublicKey)
             }
+        }), new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -72,20 +73,21 @@ public sealed class CurveEndToEndTests
         var clientKeys = crypto.GenerateKeyPair();
         var wrongServerKeys = crypto.GenerateKeyPair();
 
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys) } }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys) }
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             Security = new ZSecurityOptions
             {
                 // The client holds a different server public key: the WELCOME
                 // box never opens, and establishment must fault.
                 Mechanism = new CurveMechanism(crypto, clientKeys, wrongServerKeys.PublicKey)
             }
+        }), new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
 
         var port = GetFreePort();

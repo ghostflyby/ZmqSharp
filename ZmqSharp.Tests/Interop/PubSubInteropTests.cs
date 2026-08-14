@@ -26,7 +26,7 @@ public sealed class PubSubInteropTests
         sub.Bind($"tcp://127.0.0.1:{port}");
         sub.Subscribe([.. "news"u8]);
 
-        await using var pub = ZSocket.CreatePub();
+        await using var pub = new ZPubSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await pub.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -43,7 +43,7 @@ public sealed class PubSubInteropTests
     public async Task NetMQPub_ZmqSharpSub_FiltersBySubscription()
     {
         var channel = Channel.CreateUnbounded<ZMessage>();
-        var sub = ZSocket.CreateSubCallback();
+        var sub = new ZSubSocket();
         sub.Subscribe([.. "news"u8]);
         sub.BindMessageSink(new TestSink(message => channel.Writer.TryWrite(message)));
         var port = InteropHelpers.GetFreePort();

@@ -28,7 +28,7 @@ public sealed class XPubXSubInteropTests
         xsub.Bind($"tcp://127.0.0.1:{port}");
 
         var subscriptions = Channel.CreateUnbounded<ZMessage>();
-        await using var xpub = ZSocket.CreateXPub();
+        await using var xpub = new ZXPubSocket();
         xpub.BindMessageSink(new TestSink(message => subscriptions.Writer.TryWrite(message)));
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await xpub.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
@@ -53,7 +53,7 @@ public sealed class XPubXSubInteropTests
     public async Task NetMQXPub_ZmqSharpXSub_ReceivesUnfiltered()
     {
         var received = Channel.CreateUnbounded<ZMessage>();
-        await using var xsub = ZSocket.CreateXSubCallback();
+        await using var xsub = new ZXSubSocket();
         xsub.Subscribe([.. "any"u8]);
         xsub.BindMessageSink(new TestSink(message => received.Writer.TryWrite(message)));
         var port = InteropHelpers.GetFreePort();

@@ -345,10 +345,11 @@ public sealed class ZSecurityOptions
 }
 ```
 
-Every `ZSocket.Create*` factory forwards `Security` (currently they forward
-only `Pool`), and the queue-surface factories copy it onto the underlying
-`ZSocketOptions`. The mechanism is resolved once at socket construction -
-explicit configuration, no discovery - so it is safe under AOT and
+`ZSocketOptions.Security` is set directly at construction on the callback
+socket, including inside the queue surface: the inner socket takes the
+security options and the channel wrapper takes only queue configuration
+(0022). The mechanism is resolved once at socket construction - explicit
+configuration, no discovery - so it is safe under AOT and
 trimming analyzers, which are already enabled with warnings as errors.
 
 ## 8. Failure and error contract

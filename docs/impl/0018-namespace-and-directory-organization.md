@@ -44,8 +44,9 @@ needs.
 
 A single `using ZmqSharp;` covers all basic usage:
 
-- Entry points and surfaces: `ZSocket` (factory), `ZQueueSocket<TSocket>`,
-  `IZSocket`, `IZCallbackSocket`, `IPatternSink`.
+- Entry points and surfaces: `ZQueueSocket<TSocket>`, the concrete socket
+  composition roots (directly constructed, 0022), `IZSocket`, `IZCallbackSocket`,
+  `IPatternSink`.
 - Base classes: `ZSocketBase`, `ZAsyncState` (public because public socket
   types derive from it; its members are protected).
 - Concrete sockets: `ZPairSocket`, `ZDealerSocket`, `ZReqSocket`, `ZRepSocket`,
@@ -90,8 +91,8 @@ A single `using ZmqSharp;` covers all basic usage:
   extension face for custom socket types: a developer subclassing
   `ZSocketBase` (in `ZmqSharp`) imports `ZmqSharp.Patterns` for the
   constructor's seam arguments, mirroring how a mechanism author imports
-  `ZmqSharp.Security`. Factory users never write these types and do not pay
-  the import.
+  `ZmqSharp.Security`. Users constructing the built-in sockets never write
+  these types and do not pay the import.
 
 ### Internal API - namespaces match the directory layout
 
@@ -129,8 +130,9 @@ place.
 - **The socket-composition seams split into `ZmqSharp.Patterns`** (0015
   section 2.1 / 0019 open question, now resolved): dispatch, inbound, and
   socket-type seams are the extension face for custom socket types, a
-  distinct audience from factory users; the extension author pays the extra
-  import, exactly as a mechanism author imports `ZmqSharp.Security`.
+  distinct audience from those who only construct the built-in sockets; the
+  extension author pays the extra import, exactly as a mechanism author
+  imports `ZmqSharp.Security`.
 - **Receive/queue tuning types stay in the top-level `ZmqSharp`**: they are
   configuration for `ZQueueSocketOptions` and are needed by the same import.
 - **No behavior changes**: this is a pure structural reorganization; socket

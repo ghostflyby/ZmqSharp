@@ -18,8 +18,8 @@ public sealed class ZReqSocket : ZSocketBase
 {
     private readonly ZReqCore core;
 
-    public ZReqSocket(ZSocketOptions options)
-        : this(options, new ZCurrentPeerDispatch())
+    public ZReqSocket(ZSocketOptions? options = null)
+        : this(options ?? new ZSocketOptions(), new ZCurrentPeerDispatch())
     {
     }
 

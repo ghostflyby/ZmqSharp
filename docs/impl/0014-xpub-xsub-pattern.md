@@ -35,8 +35,8 @@ Same broadcast as PUB (0013) plus subscription observation:
 ## 4. Public shapes
 
 ```csharp
-ZSocket.CreateXPub(ZSocketOptions?)  -> ZXPubSocket   // broadcast + subscription observation
-ZSocket.CreateXSub(ZSocketOptions?)  -> ZXSubSocket   // manual subscription frames, no filter
+new ZXPubSocket(ZSocketOptions?)  -> ZXPubSocket   // broadcast + subscription observation
+new ZXSubSocket(ZSocketOptions?)  -> ZXSubSocket   // manual subscription frames, no filter
 ```
 
 Socket-Type compatibility: XPUB <-> XSUB (and PUB/SUB interop where libzmq

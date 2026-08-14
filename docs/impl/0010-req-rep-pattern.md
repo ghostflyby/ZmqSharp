@@ -95,8 +95,8 @@ public sealed class ZRepSocket : ZSocketBase, IPatternSink
 Each socket binds itself as the message sink (`BindMessageSink(this)`), so the
 raw `OnFrame` surface is mutually exclusive with the pattern surface.
 
-Factories: `ZSocket.CreateReq()` / `ZSocket.CreateRep()` (no queue variants:
-REQ is operation-oriented, REP is a typed callback).
+Construction: `new ZReqSocket(ZSocketOptions?)` / `new ZRepSocket(ZSocketOptions?)`
+(no queue variants: REQ is operation-oriented, REP is a typed callback; 0022).
 
 Socket-Type compatibility is extended: `REQ <-> REP`.
 

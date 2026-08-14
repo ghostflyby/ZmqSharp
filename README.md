@@ -22,8 +22,8 @@ libzmq-compatible socket semantics.
 using ZmqSharp;
 
 // PAIR over TCP.
-await using var server = ZSocket.CreatePair();
-await using var client = ZSocket.CreatePair();
+await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
+await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 await server.BindAsync("tcp://127.0.0.1:5555");
 await client.ConnectAsync("tcp://127.0.0.1:5555");
 
@@ -34,8 +34,8 @@ var message = await server.Messages.ReadAsync();
 // resolved against the system temp directory, or - on Linux - an abstract
 // namespace name (libzmq's ipc://@name convention) that creates no
 // filesystem entry.
-await using var ipcServer = ZSocket.CreatePair();
-await using var ipcClient = ZSocket.CreatePair();
+await using var ipcServer = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
+await using var ipcClient = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 await ipcServer.BindAsync("ipc:///tmp/zmqsharp.sock");
 await ipcClient.ConnectAsync("ipc:///tmp/zmqsharp.sock");
 ```
@@ -43,19 +43,20 @@ await ipcClient.ConnectAsync("ipc:///tmp/zmqsharp.sock");
 REQ/REP (operation-oriented):
 
 ```csharp
-await using var rep = ZSocket.CreateRep();
+await using var rep = new ZRepSocket();
 rep.BindRequestHandler((context, token) =>
     rep.SendReplyAsync(context, ZMessage.FromOwned("pong"u8.ToArray()), token));
 
-await using var req = ZSocket.CreateReq();
+await using var req = new ZReqSocket();
 var reply = await req.RequestAsync(ZMessage.FromOwned("ping"u8.ToArray()));
 ```
 
 ## Design
 
 Design documents live in `docs/impl/`. The architecture is a transport core (`ZSocketBase`) composed with per-pattern
-cores and bound to a semantic delivery seam (`IPatternSink`); surfaces are thin composition roots created through
-`ZSocket.Create*` factories.
+cores and bound to a semantic delivery seam (`IPatternSink`); surfaces are thin composition roots constructed directly
+(`new ZPairSocket()`, `new ZQueueSocket<ZPairSocket>(new ZPairSocket())`), with `BindAsync`/`ConnectAsync` as the
+repeatable endpoint surface (0022).
 
 ## License
 

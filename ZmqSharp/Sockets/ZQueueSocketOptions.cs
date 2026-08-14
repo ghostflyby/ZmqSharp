@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Threading.Channels;
 
 namespace ZmqSharp;
@@ -44,18 +43,4 @@ public sealed class ZQueueSocketOptions
     /// (0008 D3/D6). Defaults to effectively unlimited.
     /// </summary>
     public int MaxFramesPerMessage { get; init; } = int.MaxValue;
-
-    /// <summary>
-    /// Memory pool used for receive materialization and the send copy path;
-    /// defaults to the shared pool. <c>MemoryPool&lt;byte&gt;.Shared</c>'s Dispose is
-    /// a no-op, which makes it a safe default; the library never disposes an
-    /// injected pool regardless, ownership stays with the caller.
-    /// </summary>
-    public MemoryPool<byte> Pool { get; init; } = MemoryPool<byte>.Shared;
-
-    /// <summary>
-    /// ZMTP security mechanism configuration (0016 section 7); forwarded to
-    /// the wrapped socket. Defaults to the NULL mechanism.
-    /// </summary>
-    public ZSecurityOptions Security { get; init; } = ZSecurityOptions.Null;
 }
