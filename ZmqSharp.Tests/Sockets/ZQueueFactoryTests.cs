@@ -159,7 +159,7 @@ public sealed class ZQueueFactoryTests
     [Fact]
     public void Options_Defaults_ReceiveBoundedSendDisabled()
     {
-        var options = new ZQueueSocketOptions();
+        var options = new ZSocketOptions();
         options.ReceiveQueueFactory.Should().BeOfType<ZBoundedQueueFactory>();
         options.SendQueueFactory.Should().BeNull();
     }

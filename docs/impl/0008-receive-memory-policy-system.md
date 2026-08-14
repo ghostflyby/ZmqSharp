@@ -19,12 +19,13 @@ implemented yet.
 - Slice A is implemented: `ZReceiveRejection` /
   `ZReceiveRejectionReason` (0005 pattern), `IZReceivePolicy.Decide` returning
   a `ZReceiveAllocation` (allocation only, no rejection case), `MaxFrameLength` / `MaxMessageLength` /
-  `MaxFramesPerMessage` on `ZQueueSocketOptions` (one-time socket
-  configuration) enforced by a connection-level guard in the materializer
+  `MaxFramesPerMessage` on `ZSocketOptions` (one-time socket
+  configuration, 0023) enforced by a connection-level guard in the materializer
   (fixed-order evaluation; a custom policy cannot bypass them), checked
   accumulation via `ZReceiveGuard`, terminal teardown through the existing
-  failure-safe path, and a `ReceiveRejections` diagnostic counter on
-  `ZQueueSocket` (decision on open question 3: counter only, for now).
+  failure-safe path, and a `ReceiveRejections` diagnostic counter on the
+  queue surface (`ZQueueSocketBase`, 0023) (decision on open question 3:
+  counter only, for now).
   Rejection is signaled by an internal `ZReceiveRejectedException`; the public
   exception hierarchy stays open per 0006 §2.3.
 - Slice B is implemented: `MaxCommandSize` is an explicit option on
@@ -95,7 +96,7 @@ implementation.
 ### D1. Rejection is enforced by a connection-level guard, not the policy
 
 The allocation decision and the resource limits are orthogonal. The numeric
-limits live on `ZQueueSocketOptions` as one-time socket configuration; each
+limits live on `ZSocketOptions` as one-time socket configuration; each
 peer's materializer checks them after the frame header is read, before any
 allocation, and rejects the connection on violation.
 
@@ -136,7 +137,7 @@ negotiated or transmitted.
 
 Therefore the numeric receive limits default to **effectively unlimited**
 (`long.MaxValue` / `int.MaxValue`), expressed as non-null defaults on
-`ZQueueSocketOptions` rather than nullable fields: explicit configuration is
+`ZSocketOptions` rather than nullable fields: explicit configuration is
 the user's informed opt-in. The mandatory command size limit (see D5) is the
 only limit that is not opt-out.
 
@@ -188,7 +189,7 @@ message API, not by rejecting in the allocator.
 ### D6. Rejection and failure are terminal for the connection
 
 `PeerState.FrameIndex` and `AccumulatedLength` advance before allocation
-([ZQueueSocket.cs](/Users/ghostflyby/repos/tests/ZmqSharp/ZmqSharp/Sockets/ZQueueSocket.cs:267)).
+(`ZQueueSocketBase`, 0023).
 Continuing a connection after a rejection would desynchronize that accounting,
 so rejection always tears the connection down: the peer is removed, its
 accumulated owning frames are reclaimed (0006 §3.2 gate), and the parser and
@@ -205,7 +206,7 @@ read frame header
   -> allocator(length, more)
       -> checked accumulation; overflow reports MessageTooLarge
       -> connection guard (MaxFrameLength / MaxMessageLength /
-         MaxFramesPerMessage on ZQueueSocketOptions); violation rejects
+         MaxFramesPerMessage on ZSocketOptions); violation rejects
       -> Decide: allocation only
       -> if Reject: no body read, no allocation; terminal teardown
       -> if Accept: Allocate (rent/allocate) -> read body into storage
@@ -229,12 +230,12 @@ Invariants:
 
 ## 4. Options Surface
 
-The numeric limits are one-time socket configuration on `ZQueueSocketOptions`
+The numeric limits are one-time socket configuration on `ZSocketOptions`
 (all default to effectively unlimited, per D2), alongside the receive policy
 which decides allocation only:
 
 ```csharp
-public sealed class ZQueueSocketOptions
+public sealed class ZSocketOptions
 {
     public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true }; // per-peer queue (0009)
     public ZQueueFactory? SendQueueFactory { get; init; }   // optional outbound (0009)
@@ -271,7 +272,7 @@ Required work:
   only, no rejection case); update `ZReceiveOptions` and
   `ZDelegateReceivePolicy`.
 - Add `MaxFrameLength`, `MaxMessageLength`, `MaxFramesPerMessage` to
-  `ZQueueSocketOptions` with the fixed-order evaluation (D1/§4) and enforce
+  `ZSocketOptions` with the fixed-order evaluation (D1/§4) and enforce
   them with a connection-level guard in the transport core's
   `ReceiveMaterializer.CreateAllocator`.
 - Add checked accumulation (`checked(AccumulatedLength + length)`) in the
@@ -284,7 +285,7 @@ Required work:
 - Teardown: rejected connections follow the existing failure-safe `finally`
   path; `PeerEnded` carries the rejection; accumulated owning frames are
   reclaimed.
-- Diagnostics: add a rejection counter (or event) on `ZQueueSocket`; exact
+- Diagnostics: add a rejection counter (or event) on `ZQueueSocketBase`; exact
   API shape stays open per 0006 §2.2.
 
 Completion gate:
@@ -343,7 +344,7 @@ not depend on it: rejection checks run before any segmentation decision.
 ## 7. Open Questions for Review
 
 1. Limit types: non-null `long.MaxValue` / `int.MaxValue` defaults on
-   `ZQueueSocketOptions` (this plan) versus a libzmq-style `-1` sentinel or
+   `ZSocketOptions` (this plan) versus a libzmq-style `-1` sentinel or
    nullable fields. The plan uses non-null defaults so the options are
    declarative and require no null handling.
 2. Whether `MaxFramesPerMessage` belongs with the other limits or in a

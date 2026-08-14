@@ -39,10 +39,7 @@ public sealed class PushPullInteropTests
     [Fact]
     public async Task NetMQPush_ZmqSharpPull_Delivers()
     {
-        await using var pull = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
-        });
+        await using var pull = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         var port = InteropHelpers.GetFreePort();
         await pull.BindAsync($"tcp://127.0.0.1:{port}");
 
@@ -110,10 +107,7 @@ public sealed class PushPullInteropTests
     [Fact]
     public async Task Pull_SendThrows()
     {
-        await using var pull = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
-        });
+        await using var pull = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         var act = () => pull.SendAsync(ZMessage.FromOwned([.. "x"u8])).AsTask();
         (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("receive-only");
     }

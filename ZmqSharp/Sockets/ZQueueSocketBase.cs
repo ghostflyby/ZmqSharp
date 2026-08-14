@@ -1,17 +1,22 @@
 using System.Buffers;
 using System.Threading.Channels;
+using ZmqSharp.Patterns;
 using ZmqSharp.Transports;
 
 namespace ZmqSharp;
 
 /// <summary>
-/// High-level queue surface: wraps a callback socket type, takes over its
-/// per-peer frame delivery at construction, materializes each peer's messages
-/// into that peer's own bounded queue (0004), and exposes an aggregate reader
-/// over the peer queues. The wrapped socket is never exposed.
+/// Base for every concrete socket that composes the queue receive surface by
+/// default (0023): each peer's messages land in that peer's own bounded queue
+/// and are read through <see cref="Messages"/> (0004). The queue machinery
+/// lived in the retired <c>ZQueueSocket&lt;TSocket&gt;</c> wrapper; it is now
+/// owned by the socket itself. <see cref="ZReceiveSurface.Callback"/> opts
+/// out: no queue is composed and the raw <c>OnFrame</c> /
+/// <see cref="ZSocketBase.BindMessageSink"/> surface is the delivery path.
+/// REQ and REP do not derive from this type - their protocol cores consume
+/// inbound messages regardless of surface.
 /// </summary>
-public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
-    where TSocket : ZSocketBase
+public abstract class ZQueueSocketBase : ZSocketBase
 {
     /// <summary>Peer receive-queue lifecycle (0006 3.6): Active while parsing,
     /// Draining while reclaimed on disconnect, Closed afterward.</summary>
@@ -36,7 +41,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     }
 
     /// <summary>Reads from every peer queue; the peer queues are the only physical queues.</summary>
-    private sealed class AggregateReader(ZQueueSocket<TSocket> owner) : ChannelReader<ZMessage>
+    private sealed class AggregateReader(ZQueueSocketBase owner) : ChannelReader<ZMessage>
     {
         public override Task Completion => owner.completion.Task;
 
@@ -75,7 +80,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         }
     }
 
-    private readonly TSocket socket;
+    private readonly bool queueSurface;
     private readonly Channel<ZMessage>? sendChannel;
     private readonly Task? sendPump;
     private readonly Dictionary<IZConnection, PeerState> peers = [];
@@ -89,118 +94,76 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
 
     private readonly ZQueueFactory receiveQueueFactory;
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
+    private readonly ChannelReader<ZMessage>? messages;
 
     /// <summary>
-    /// Wraps an already-constructed callback socket: binds the channel surface,
-    /// configures receive materialization, and takes over per-peer frame
-    /// delivery at construction. The wrapped socket is never exposed after
-    /// this point. Socket-level configuration (pool, security, handshake
-    /// limits) is set on the inner socket's <see cref="ZSocketOptions"/>.
+    /// The socket composition face, same shape as <see cref="ZSocketBase"/>
+    /// (0019 section 2). When <see cref="ZSocketOptions.ReceiveSurface"/> is
+    /// <see cref="ZReceiveSurface.Queue"/> (the default), the queue surface is
+    /// bound at construction: per-peer queues, an optional outbound channel,
+    /// and per-peer message delivery through <see cref="Messages"/>.
     /// </summary>
-    public ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
-        : base(MemoryPool<byte>.Shared)
+    protected ZQueueSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
+        IZInboundPolicy? inbound = null)
+        : base(options, dispatch, type, inbound)
     {
-        ArgumentNullException.ThrowIfNull(socket);
-        this.socket = socket;
-        options ??= new ZQueueSocketOptions();
+        queueSurface = options.ReceiveSurface == ZReceiveSurface.Queue;
         receiveQueueFactory = options.ReceiveQueueFactory;
         ArgumentNullException.ThrowIfNull(receiveQueueFactory);
-        var sendQueueFactory1 = options.SendQueueFactory;
-        Messages = new AggregateReader(this);
 
-        if (sendQueueFactory1 is { } outboundFactory)
+        if (queueSurface)
         {
-            sendChannel = outboundFactory.Create(static message => message.Dispose());
-            sendPump = SendPumpAsync(Cts.Token);
-        }
+            messages = new AggregateReader(this);
+            var sendQueueFactory = options.SendQueueFactory;
+            if (sendQueueFactory is { } outboundFactory)
+            {
+                sendChannel = outboundFactory.Create(static message => message.Dispose());
+                sendPump = SendPumpAsync(Cts.Token);
+            }
 
-        socket.BindMessageSink(new QueueSurface(this));
-        socket.SetReceiveMaterialization(
-            options.ReceivePolicy,
-            options.MaxFrameLength,
-            options.MaxMessageLength,
-            options.MaxFramesPerMessage);
-        socket.SetPeerConnectedHandler(OnPeerConnected);
-        socket.PeerEnded += OnPeerEnded;
+            SetReceiveMaterialization(
+                options.ReceivePolicy,
+                options.MaxFrameLength,
+                options.MaxMessageLength,
+                options.MaxFramesPerMessage);
+            BindMessageSink(new QueueSurface(this));
+            SetPeerConnectedHandler(OnPeerConnected);
+            PeerEnded += OnPeerEnded;
+        }
+        else
+        {
+            messages = null;
+        }
     }
 
-    public ChannelReader<ZMessage> Messages { get; }
+    /// <summary>
+    /// The aggregate reader over every peer's queue. On the callback surface
+    /// (<see cref="ZReceiveSurface.Callback"/>) the socket composes no queue,
+    /// so accessing this throws.
+    /// </summary>
+    public ChannelReader<ZMessage> Messages => messages
+        ?? throw new InvalidOperationException("callback surface: the socket composes no queue (set ReceiveSurface = ZReceiveSurface.Queue)");
 
     /// <summary>Total frames rejected by the receive materialization since construction.</summary>
-    public long ReceiveRejections => socket.ReceiveRejectionsCount;
+    public long ReceiveRejections => ReceiveRejectionsCount;
 
     /// <summary>
     /// Optional outbound channel built by <c>SendQueueFactory</c>. When
     /// the send pump fails, the channel completes with that failure so
     /// producers discover it through a failing <c>WriteAsync</c> instead of
-    /// waiting for socket disposal (0006 3.5).
+    /// waiting for socket disposal (0006 3.5). Null on the callback surface.
     /// </summary>
     public ChannelWriter<ZMessage>? Outbound => sendChannel?.Writer;
 
-    /// <summary>Raised when a peer connection ends; null = clean EOF, otherwise the failure.</summary>
-    public event Action<IZConnection, Exception?>? PeerEnded
-    {
-        add
-        {
-            lock (StateLock)
-            {
-                peerEnded += value;
-            }
-        }
-        remove
-        {
-            lock (StateLock)
-            {
-                peerEnded -= value;
-            }
-        }
-    }
-
-    public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-    {
-        return socket.SendAsync(message, token);
-    }
-
-    public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-    {
-        return socket.SendAsync(bytes, token);
-    }
-
-    public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-    {
-        return socket.BindAsync<TEndpoint, TTransport>(endpoint, token);
-    }
-
-    public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-    {
-        return socket.ConnectAsync<TEndpoint, TTransport>(endpoint, token);
-    }
-
-    public Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-    {
-        return socket.UnbindAsync<TEndpoint, TTransport>(endpoint);
-    }
-
-    public Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-    {
-        return socket.DisconnectAsync<TEndpoint, TTransport>(endpoint);
-    }
-
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref Closed, 1) != 0) return;
 
-        socket.PeerEnded -= OnPeerEnded;
-        await Cts.CancelAsync();
+        PeerEnded -= OnPeerEnded;
         sendChannel?.Writer.TryComplete();
 
-        await socket.DisposeAsync();
+        await StopCoreAsync();
 
         if (sendPump is not null)
             try
@@ -234,7 +197,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
                 message.Dispose();
 
         completion.TrySetResult();
-        Cts.Dispose();
     }
 
     /// <summary>
@@ -242,7 +204,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     /// transport core aggregates complete messages and delivers them here, per
     /// peer and serialized; backpressure is the peer queue's full state.
     /// </summary>
-    private sealed class QueueSurface(ZQueueSocket<TSocket> owner) : IPatternSink
+    private sealed class QueueSurface(ZQueueSocketBase owner) : IPatternSink
     {
         public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
         {
@@ -336,14 +298,6 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
         // teardown (0006 3.5/3.6).
         if (failure is not null && sendChannel is { } outbound && peerSnapshot.Length == 0)
             outbound.Writer.TryComplete(failure);
-
-        Action<IZConnection, Exception?>? handler;
-        lock (StateLock)
-        {
-            handler = peerEnded;
-        }
-
-        handler?.Invoke(connection, failure);
     }
 
     /// <summary>
@@ -417,7 +371,7 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
             await foreach (var message in channel.Reader.ReadAllAsync(token))
                 try
                 {
-                    await socket.SendAsync(message, token);
+                    await SendAsync(message, token);
                 }
                 catch (OperationCanceledException)
                 {

@@ -173,9 +173,12 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     }
 
     /// <summary>
-    /// Registers a per-peer connection callback for the message-sink surface
+    /// Registers a per-peer connection callback for a composed surface
     /// (creates the surface's per-connection state, e.g. the queue surface's
-    /// PeerState); must be called before any connection is established.
+    /// PeerState or SUB's subscription broadcast); must be called before any
+    /// connection is established. Multicast: a socket may compose several
+    /// per-peer callbacks (0023 - the queue surface and SUB's subscription
+    /// propagation both observe new peers).
     /// </summary>
     internal void SetPeerConnectedHandler(Action<IZConnection> handler)
     {
@@ -186,7 +189,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 throw new InvalidOperationException(
                     "peer connected handler must be set before connections are established");
 
-            peerConnected = handler;
+            peerConnected += handler;
         }
     }
 
@@ -211,8 +214,10 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     /// <summary>
     /// Configures receive materialization for the transport core (0007 2.1):
     /// the allocation policy and the connection-level limits (0008 D1) applied
-    /// per connection by a <see cref="ReceiveMaterializer"/>. Must be called
-    /// before any connection is established.
+    /// per connection by a <see cref="ReceiveMaterializer"/>. Composed by the
+    /// queue surface at construction (0023); a callback-only socket keeps the
+    /// null policy and runs the borrowed frame tier. Must be called before any
+    /// connection is established.
     /// </summary>
     internal void SetReceiveMaterialization(
         IZReceivePolicy policy,
@@ -309,10 +314,44 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         return Task.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Stops the socket: cancels the background work, disposes listeners, and
+    /// awaits the connection pumps. The queue surface composes its own teardown
+    /// (reclaiming buffered messages) around this in <see
+    /// cref="ZQueueSocketBase"/>.
+    /// </summary>
+    public virtual async ValueTask DisposeAsync()
     {
         await StopAsync();
         await AwaitBackgroundAsync();
+    }
+
+    private async Task StopAsync()
+    {
+        if (Interlocked.Exchange(ref Closed, 1) != 0) return;
+
+        await StopCoreAsync();
+    }
+
+    /// <summary>
+    /// Disposes listeners and cancels background work; the Closed flag is
+    /// already set when this runs. Subclasses that stop in their own order
+    /// (the queue surface completes and drains its outbound channel before
+    /// stopping the connection pumps) call this from their teardown.
+    /// </summary>
+    protected async Task StopCoreAsync()
+    {
+        await Cts.CancelAsync();
+        List<IZTransport> listenerSnapshot;
+        lock (StateLock)
+        {
+            listenerSnapshot = [.. listeners.Select(entry => entry.Listener)];
+            listeners.Clear();
+        }
+
+        foreach (var listener in listenerSnapshot) listener.Dispose();
+
+        Cts.Dispose();
     }
 
     /// <summary>
@@ -861,23 +900,6 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         }
 
         handler?.Invoke(connection, failure);
-    }
-
-    private async Task StopAsync()
-    {
-        if (Interlocked.Exchange(ref Closed, 1) != 0) return;
-
-        await Cts.CancelAsync();
-        List<IZTransport> listenerSnapshot;
-        lock (StateLock)
-        {
-            listenerSnapshot = [.. listeners.Select(entry => entry.Listener)];
-            listeners.Clear();
-        }
-
-        foreach (var listener in listenerSnapshot) listener.Dispose();
-
-        Cts.Dispose();
     }
 
     /// <summary>

@@ -16,8 +16,9 @@ Revision 2 changes:
 - Splits the transport core from the pattern core. `ZSocketBase` becomes a
   pattern-agnostic transport core; pattern semantics live in per-type internal
   core objects composed with it, and `RouteOutbound` moves out of the base.
-  Public types become thin composition roots (core x surface) instead of the
-  `ZQueueSocket<TSocket>` generic wrapper.
+  Public types become thin composition roots (core x surface); the queue
+  surface is the default surface, owned by `ZQueueSocketBase` (0023), with
+  the callback surface as an explicit opt-out.
 - Simplifies the semantic seam to a single backpressure model: a
   `ValueTask` whose completion continues the peer pump, pending pauses it.
 - Records the async delivery chain as an explicit implementation
@@ -54,12 +55,14 @@ Two further structural problems drive this revision:
   and `SocketTypeName` are abstract members of the base, so every socket type
   is a base subclass. Pattern state machines (REQ alternation, SUB filter,
   ROUTER identity) have no home except subclassing the transport.
-- `ZQueueSocket<TSocket>` makes the delivery surface an inherent property of
-  one public generic type. A channel reader/writer pair is a natural shape for
-  flow-like patterns (PUSH, PULL, SUB inbound, PAIR) but not for
-  operation-oriented patterns (REQ reply return, REP request context, ROUTER
-  routing values). The concrete socket type functionality and the delivery
-  surface must therefore be orthogonal and composable independently.
+- `ZQueueSocket<TSocket>` made the delivery surface an inherent property of
+  one public generic type; it is retired (0023). A channel reader/writer pair
+  is a natural shape for flow-like patterns (PUSH, PULL, SUB inbound, PAIR)
+  but not for operation-oriented patterns (REQ reply return, REP request
+  context, ROUTER routing values). The concrete socket type functionality and
+  the delivery surface must therefore be orthogonal and composable
+  independently: the queue surface is now the default surface of the socket
+  itself (`ZQueueSocketBase`), and the callback surface opts out.
 
 ## 2. Design: three layers and one seam
 
@@ -127,7 +130,7 @@ subclasses. A pattern core owns wire semantics and consumes the wire seam:
   identity addressing.
 
 Per-peer receive state (frame index, accumulated length, message accumulator,
-pattern state) lives in the core, mirroring today's `ZQueueSocket.PeerState`.
+pattern state) lives in the core, mirroring `ZQueueSocketBase.PeerState`.
 
 The pattern core emits complete semantic messages to the semantic seam.
 Pattern receive state that is not part of the message - the ROUTER sender
@@ -171,9 +174,9 @@ Rules of the seam:
    message)` as pattern-typed events (REP `ZRequestContext`, ROUTER routed
    value). Pattern delegates may be asynchronous (`ValueTask`); backpressure is
    their awaited completion.
-3. Channel surface (evolution of `ZQueueSocket<TSocket>`): implements
-   `IPatternSink`, writes per-peer bounded queues (0004), exposes the aggregate
-   reader. Backpressure is the bounded channel's full state (pending
+3. Channel surface (the default, 0023; formerly `ZQueueSocket<TSocket>`):
+   implements `IPatternSink`, writes per-peer bounded queues (0004), exposes the
+   aggregate reader. Backpressure is the bounded channel's full state (pending
    `WriteAsync`), with the existing hysteresis resume.
 4. Operation surface: implements `IPatternSink`, matches replies to pending
    operation tasks. REQ exposes `Task<ZMessage> RequestAsync(ZMessage)`; the
@@ -192,8 +195,8 @@ Three independent axes compose:
 
 Public types are thin composition roots that bind exactly one core and one
 surface (section 5). There is no general `IZSocket.SendAsync` surface contract
-and no `ZQueueSocket<TSocket>` generic wrapper: an instance of a concrete type
-has exactly one set of members, so raw and pattern-wrapped modes are
+and no `ZQueueSocket<TSocket>` generic wrapper (0023): an instance of a concrete
+type has exactly one set of members, so raw and pattern-wrapped modes are
 mutually exclusive by type, not by convention.
 
 ## 3. Message ownership and move rules
@@ -270,23 +273,25 @@ design docs 0010-0014 fix the exact signatures.
 
 | Type | Operation model (0004) | Public surface (implemented) |
 |---|---|---|
-| PAIR | symmetric, single peer | `new ZPairSocket()` / `new ZQueueSocket<ZPairSocket>(new ZPairSocket())` |
+| PAIR | symmetric, single peer | `new ZPairSocket()` → queue surface (`Messages`) by default |
 | PUSH | send-only, round-robin | `new ZPushSocket()` → `SendAsync` only |
-| PULL | receive-only, fair-queue | `new ZQueueSocket<ZPullSocket>(new ZPullSocket())` → channel surface |
+| PULL | receive-only, fair-queue | `new ZPullSocket()` → queue surface (`Messages`) |
 | PUB | send-only, broadcast, topic prefix | `new ZPubSocket()` → `SendAsync(message)` broadcast |
-| SUB | receive-only, topic filter | `new ZSubSocket()` → `Subscribe`/`Unsubscribe` + sink |
-| REQ | strict alternation, single in-flight | `new ZReqSocket()` → `Task<ZMessage> RequestAsync(ZMessage)` |
-| REP | directed reply, strict alternation | `new ZRepSocket()` → `BindRequestHandler` + `SendReplyAsync(context, reply)` |
-| DEALER | asynchronous round-robin / fair-queue | `new ZDealerSocket()` / `new ZQueueSocket<ZDealerSocket>(new ZDealerSocket())` |
-| ROUTER | identity-aware | `new ZRouterSocket()` / `new ZQueueSocket<ZRouterSocket>(new ZRouterSocket())` + `SendAsync(identity, message)` |
-| XPUB | broadcast + subscription observation | `new ZXPubSocket()` + sink |
-| XSUB | manual subscription control | `new ZXSubSocket()` + sink |
+| SUB | receive-only, topic filter | `new ZSubSocket()` → `Subscribe`/`Unsubscribe` + queue surface |
+| REQ | strict alternation, single in-flight | `new ZReqSocket()` → `Task<ZMessage> RequestAsync(ZMessage)` (no queue surface) |
+| REP | directed reply, strict alternation | `new ZRepSocket()` → `BindRequestHandler` + `SendReplyAsync(context, reply)` (no queue surface) |
+| DEALER | asynchronous round-robin / fair-queue | `new ZDealerSocket()` → queue surface (`Messages`) |
+| ROUTER | identity-aware | `new ZRouterSocket()` → queue surface + `SendAsync(identity, message)` |
+| XPUB | broadcast + subscription observation | `new ZXPubSocket()` → queue surface |
+| XSUB | manual subscription control | `new ZXSubSocket()` → queue surface |
 
-Construction is direct (0022): each composition root takes
-`ZSocketOptions?` (defaults to a fresh options bag) and, for the queue
-surface, the channel wrapper takes the already-constructed callback socket
-plus `ZQueueSocketOptions?`. The wrapper binds the selected surface at
-construction. The binding completes before any connection is established.
+Construction is direct (0022, 0023): each composition root takes
+`ZSocketOptions?` (defaults to a fresh options bag) and composes the queue
+surface by default (`ZQueueSocketBase`); `ZReceiveSurface.Callback` opts out
+to the raw `OnFrame` / `BindMessageSink` surface. The binding completes before
+any connection is established. REQ and REP stay on `ZSocketBase` - their
+protocol cores consume inbound messages, so a queue surface would be dead
+configuration.
 
 REQ's `RequestAsync` is the operation surface's view of the core: the core's
 state-machine gate checks single in-flight, `BuildOutbound` adds the empty
@@ -308,7 +313,7 @@ invalid after the reply is sent or the peer ends.
    the same instance. Per-frame receive materialization (the receive policy
    allocator, the 0008 guard counters, and the rejection counter) also lives
    in the transport core's per-connection `ReceiveMaterializer`, configured
-   through `ZQueueSocketOptions`; the guard counters reset at each message
+   through `ZSocketOptions` (0023); the guard counters reset at each message
    boundary.
 2. Make the delivery chain async. Implemented: `IZMessageSink.OnFrameAsync`
    and `ZFrameHandlerAsync` return `ValueTask<bool>`, the parser awaits the
@@ -331,7 +336,8 @@ invalid after the reply is sent or the peer ends.
 4. Evolve `ZQueueSocket<TSocket>` into the channel surface bound to the
    semantic seam instead of `SetFrameSink`; keep per-peer queues, aggregate
    reading, and materialization.
-   Implemented: `ZQueueSocket` binds an internal `QueueSurface`
+   Implemented (and since moved into `ZQueueSocketBase`, 0023): the queue
+   surface binds an internal `QueueSurface`
    (`IPatternSink`) and writes each delivered message to the peer queue;
    aggregation, borrowed-frame pooling, and per-peer serialization live in
    the transport core.

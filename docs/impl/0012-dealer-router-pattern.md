@@ -62,15 +62,14 @@ RFC 23/37 routing-id metadata is a wire prerequisite).
 ## 5. Public shapes
 
 ```csharp
-public sealed class ZRouterSocket : ZSocketBase
+public sealed class ZRouterSocket : ZQueueSocketBase   // queue surface by default (0023)
 {
-    // channel surface wraps it for fair-queue inbound
     public ValueTask SendAsync(byte[] identity, ZMessage message, CancellationToken token);
     public ValueTask SendAsync(byte[] identity, ReadOnlyMemory<byte> bytes, CancellationToken token);
 }
 
-// Inbound: ZQueueSocket<ZRouterSocket> delivers ZMessage; the first frame is
-// the identity, the remainder the payload.
+// Inbound: Messages delivers ZMessage; the first frame is the identity, the
+// remainder the payload.
 ```
 
 DEALER/ROUTER and REQ/REP/DEALER compatibility follow libzmq.

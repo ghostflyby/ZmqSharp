@@ -43,7 +43,7 @@ public sealed class PubSubInteropTests
     public async Task NetMQPub_ZmqSharpSub_FiltersBySubscription()
     {
         var channel = Channel.CreateUnbounded<ZMessage>();
-        await using var sub = new ZSubSocket();
+        await using var sub = new ZSubSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
         sub.Subscribe([.. "news"u8]);
         sub.BindMessageSink(new TestSink(message => channel.Writer.TryWrite(message)));
         var port = InteropHelpers.GetFreePort();

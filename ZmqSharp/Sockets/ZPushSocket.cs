@@ -2,6 +2,6 @@ using ZmqSharp.Patterns;
 
 namespace ZmqSharp;
 
-/// <summary>PUSH composition root: send-only, round-robin outbound (0011).</summary>
+/// <summary>PUSH composition root: send-only, round-robin outbound (0011, 0023).</summary>
 public sealed class ZPushSocket(ZSocketOptions? options = null)
-    : ZSocketBase(options ?? new ZSocketOptions(), new ZRoundRobinDispatch(), ZSocketTypes.Push);
+    : ZQueueSocketBase(options ?? new ZSocketOptions(), new ZRoundRobinDispatch(), ZSocketTypes.Push);

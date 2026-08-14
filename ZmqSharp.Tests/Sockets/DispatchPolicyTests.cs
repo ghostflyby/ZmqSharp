@@ -178,8 +178,8 @@ public sealed class DispatchPolicyTests
         var endpointA = TestTransports.GetEndpoint(kind);
         var endpointB = TestTransports.GetEndpoint(kind);
         await using var sender = new MultiSelectSocket();
-        await using var receiverA = new ZPairSocket();
-        await using var receiverB = new ZPairSocket();
+        await using var receiverA = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
+        await using var receiverB = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var receivedA = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -3,10 +3,10 @@
 Status: draft
 Date: 2026-08-07
 
-Defines the queue model of the high-level socket (`ZQueueSocket<TSocket>`,
-see 0002) and the hard performance constraints the implementation must
-respect. The model follows libzmq: queues live per peer, not per socket;
-socket types are selection policies over the per-peer queues.
+Defines the queue model of the queue surface (`ZQueueSocketBase`, 0002/0023)
+and the hard performance constraints the implementation must respect. The
+model follows libzmq: queues live per peer, not per socket; socket types are
+selection policies over the per-peer queues.
 
 ## 1. Queue Model (per peer)
 

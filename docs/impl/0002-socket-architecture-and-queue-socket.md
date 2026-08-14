@@ -4,8 +4,8 @@ Status: draft
 Date: 2026-08-07
 
 Extends 0001 into the socket layer: a low-level callback primitive
-(`IZCallbackSocket`) and the high-level queue socket
-(`ZQueueSocket<TSocket>`) built on top of it, following the per-peer queue
+(`IZCallbackSocket`) and the queue surface (`ZQueueSocketBase`) that every
+deliverable socket composes by default (0023), following the per-peer queue
 model of 0004. The transport/connection separation matches the current
 implementation.
 
@@ -14,8 +14,7 @@ implementation.
 ```text
 Application
   |
-  +-- ZQueueSocket<TSocket>  high-level main API: takes over the low-level callback
-  |                      at construction; per-peer queues; Channel delivery (0004)
+  +-- ZQueueSocketBase      queue surface (default, 0023): per-peer queues; Channel delivery (0004)
   |
   +-- IZCallbackSocket   low-level primitive: bind/connect, peer management,
   |                      borrowed frame callback, direct send
@@ -67,35 +66,38 @@ public interface IZCallbackSocket : IZSocket
 - Send is direct and synchronous-with-ownership: the socket type's
   `RouteOutbound` selects the target connection(s) and the message is disposed
   after the last peer send.
-- No queues on this interface; queue semantics live in `ZQueueSocket<TSocket>`.
+- No queues on this interface; queue semantics live on the socket itself
+  (`ZQueueSocketBase`, 0023).
 
-## 3. ZQueueSocket (Queue Surface, Main Path)
+## 3. Queue Surface (Default, 0023)
 
 ```csharp
-public sealed class ZQueueSocket<TSocket> : IZSocket
-    where TSocket : ZSocketBase
+public abstract class ZQueueSocketBase : ZSocketBase
 {
     public ChannelReader<IZMessage> Messages { get; }       // aggregate reader over peer queues
     public ChannelWriter<IZMessage>? Outbound { get; }      // optional send channel
-    public ValueTask SendAsync(IZMessage message, CancellationToken token = default);
-    // Bind / Connect / Close forward to the wrapped TSocket.
+    // Send / Bind / Connect / Close from ZSocketBase.
 }
 
-public sealed class ZQueueSocketOptions
+// Options live on ZSocketOptions (one bag per socket, 0023):
+public sealed class ZSocketOptions
 {
+    public ZReceiveSurface ReceiveSurface { get; init; } = ZReceiveSurface.Queue; // Callback opts out
     public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true }; // per-peer queue (0009)
     public ZQueueFactory? SendQueueFactory { get; init; }     // optional outbound (0009)
-    public ZReceiveOptions? ReceivePolicy { get; init; }    // materialization, see 0003
+    public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions(); // materialization, see 0003
 }
 ```
 
-- `ZQueueSocket<TSocket>` wraps a concrete socket type (`ZPairSocket`,
-  `ZDealerSocket`, ...); the generic parameter carries the socket type and the
-  wrapped socket is never exposed. Construction binds the channel surface to
-  the transport core's semantic seam (`IPatternSink`, 0007 section 2.3): the
-  core aggregates complete messages and the surface writes them to the peer
-  queues, so the two tiers are mutually exclusive by construction (a bound
-  seam also rejects raw `OnFrame` subscription).
+- Every concrete socket that can deliver messages derives from
+  `ZQueueSocketBase` and composes the queue surface by default (0023): the
+  retired `ZQueueSocket<TSocket>` wrapper's machinery moved into the base.
+  Construction binds the channel surface to the transport core's semantic seam
+  (`IPatternSink`, 0007 section 2.3): the core aggregates complete messages
+  and the surface writes them to the peer queues, so the two tiers are
+  mutually exclusive by construction (a bound seam also rejects raw `OnFrame`
+  subscription). `ZReceiveSurface.Callback` opts out: no queue is composed and
+  the raw `OnFrame` / `BindMessageSink` surface is the delivery path.
 - Capacity is per peer (each peer gets its own bounded queue with the
   configured HWM), following 0004. `Messages` exposes the socket-level
   aggregated view selected by the socket type (fair-queue, direct, ...).
@@ -168,13 +170,13 @@ As implemented:
 ## 8. Socket Types
 
 ```csharp
-// Queue surface: wrap a callback socket in the channel surface.
-var pair = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
-var dealer = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket());
+// Queue surface is the default (0023): the socket is its own queue surface.
+var pair = new ZPairSocket();
+var dealer = new ZDealerSocket();
 
-// Callback surface: construct the composition root directly.
-ZPairSocket pairCallback = new();
-ZDealerSocket dealerCallback = new();
+// Callback surface: explicit opt-out on the same composition root.
+var pairCallback = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
+var dealerCallback = new ZDealerSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
 ```
 
 Internally every type is a subtype of `ZSocketBase` overriding
@@ -183,11 +185,12 @@ Internally every type is a subtype of `ZSocketBase` overriding
 `Push`, `Pull`, each adding its own outbound selection and inbound
 aggregation (0004 section 1 table).
 
-The queue surface wraps a callback socket in `ZQueueSocket<TSocket>`; the
-callback surface is the composition root itself. Construction is direct
-(0022): set-once configuration lives in `ZSocketOptions` / `ZQueueSocketOptions`
-as `init` properties, and endpoint binding/connection is the only repeatable
-surface (`BindAsync` / `ConnectAsync`, repeatable).
+The queue surface is the default receive surface of the socket itself
+(`ZQueueSocketBase`, 0023); the callback surface is an explicit opt-out on
+the same composition root. Construction is direct (0022, 0023): set-once
+configuration lives in `ZSocketOptions` as `init` properties, and endpoint
+binding/connection is the only repeatable surface
+(`BindAsync` / `ConnectAsync`, repeatable).
 
 ## 9. Decisions
 
@@ -195,15 +198,15 @@ surface (`BindAsync` / `ConnectAsync`, repeatable).
 |---|----------|-----------|
 | D9 | `IZSocket` is the small common contract (endpoints + send); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
 | D10 | Generic transport factory (`IZTransport<TSelf, TEndpoint>`) is the core | Transports plug in with typed endpoints and compile-time selection |
-| D11 | `ZQueueSocket<TSocket>` is the high-level main API; it takes over the callback at construction | Matches 0001 D7/D8; two tiers are mutually exclusive by construction |
+| D11 | The queue surface is the default receive surface, owned by `ZQueueSocketBase` (0023); the callback surface is an explicit opt-out | Matches 0001 D7/D8; the two tiers are mutually exclusive by construction |
 | D12 | Queue capacity is per peer (HWM per peer) | Matches libzmq; per-peer backpressure isolation (0004) |
-| D13 | Connection sessions are internal; direct send is the low-level send path | Keeps the primitive small; queue semantics stay in the wrapper |
+| D13 | Connection sessions are internal; direct send is the low-level send path | Keeps the primitive small; queue semantics live in the base |
 | D14 | String endpoints are a facade over the generic core | User-facing convenience without replacing the generic factory |
 
 ## 10. Test Plan
 
 - TCP loopback round-trip through `IZCallbackSocket.OnFrame` (borrowed, multipart
-  streamed) and through `ZQueueSocket<TSocket>.Messages` (assembled).
+  streamed) and through `Messages` on the default queue surface (assembled).
 - Per-peer isolation: one slow peer must not pause another peer's receive
   queue.
 - Channel backpressure: full -> pause that peer -> resume with hysteresis;

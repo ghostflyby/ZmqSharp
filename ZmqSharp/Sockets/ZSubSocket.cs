@@ -14,7 +14,7 @@ namespace ZmqSharp;
 /// subscription set lives in a <see cref="ZTopicFilter"/>; SUB composes a
 /// filter inbound policy, XSUB composes pass-through.
 /// </summary>
-public class ZSubSocket : ZSocketBase
+public class ZSubSocket : ZQueueSocketBase
 {
     private readonly ZTopicFilter filter;
 
