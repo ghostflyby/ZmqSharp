@@ -20,10 +20,12 @@ public sealed class CurveEndToEndTests
     public async Task CurveClient_AndServer_AuthenticateAndExchangeMessages()
     {
         var crypto = new BouncyCastleCurveCrypto();
-        var serverKeys = crypto.GenerateKeyPair();
-        var clientKeys = crypto.GenerateKeyPair();
+        crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
+        crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
+        var serverKeys = (Public: serverPublic, Secret: serverSecret);
+        var clientKeys = (Public: clientPublic, Secret: clientSecret);
 
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys) } }), new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys.Secret) } }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
@@ -32,7 +34,7 @@ public sealed class CurveEndToEndTests
         {
             Security = new ZSecurityOptions
             {
-                Mechanism = new CurveMechanism(crypto, clientKeys, serverKeys.PublicKey)
+                Mechanism = new CurveMechanism(crypto, clientKeys.Secret, serverKeys.Public)
             }
         }), new ZQueueSocketOptions
         {
@@ -69,21 +71,22 @@ public sealed class CurveEndToEndTests
     public async Task CurveClient_WithWrongServerKey_FailsHandshake()
     {
         var crypto = new BouncyCastleCurveCrypto();
-        var serverKeys = crypto.GenerateKeyPair();
-        var clientKeys = crypto.GenerateKeyPair();
-        var wrongServerKeys = crypto.GenerateKeyPair();
+        crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
+        crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
+        crypto.GenerateKeyPair(out var wrongPublic, out _);
 
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys) } }), new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverSecret) } }), new ZQueueSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
+
         await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
             {
                 // The client holds a different server public key: the WELCOME
                 // box never opens, and establishment must fault.
-                Mechanism = new CurveMechanism(crypto, clientKeys, wrongServerKeys.PublicKey)
+                Mechanism = new CurveMechanism(crypto, clientSecret, wrongPublic)
             }
         }), new ZQueueSocketOptions
         {
