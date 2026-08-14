@@ -43,8 +43,8 @@ and subscription propagation to publishers.
 ## 4. Public shapes
 
 ```csharp
-ZSocket.CreatePub(ZSocketOptions?)            -> ZPubSocket   // SendAsync broadcast
-ZSocket.CreateSubCallback(ZSocketOptions?)    -> ZSubSocket   // Subscribe/Unsubscribe + BindMessageSink
+new ZPubSocket(ZSocketOptions?)    -> ZPubSocket   // SendAsync broadcast
+new ZSubSocket(ZSocketOptions?)    -> ZSubSocket   // Subscribe/Unsubscribe + BindMessageSink
 ```
 
 ## 5. Interop acceptance

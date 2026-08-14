@@ -18,8 +18,8 @@ public class ZSubSocket : ZSocketBase
 {
     private readonly ZTopicFilter filter;
 
-    public ZSubSocket(ZSocketOptions options)
-        : this(options, ZSocketTypes.Sub, new ZTopicFilter(), true)
+    public ZSubSocket(ZSocketOptions? options = null)
+        : this(options ?? new ZSocketOptions(), ZSocketTypes.Sub, new ZTopicFilter(), true)
     {
     }
 

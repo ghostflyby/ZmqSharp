@@ -39,7 +39,7 @@ public class ReceiveAllocationTests
     public async Task Receive_SteadyState_PerMessageCostIsBoundedOnPumpThread()
     {
         var sink = new MeasuringSink(MessageCount);
-        await using var socket = ZSocket.CreatePairCallback();
+        await using var socket = new ZPairSocket();
         socket.BindMessageSink(sink);
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
             new IPEndPoint(IPAddress.Loopback, 0));
@@ -84,7 +84,7 @@ public class ReceiveAllocationTests
     {
         using var pool = new CountingRentPool();
         var sink = new MeasuringSink(MessageCount);
-        await using var socket = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
+        await using var socket = new ZPairSocket(new ZSocketOptions { Pool = pool });
         socket.BindMessageSink(sink);
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
             new IPEndPoint(IPAddress.Loopback, 0));
@@ -104,7 +104,7 @@ public class ReceiveAllocationTests
     public async Task Receive_FirstDelivery_AllocatesThenSteadies()
     {
         var sink = new MeasuringSink(WarmupCount);
-        await using var socket = ZSocket.CreatePairCallback();
+        await using var socket = new ZPairSocket();
         socket.BindMessageSink(sink);
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
             new IPEndPoint(IPAddress.Loopback, 0));
@@ -123,7 +123,7 @@ public class ReceiveAllocationTests
     public async Task Receive_MultiFrameMessage_PerMessageCostIsBoundedOnPumpThread()
     {
         var sink = new MeasuringSink(MessageCount);
-        await using var socket = ZSocket.CreatePairCallback();
+        await using var socket = new ZPairSocket();
         socket.BindMessageSink(sink);
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
             new IPEndPoint(IPAddress.Loopback, 0));

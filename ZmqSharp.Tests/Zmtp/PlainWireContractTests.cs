@@ -30,10 +30,9 @@ public sealed class PlainWireContractTests
     public async Task ClientHello_WireBytes_MatchRfc27()
     {
         // Our PLAIN client vs. a scripted libzmq-style PLAIN server.
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "s3cret"u8) } }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "s3cret"u8) }
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var port = GetFreePort();
@@ -79,14 +78,16 @@ public sealed class PlainWireContractTests
     public async Task ServerWelcomeAndReady_WireBytes_MatchRfc27()
     {
         // Our PLAIN server vs. a scripted libzmq-style PLAIN client.
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             Security = new ZSecurityOptions
             {
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("s3cret"u8))
             }
+        }), new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var port = GetFreePort();
@@ -129,14 +130,16 @@ public sealed class PlainWireContractTests
     {
         // Rejected credentials: the server answers with libzmq's exact ERROR
         // bytes and tears the connection down - no WELCOME follows.
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             Security = new ZSecurityOptions
             {
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("s3cret"u8))
             }
+        }), new ZQueueSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var port = GetFreePort();

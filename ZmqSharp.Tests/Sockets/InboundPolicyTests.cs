@@ -75,7 +75,7 @@ public sealed class InboundPolicyTests
         // The socket reuses the PAIR identity, so a built-in pair connects.
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var server = new CustomTransformSocket();
-        await using var client = ZSocket.CreatePairCallback();
+        await using var client = new ZPairSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -104,7 +104,7 @@ public sealed class InboundPolicyTests
         var endpoint = TestTransports.GetEndpoint(kind);
         var inbound = new ConsumeInbound();
         await using var server = new ConsumeSocket(inbound);
-        await using var client = ZSocket.CreatePairCallback();
+        await using var client = new ZPairSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await server.BindAsync(endpoint, cts.Token);
@@ -121,7 +121,7 @@ public sealed class InboundPolicyTests
         // A non-default inbound policy consumes the aggregated delivery
         // stream, so the raw frame surface must fail loudly instead of
         // silently delivering nothing (subagent review finding).
-        await using var router = ZSocket.CreateRouterCallback();
+        await using var router = new ZRouterSocket();
         var act = () => router.OnFrame += (_, _) => true;
 
         act.Should().Throw<InvalidOperationException>()
@@ -131,7 +131,7 @@ public sealed class InboundPolicyTests
     [Fact]
     public async Task OnFrame_OnPassThroughSocket_Subscribes()
     {
-        await using var pair = ZSocket.CreatePairCallback();
+        await using var pair = new ZPairSocket();
         var subscribed = false;
         pair.OnFrame += (_, _) =>
         {

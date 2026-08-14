@@ -51,7 +51,7 @@ public sealed class CustomSocketTypeTests
         // does not match either predicate, so establishment fails with the
         // protocol rejection (RFC 23 ERROR + ZeroMqProtocolException).
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var server = ZSocket.CreatePairCallback();
+        await using var server = new ZPairSocket();
         await using var client = new CustomTypeSocket(CustomName);
 
         await server.BindAsync(endpoint);

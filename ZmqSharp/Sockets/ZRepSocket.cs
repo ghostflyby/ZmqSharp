@@ -16,8 +16,8 @@ public sealed class ZRepSocket : ZSocketBase
     private readonly ZRepCore core;
     private Func<ZRequestContext, CancellationToken, ValueTask>? requestHandler;
 
-    public ZRepSocket(ZSocketOptions options)
-        : this(options, new ZRepCore())
+    public ZRepSocket(ZSocketOptions? options = null)
+        : this(options ?? new ZSocketOptions(), new ZRepCore())
     {
     }
 

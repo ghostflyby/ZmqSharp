@@ -270,23 +270,23 @@ design docs 0010-0014 fix the exact signatures.
 
 | Type | Operation model (0004) | Public surface (implemented) |
 |---|---|---|
-| PAIR | symmetric, single peer | `CreatePair` (channel) / `CreatePairCallback` |
-| PUSH | send-only, round-robin | `CreatePush` → `SendAsync` only |
-| PULL | receive-only, fair-queue | `CreatePull` → channel surface |
-| PUB | send-only, broadcast, topic prefix | `CreatePub` → `SendAsync(message)` broadcast |
-| SUB | receive-only, topic filter | `CreateSubCallback` → `Subscribe`/`Unsubscribe` + sink |
-| REQ | strict alternation, single in-flight | `CreateReq` → `Task<ZMessage> RequestAsync(ZMessage)` |
-| REP | directed reply, strict alternation | `CreateRep` → `BindRequestHandler` + `SendReplyAsync(context, reply)` |
-| DEALER | asynchronous round-robin / fair-queue | `CreateDealer` (channel) / `CreateDealerCallback` |
-| ROUTER | identity-aware | `CreateRouter` (channel) / `CreateRouterCallback` + `SendAsync(identity, message)` |
-| XPUB | broadcast + subscription observation | `CreateXPub` + sink |
-| XSUB | manual subscription control | `CreateXSubCallback` + sink |
+| PAIR | symmetric, single peer | `new ZPairSocket()` / `new ZQueueSocket<ZPairSocket>(new ZPairSocket())` |
+| PUSH | send-only, round-robin | `new ZPushSocket()` → `SendAsync` only |
+| PULL | receive-only, fair-queue | `new ZQueueSocket<ZPullSocket>(new ZPullSocket())` → channel surface |
+| PUB | send-only, broadcast, topic prefix | `new ZPubSocket()` → `SendAsync(message)` broadcast |
+| SUB | receive-only, topic filter | `new ZSubSocket()` → `Subscribe`/`Unsubscribe` + sink |
+| REQ | strict alternation, single in-flight | `new ZReqSocket()` → `Task<ZMessage> RequestAsync(ZMessage)` |
+| REP | directed reply, strict alternation | `new ZRepSocket()` → `BindRequestHandler` + `SendReplyAsync(context, reply)` |
+| DEALER | asynchronous round-robin / fair-queue | `new ZDealerSocket()` / `new ZQueueSocket<ZDealerSocket>(new ZDealerSocket())` |
+| ROUTER | identity-aware | `new ZRouterSocket()` / `new ZQueueSocket<ZRouterSocket>(new ZRouterSocket())` + `SendAsync(identity, message)` |
+| XPUB | broadcast + subscription observation | `new ZXPubSocket()` + sink |
+| XSUB | manual subscription control | `new ZXSubSocket()` + sink |
 
-The factory (`ZSocket.Create*`) selects the surface: `CreatePair` /
-`CreatePairCallback`, and the analogous split per pattern as the surface set
-lands. Each factory constructs the transport core, composes the pattern core,
-binds the selected surface, and returns the concrete composition root. The
-binding completes before any connection is established.
+Construction is direct (0022): each composition root takes
+`ZSocketOptions?` (defaults to a fresh options bag) and, for the queue
+surface, the channel wrapper takes the already-constructed callback socket
+plus `ZQueueSocketOptions?`. The wrapper binds the selected surface at
+construction. The binding completes before any connection is established.
 
 REQ's `RequestAsync` is the operation surface's view of the core: the core's
 state-machine gate checks single in-flight, `BuildOutbound` adds the empty
@@ -342,10 +342,12 @@ invalid after the reply is sent or the peer ends.
    surface), `ZRequestContext`, and the directed-send primitive
    (`ZSocketBase.SendToAsync`).
 6. Directed send lands with REP; the REQ operation surface lands with REQ;
-   factory methods are extended alongside each pattern.
+   surface entry points are added alongside each pattern.
    Implemented with 0010: `ZSocketBase.SendToAsync` (directed send), REQ
-   operation surface, REP typed callback, and `ZSocket.CreateReq` /
-   `CreateRep`.
+   operation surface (`ZReqSocket.RequestAsync`), REP typed callback
+   (`ZRepSocket.BindRequestHandler` / `SendReplyAsync`). The static factory
+   is retired with 0022: sockets are constructed directly, so each pattern
+   adds a composition root rather than a factory method.
 
 Each pattern receives its own numbered design document before implementation
 (0006 section 6). This document fixes the shared architecture; pattern
@@ -360,8 +362,8 @@ documents fix exact signatures.
 - Typed callback semantics: handler exceptions, serialization guarantees, and
   whether awaiting the handler pauses the peer pump for the whole pattern
   (natural for strict-alternation REP, unnecessary for flow surfaces).
-- Whether the raw `OnFrame` surface remains a public factory path or moves to
-  an explicitly advanced entry point.
+- Whether the raw `OnFrame` surface remains a public entry point or moves to
+  an explicitly advanced one.
 - REQ multi-peer semantics: round-robin outbound plus strict alternation
   matches libzmq; out-of-order replies across several REP peers are not
   correlated (concurrent correlation is DEALER/ROUTER territory) and must be

@@ -24,7 +24,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -52,7 +52,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -80,7 +80,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -122,7 +122,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
@@ -151,7 +151,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var socket = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });

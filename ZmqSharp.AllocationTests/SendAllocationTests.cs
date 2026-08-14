@@ -17,7 +17,7 @@ public class SendAllocationTests
     [Fact]
     public async Task Send_SteadyState_IsAllocationFreePerMessage()
     {
-        await using var socket = ZSocket.CreatePairCallback();
+        await using var socket = new ZPairSocket();
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
             new IPEndPoint(IPAddress.Loopback, 0));
 

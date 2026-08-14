@@ -17,8 +17,8 @@ public sealed class ZRouterSocket : ZSocketBase
 {
     private readonly ZIdentityDispatch dispatch;
 
-    public ZRouterSocket(ZSocketOptions options)
-        : this(options, new ZIdentityDispatch())
+    public ZRouterSocket(ZSocketOptions? options = null)
+        : this(options ?? new ZSocketOptions(), new ZIdentityDispatch())
     {
     }
 

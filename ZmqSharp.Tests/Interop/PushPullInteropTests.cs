@@ -24,7 +24,7 @@ public sealed class PushPullInteropTests
         var port = InteropHelpers.GetFreePort();
         pull.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var push = ZSocket.CreatePush();
+        await using var push = new ZPushSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await push.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -39,7 +39,7 @@ public sealed class PushPullInteropTests
     [Fact]
     public async Task NetMQPush_ZmqSharpPull_Delivers()
     {
-        await using var pull = ZSocket.CreatePull(new ZQueueSocketOptions
+        await using var pull = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -72,7 +72,7 @@ public sealed class PushPullInteropTests
         pullA.Bind($"tcp://127.0.0.1:{portA}");
         pullB.Bind($"tcp://127.0.0.1:{portB}");
 
-        await using var push = ZSocket.CreatePush();
+        await using var push = new ZPushSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await push.ConnectAsync($"tcp://127.0.0.1:{portA}", cts.Token);
         await push.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
@@ -110,7 +110,7 @@ public sealed class PushPullInteropTests
     [Fact]
     public async Task Pull_SendThrows()
     {
-        await using var pull = ZSocket.CreatePull(new ZQueueSocketOptions
+        await using var pull = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });

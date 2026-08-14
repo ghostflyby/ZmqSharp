@@ -16,8 +16,8 @@ namespace ZmqSharp;
 // ReSharper disable once InconsistentNaming
 public sealed class ZXPubSocket : ZPubSocket
 {
-    public ZXPubSocket(ZSocketOptions options)
-        : base(options, ZSocketTypes.XPub, new XPubInbound())
+    public ZXPubSocket(ZSocketOptions? options = null)
+        : base(options ?? new ZSocketOptions(), ZSocketTypes.XPub, new XPubInbound())
     {
         ((XPubInbound)InboundPolicy).Attach(this);
     }

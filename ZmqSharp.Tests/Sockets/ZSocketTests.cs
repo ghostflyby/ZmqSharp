@@ -18,10 +18,8 @@ public sealed class ZSocketTests
     public async Task PairSocket_RoundTripsMultipartOverTcp(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await server.BindAsync(endpoint, cts.Token);
@@ -61,12 +59,9 @@ public sealed class ZSocketTests
     {
         var endpointA = TestTransports.GetEndpoint(kind);
         var endpointB = TestTransports.GetEndpoint(kind);
-        await using var serverA = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var serverB = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var dealer = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var serverA = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var serverB = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var dealer = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await serverA.BindAsync(endpointA, cts.Token);
@@ -122,12 +117,9 @@ public sealed class ZSocketTests
     {
         var endpointA = TestTransports.GetEndpoint(kind);
         var endpointB = TestTransports.GetEndpoint(kind);
-        await using var serverA = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var serverB = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var dealer = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var serverA = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var serverB = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var dealer = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await serverA.BindAsync(endpointA, cts.Token);
@@ -165,7 +157,7 @@ public sealed class ZSocketTests
     public async Task SendAsync_DisposesMessageAfterRouting()
     {
         using var pool = new CountingMemoryPool();
-        await using var socket = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
+        await using var socket = new ZPairSocket(new ZSocketOptions { Pool = pool });
         var message = MessageFactory.PooledSingleFrame(pool, [.. "hello"u8]);
 
         await socket.SendAsync(message);
@@ -178,14 +170,12 @@ public sealed class ZSocketTests
     public async Task ReceivePolicy_DecideOwned_NeverTouchesPool(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(_ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned })
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -213,16 +203,14 @@ public sealed class ZSocketTests
     public async Task ReceivePolicy_DecidePerFrame_SplitsModesWithinMessage(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(ctx => ctx.FrameIndex == 0
                 ? new ZReceiveAllocation { Mode = ZReceiveMode.Pooled }
                 : new ZReceiveAllocation { Mode = ZReceiveMode.Owned })
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -252,13 +240,12 @@ public sealed class ZSocketTests
         var payload = new byte[9000];
         for (var i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 251);
 
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             ReceivePolicy = new ZReceiveOptions { ContiguousFrameLimit = 100 }
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -290,13 +277,12 @@ public sealed class ZSocketTests
             second[i] = (byte)((i + 7) % 251);
         }
 
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             ReceivePolicy = new ZReceiveOptions { ContiguousFrameLimit = 100 }
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -338,16 +324,14 @@ public sealed class ZSocketTests
     public async Task ReceivePolicy_DecideByFrameLength_MixesModes(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
-            Pool = pool,
             ReceivePolicy = new ZDelegateReceivePolicy(ctx => ctx.FrameLength > 100
                 ? new ZReceiveAllocation { Mode = ZReceiveMode.Owned }
                 : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -386,17 +370,15 @@ public sealed class ZSocketTests
     public async Task ReceivePolicy_DefaultModeOwned_NeverTouchesPool(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Pool = pool,
             ReceivePolicy = new ZReceiveOptions
             {
                 Mode = ZReceiveMode.Owned
             }
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -421,8 +403,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task Close_CompletesReceiveChannel()
     {
-        var socket = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         await socket.DisposeAsync();
         socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
@@ -432,8 +413,7 @@ public sealed class ZSocketTests
     {
         var port = GetFreePort();
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
@@ -458,7 +438,7 @@ public sealed class ZSocketTests
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
 
-        await using var client = ZSocket.CreatePairCallback(new ZSocketOptions { HandshakeTimeoutMs = 200 });
+        await using var client = new ZPairSocket(new ZSocketOptions { HandshakeTimeoutMs = 200 });
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
 
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -475,7 +455,7 @@ public sealed class ZSocketTests
     {
         // The inbound surface caps concurrent incomplete handshakes; a second
         // slow-connecting peer is dropped with cancellation (0006 3.2).
-        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { MaxIncompleteHandshakes = 1 });
+        await using var server = new ZPairSocket(new ZSocketOptions { MaxIncompleteHandshakes = 1 });
         var port = GetFreePort();
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
@@ -501,7 +481,7 @@ public sealed class ZSocketTests
     public async Task LegacyZmtp2_Greeting_RejectedWithClearError()
     {
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePairCallback();
+        await using var server = new ZPairSocket();
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();
         await server.BindAsync($"tcp://127.0.0.1:{port}");
@@ -525,7 +505,7 @@ public sealed class ZSocketTests
     public async Task OversizedCommand_WithSmallMaxCommandSize_RejectsPeer()
     {
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { MaxCommandSize = 256 });
+        await using var server = new ZPairSocket(new ZSocketOptions { MaxCommandSize = 256 });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();
         await server.BindAsync($"tcp://127.0.0.1:{port}");
@@ -559,11 +539,10 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
+        await using var server = new ZPairSocket(new ZSocketOptions { Pool = pool });
         var sink = new TestMessageSink(message => received.TrySetResult(message));
         server.BindMessageSink(sink);
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -594,12 +573,12 @@ public sealed class ZSocketTests
         // many small messages under a tight MaxMessageLength must not
         // accumulate a total across messages and falsely reject (the counters
         // live in the transport core's per-peer materializer).
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
             MaxMessageLength = 10
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -632,7 +611,7 @@ public sealed class ZSocketTests
     {
         // The raw frame surface and the message sink are mutually exclusive
         // (0007 section 1): exactly one consumer of the delivery stream.
-        var socket = ZSocket.CreatePairCallback();
+        var socket = new ZPairSocket();
         socket.BindMessageSink(new TestMessageSink(_ => { }));
         var act = () => socket.OnFrame += (_, _) => true;
         act.Should().Throw<InvalidOperationException>();
@@ -644,9 +623,8 @@ public sealed class ZSocketTests
     public async Task ConcurrentSends_DoNotInterleaveMultipartFrames(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions());
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(64) { SingleWriter = true } });
+        await using var server = new ZPairSocket();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(64) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await server.BindAsync(endpoint, cts.Token);
@@ -692,7 +670,7 @@ public sealed class ZSocketTests
     {
         var port = GetFreePort();
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePairCallback(new ZSocketOptions());
+        await using var server = new ZPairSocket();
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await server.BindAsync($"tcp://127.0.0.1:{port}");
 
@@ -719,10 +697,8 @@ public sealed class ZSocketTests
         for (var attempt = 0; attempt < 40; attempt++)
         {
             var endpoint = TestTransports.GetEndpoint(kind);
-            await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
-            { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-            await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-            { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+            await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+            await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await server.BindAsync(endpoint, cts.Token);
             await client.ConnectAsync(endpoint, cts.Token);
@@ -753,7 +729,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -780,7 +756,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -799,7 +775,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -839,7 +815,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -857,7 +833,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
         using var cts = new CancellationTokenSource();
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
@@ -875,7 +851,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -909,7 +885,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreateDealer();
+        await using var client = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -927,7 +903,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreateDealer();
+        await using var client = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -942,7 +918,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task ConnectAsync_SynchronousHandshakeFailure_LeavesNoRoutablePeer()
     {
-        await using var client = ZSocket.CreatePairCallback();
+        await using var client = new ZPairSocket();
 
         var act = () => client.ConnectAsync<EndPoint, SynchronousEofTransport>(
             new IPEndPoint(IPAddress.Loopback, 1));
@@ -957,7 +933,7 @@ public sealed class ZSocketTests
     public async Task CallbackException_StillRaisesPeerEndedAndReclaimsPool()
     {
         using var pool = new CountingMemoryPool();
-        var server = ZSocket.CreatePairCallback(new ZSocketOptions { Pool = pool });
+        var server = new ZPairSocket(new ZSocketOptions { Pool = pool });
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();
@@ -983,15 +959,13 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Pool = pool,
             MaxFrameLength = 4
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1015,15 +989,13 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Pool = pool,
             MaxMessageLength = 10
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1045,13 +1017,12 @@ public sealed class ZSocketTests
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task RejectedPeer_IsNotRoutable_NoFurtherMessages(TransportKind kind)
     {
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             MaxFrameLength = 4
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1087,13 +1058,12 @@ public sealed class ZSocketTests
     public async Task RejectedPeer_EndsWithClose_NotWithPeerError(TransportKind kind)
     {
         var clientEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             MaxFrameLength = 4
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         client.PeerEnded += (_, failure) => clientEnded.TrySetResult(failure);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -1116,14 +1086,12 @@ public sealed class ZSocketTests
     public async Task OverLimitFrame_DoesNotRentFromPool(TransportKind kind)
     {
         using var pool = new ProbingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
-            Pool = pool,
             MaxFrameLength = 4
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1154,15 +1122,14 @@ public sealed class ZSocketTests
         // socket-level limits: they are enforced by the connection guard
         // before Decide is called.
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
             MaxFrameLength = 4,
             ReceivePolicy = new ZDelegateReceivePolicy(_ => new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1183,10 +1150,8 @@ public sealed class ZSocketTests
     {
         // With a capacity of 2 and no consumer, the per-peer pump blocks on
         // WriteAsync; the messages are not dropped and all arrive once read.
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1215,12 +1180,9 @@ public sealed class ZSocketTests
     {
         var endpointA = TestTransports.GetEndpoint(kind);
         var endpointB = TestTransports.GetEndpoint(kind);
-        await using var serverA = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        await using var serverB = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        await using var dealer = ZSocket.CreateDealer(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
+        await using var serverA = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var serverB = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var dealer = new ZQueueSocket<ZDealerSocket>(new ZDealerSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await serverA.BindAsync(endpointA, cts.Token);
@@ -1263,13 +1225,11 @@ public sealed class ZSocketTests
     public async Task DropWriteMode_KeepsFirstMessages_AndReturnsPoolOnDispose(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropWrite },
-            Pool = pool
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1303,13 +1263,11 @@ public sealed class ZSocketTests
     public async Task DropNewestMode_KeepsOldestAndIncoming(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropNewest },
-            Pool = pool
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1342,13 +1300,11 @@ public sealed class ZSocketTests
     public async Task DropOldestMode_KeepsNewestMessages(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropOldest },
-            Pool = pool
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1379,14 +1335,12 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropWrite },
-            Pool = pool
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1415,13 +1369,11 @@ public sealed class ZSocketTests
     public async Task SocketDispose_WithUnreadBufferedMessages_ReturnsPool(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true },
-            Pool = pool
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1446,10 +1398,9 @@ public sealed class ZSocketTests
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
 
-        var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             SendQueueFactory = new BoundedChannelOptions(2) { SingleWriter = false },
-            Pool = pool
         });
 
         // The raw peer never answers READY, so the send pump blocks on the
@@ -1487,10 +1438,9 @@ public sealed class ZSocketTests
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
 
-        var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             SendQueueFactory = new BoundedChannelOptions(2) { FullMode = mode, SingleWriter = false },
-            Pool = pool
         });
 
         // The raw peer never answers READY, so the send pump dequeues the
@@ -1534,10 +1484,9 @@ public sealed class ZSocketTests
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
 
-        var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             SendQueueFactory = new BoundedChannelOptions(2) { SingleWriter = false },
-            Pool = pool
         });
 
         // The peer completes the handshake as a DEALER, which is incompatible
@@ -1600,7 +1549,7 @@ public sealed class ZSocketTests
         // The send hot path must not allocate per message: a copy-on-write
         // snapshot read (0006 3.6), a span-based single-target route, the
         // established gate fast path, and a no-op fake write.
-        await using var socket = ZSocket.CreatePairCallback();
+        await using var socket = new ZPairSocket();
         await socket.ConnectAsync<EndPoint, EstablishedFakeTransport>(
             new IPEndPoint(IPAddress.Loopback, 0));
 
@@ -1645,12 +1594,11 @@ public sealed class ZSocketTests
         // are sampled inside the pump in ZmqSharp.AllocationTests, because a
         // counter read on this test thread never sees that thread.
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(1024) { SingleWriter = true },
-            Pool = pool
         });
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(1024) { SingleWriter = true }
         });
@@ -1693,10 +1641,9 @@ public sealed class ZSocketTests
         // ipc concurrency coverage is provided by ZSocketIpcTests and the
         // parameterized concurrent-send suites.
         using var pool = new CountingMemoryPool();
-        await using var server = ZSocket.CreatePair(new ZQueueSocketOptions
+        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Pool = pool }), new ZQueueSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
-            Pool = pool
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var port = GetFreePort();
@@ -1740,7 +1687,7 @@ public sealed class ZSocketTests
         // retires it out of the routing snapshot.
         for (var round = 0; round < 4; round++)
         {
-            await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
+            await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
             {
                 ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true }
             });
@@ -1776,7 +1723,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1796,7 +1743,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair();
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket());
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1819,8 +1766,7 @@ public sealed class ZSocketTests
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         var acceptTask = listener.AcceptTcpClientAsync();
-        await using var client = ZSocket.CreatePair(new ZQueueSocketOptions
-        { Security = new ZSecurityOptions { Mechanism = new TestPingPongMechanism() } });
+        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new TestPingPongMechanism() } }));
 
         var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
         using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));

@@ -92,8 +92,15 @@ public sealed class ZQueueSocket<TSocket> : ZAsyncState, IZSocket
     private Action<IZConnection, Exception?>? peerEnded;
     private TaskCompletionSource wakeGate = CreateGate();
 
-    internal ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
-        : base(options?.Pool ?? MemoryPool<byte>.Shared)
+    /// <summary>
+    /// Wraps an already-constructed callback socket: binds the channel surface,
+    /// configures receive materialization, and takes over per-peer frame
+    /// delivery at construction. The wrapped socket is never exposed after
+    /// this point. Socket-level configuration (pool, security, handshake
+    /// limits) is set on the inner socket's <see cref="ZSocketOptions"/>.
+    /// </summary>
+    public ZQueueSocket(TSocket socket, ZQueueSocketOptions? options = null)
+        : base(MemoryPool<byte>.Shared)
     {
         ArgumentNullException.ThrowIfNull(socket);
         this.socket = socket;

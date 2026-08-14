@@ -24,7 +24,7 @@ public sealed class ReqRepInteropTests
         var port = InteropHelpers.GetFreePort();
         rep.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var req = ZSocket.CreateReq();
+        await using var req = new ZReqSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await req.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -50,7 +50,7 @@ public sealed class ReqRepInteropTests
     [Fact]
     public async Task NetMQReq_ZmqSharpRep_RoundTrips()
     {
-        await using var rep = ZSocket.CreateRep();
+        await using var rep = new ZRepSocket();
         var port = InteropHelpers.GetFreePort();
         await rep.BindAsync($"tcp://127.0.0.1:{port}");
         rep.BindRequestHandler((context, token) =>
@@ -83,7 +83,7 @@ public sealed class ReqRepInteropTests
         var port = InteropHelpers.GetFreePort();
         dealer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var pair = ZSocket.CreatePairCallback();
+        await using var pair = new ZPairSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         // PAIR <-> DEALER is incompatible: establishment must fail. The

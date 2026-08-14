@@ -22,7 +22,7 @@ public sealed class ZSocketIpcTests
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Bind_UnlinksPath_OnSocketDispose(string path)
     {
-        var socket = ZSocket.CreatePairCallback();
+        var socket = new ZPairSocket();
         await socket.BindAsync($"ipc://{path}");
 
         File.Exists(path).Should().BeTrue("binding an ipc endpoint creates the filesystem entry");
@@ -35,14 +35,14 @@ public sealed class ZSocketIpcTests
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Bind_AfterDispose_SamePathSucceeds(string path)
     {
-        await using (var first = ZSocket.CreatePairCallback())
+        await using (var first = new ZPairSocket())
         {
             await first.BindAsync($"ipc://{path}");
         }
 
         // The unlink on dispose freed the path, so a later bind of the same
         // path must succeed instead of failing with EADDRINUSE.
-        await using var second = ZSocket.CreatePairCallback();
+        await using var second = new ZPairSocket();
         await FluentActions.Awaiting(() => second.BindAsync($"ipc://{path}")).Should().NotThrowAsync();
     }
 
@@ -50,7 +50,7 @@ public sealed class ZSocketIpcTests
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Connect_MissingPath_ThrowsCleanly(string path)
     {
-        await using var client = ZSocket.CreatePairCallback();
+        await using var client = new ZPairSocket();
 
         var failure = await Record.ExceptionAsync(
             () => client.ConnectAsync($"ipc://{path}").WaitAsync(TimeSpan.FromSeconds(5)));
@@ -65,7 +65,7 @@ public sealed class ZSocketIpcTests
         // host slot; it must resolve against the system temp directory instead
         // of the filesystem root (0020 section 3).
         var name = $"zmqsharp-rel-{Guid.NewGuid().ToString("N")[..8]}.sock";
-        var socket = ZSocket.CreatePairCallback();
+        var socket = new ZPairSocket();
         await socket.BindAsync($"ipc://{name}");
         try
         {
@@ -84,11 +84,11 @@ public sealed class ZSocketIpcTests
     {
         var endpointA = $"ipc://{pathA}";
         var endpointB = $"ipc://{TestTransports.IpcSocketPath("zmqsharp-test-")}";
-        await using var pullA = ZSocket.CreatePull(new ZQueueSocketOptions
+        await using var pullA = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
         { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var pullB = ZSocket.CreatePull(new ZQueueSocketOptions
+        await using var pullB = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
         { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var push = ZSocket.CreatePush();
+        await using var push = new ZPushSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await pullA.BindAsync(endpointA, cts.Token);
@@ -147,14 +147,14 @@ public sealed class ZSocketIpcTests
 
         var endpoint = $"ipc://@{name}";
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = ZSocket.CreatePairCallback();
+        await using var server = new ZPairSocket();
         server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
         await server.BindAsync(endpoint);
 
         File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeFalse(
             "an abstract namespace bind creates no filesystem entry");
 
-        await using var client = ZSocket.CreatePairCallback();
+        await using var client = new ZPairSocket();
         await client.ConnectAsync(endpoint);
         await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]));
 
