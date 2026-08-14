@@ -14,13 +14,13 @@ namespace ZmqSharp.AllocationTests;
 /// collection (configured non-parallel), so no other test's allocations
 /// pollute the process-wide counter.
 ///
-/// The measured window is single-threaded by construction, not by luck: the
-/// enqueue loop never awaits, so when the pump wakes the channel is already
-/// fully buffered and every read completes synchronously - the pump cannot
-/// migrate threads mid-window (the migration that follows the forced GC falls
-/// on the warm-up boundary and is excluded). A thread-id invariant asserts
-/// this, so the thread-local GC counter is used inside a provably one-thread
-/// window rather than by assumption.
+/// The measured window is single-threaded by construction: the fake
+/// connection parks the pump at an empty channel, the test then enqueues
+/// every measured frame and releases the pump, which drains the fully
+/// buffered channel in one continuation - so the pump cannot migrate threads
+/// mid-window. A thread-id invariant asserts this, so the thread-local GC
+/// counter is used inside a provably one-thread window rather than by
+/// assumption.
 ///
 /// Measured reality: a pooled 1-byte frame costs a fixed ~216 bytes per
 /// message on the pump thread (one MemoryPool rent + its owner wrapper per
@@ -55,8 +55,25 @@ public class ReceiveAllocationTests
         GC.WaitForPendingFinalizers();
         GC.Collect();
 
-        for (var i = WarmupCount; i < MessageCount; i++)
+        // Deterministic window: arm the fake's pump gate, wake the pump out of
+        // its post-warmup channel block with one sentinel frame, and wait until
+        // it parks at the gate. Every measured frame is then buffered while the
+        // pump cannot consume, and the release lets it drain the fully buffered
+        // channel in one continuation on one thread - so the thread-local GC
+        // window below is single-threaded by construction, not by racing the
+        // pump (a pump that parks mid-window would migrate to another
+        // thread-pool thread and invalidate the deltas).
+        peer.ArmSynchronousWindow();
+        peer.Enqueue(AllocationFrameData.Frame([0x00]));
+        await peer.WaitUntilPumpIdleAsync();
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        for (var i = WarmupCount + 1; i < MessageCount; i++)
             peer.Enqueue(AllocationFrameData.Frame([(byte)i]));
+        peer.ReleasePump();
         await sink.WaitForAsync(MessageCount);
 
         // The measured window is single-threaded by construction (see the
@@ -143,12 +160,24 @@ public class ReceiveAllocationTests
         GC.WaitForPendingFinalizers();
         GC.Collect();
 
-        for (var i = WarmupCount; i < MessageCount; i++)
+        // Same deterministic window as the steady-state test: park the pump
+        // with a sentinel frame, buffer the measured two-frame messages, then
+        // release for a single-threaded drain.
+        peer.ArmSynchronousWindow();
+        peer.Enqueue(AllocationFrameData.Frame([0x00]));
+        await peer.WaitUntilPumpIdleAsync();
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        for (var i = WarmupCount + 1; i < MessageCount; i++)
         {
             peer.Enqueue(AllocationFrameData.Frame(firstFrame, true));
             peer.Enqueue(AllocationFrameData.Frame(secondFrame));
         }
 
+        peer.ReleasePump();
         await sink.WaitForAsync(MessageCount);
 
         var deltas = WindowDeltas(sink);
@@ -165,21 +194,26 @@ public class ReceiveAllocationTests
 
     /// <summary>
     /// Deltas across the measured window with the single-thread invariant
-    /// asserted, not filtered: the enqueue loop never awaits, so the pump
-    /// drains the fully-buffered channel with synchronously completing reads
-    /// and cannot migrate threads mid-window. A migration would make the
-    /// thread-local GC counter meaningless, so it must fail the test loudly
-    /// instead of silently skewing the deltas.
+    /// asserted, not filtered: the fake's pump gate parks the pump, the frames
+    /// are pre-buffered, and the release lets it drain in one continuation
+    /// with synchronously completing reads, so it cannot migrate threads
+    /// mid-window. A migration would make the thread-local GC counter
+    /// meaningless, so it must fail the test loudly instead of silently
+    /// skewing the deltas.
     /// </summary>
     private static long[] WindowDeltas(MeasuringSink sink)
     {
-        var windowThreads = sink.ThreadIds[WarmupCount..].Distinct().ToArray();
+        // The sentinel frame that wakes the pump out of its post-warm-up
+        // channel block is delivered on the wake-up continuation, which may be
+        // a different thread than the release drain; the measured window
+        // therefore starts after the sentinel.
+        var windowThreads = sink.ThreadIds[(WarmupCount + 1)..].Distinct().ToArray();
         windowThreads.Should().ContainSingle(
             "the measured window must run on a single pump thread for the thread-local deltas to be valid");
 
-        var deltas = new long[MessageCount - WarmupCount - 1];
-        for (var i = WarmupCount + 1; i < MessageCount; i++)
-            deltas[i - WarmupCount - 1] = sink.Samples[i] - sink.Samples[i - 1];
+        var deltas = new long[MessageCount - WarmupCount - 2];
+        for (var i = WarmupCount + 2; i < MessageCount; i++)
+            deltas[i - WarmupCount - 2] = sink.Samples[i] - sink.Samples[i - 1];
 
         return deltas;
     }

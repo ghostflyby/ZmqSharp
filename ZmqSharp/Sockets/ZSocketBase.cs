@@ -70,6 +70,13 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private long receiveRejections;
 
     /// <summary>
+    /// Raised when the receive materializer rejects a frame (an over-limit
+    /// frame, a policy rejection, or an empty message). Test seam: lets tests
+    /// wait on the rejection state directly instead of polling the counter.
+    /// </summary>
+    internal event Action? MaterializerRejected;
+
+    /// <summary>
     /// The socket composition face (0019 section 2): outbound dispatch, socket
     /// identity, and inbound processing. <paramref name="inbound"/> defaults to
     /// pass-through delivery, so sockets that only route outbound (single-peer,
@@ -233,6 +240,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private void OnMaterializerRejected()
     {
         Interlocked.Increment(ref receiveRejections);
+        MaterializerRejected?.Invoke();
     }
 
     public async Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)

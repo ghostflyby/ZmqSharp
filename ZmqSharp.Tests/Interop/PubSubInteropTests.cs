@@ -43,7 +43,7 @@ public sealed class PubSubInteropTests
     public async Task NetMQPub_ZmqSharpSub_FiltersBySubscription()
     {
         var channel = Channel.CreateUnbounded<ZMessage>();
-        var sub = new ZSubSocket();
+        await using var sub = new ZSubSocket();
         sub.Subscribe([.. "news"u8]);
         sub.BindMessageSink(new TestSink(message => channel.Writer.TryWrite(message)));
         var port = InteropHelpers.GetFreePort();
@@ -72,7 +72,6 @@ public sealed class PubSubInteropTests
         var idle = Task.Delay(300);
         var first = await Task.WhenAny(drainTask, idle);
         first.Should().Be(idle);
-        await sub.DisposeAsync();
     }
 
     private static byte[] Concat(string topic, string payload)

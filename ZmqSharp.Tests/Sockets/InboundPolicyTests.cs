@@ -112,7 +112,8 @@ public sealed class InboundPolicyTests
         await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
         await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
 
-        await WaitUntilAsync(() => inbound.Count, value => value == 2, TimeSpan.FromSeconds(5));
+        // The consume policy signals the state directly instead of polling.
+        await inbound.ReachedTwoAsync.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -165,12 +166,17 @@ public sealed class InboundPolicyTests
     private sealed class ConsumeInbound : IZInboundPolicy
     {
         private int count;
+        private readonly TaskCompletionSource reachedTwo = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int Count => count;
 
+        /// <summary>Completes when two messages have been consumed (the state
+        /// this test waits for, exposed instead of polling the counter).</summary>
+        public Task ReachedTwoAsync => reachedTwo.Task;
+
         public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
         {
-            Interlocked.Increment(ref count);
+            if (Interlocked.Increment(ref count) >= 2) reachedTwo.TrySetResult();
             message.Dispose();
             return ValueTask.FromResult(new ZInboundDecision { Action = ZInboundAction.Consumed });
         }
