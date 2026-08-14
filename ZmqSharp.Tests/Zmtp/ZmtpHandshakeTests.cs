@@ -30,7 +30,7 @@ public sealed class ZmtpHandshakeTests
 
         result.Should().NotBeNull();
         result.Value.SessionConnection.Should().BeSameAs(connection);
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody).Should().Be("PAIR");
+        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public sealed class ZmtpHandshakeTests
         var result = await handshake.EstablishAsync(ZMechanismRole.Client);
 
         result.Should().NotBeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody).Should().Be("DEALER");
+        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("DEALER");
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class ZmtpHandshakeTests
         var result = await handshake.EstablishAsync(ZMechanismRole.Client);
 
         result.Should().NotBeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody).Should().Be("CUSTOM");
+        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("CUSTOM");
     }
 
     [Fact]

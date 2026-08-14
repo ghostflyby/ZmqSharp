@@ -52,6 +52,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     private readonly ZSocketType type;
     private readonly IZInboundPolicy inbound;
     private readonly IZSecurityMechanism mechanism;
+    private readonly ReadOnlyMemory<byte> localReadyBody;
     private readonly int handshakeTimeoutMs;
     private readonly int maxIncompleteHandshakes;
     private int incompleteHandshakes;
@@ -88,6 +89,10 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         mechanism = options.Security.Mechanism;
         handshakeTimeoutMs = options.HandshakeTimeoutMs;
         maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
+        // The local READY body depends only on the socket type; building it
+        // once per socket instead of once per connection keeps the handshake
+        // cold path allocation-free (0023 D6).
+        localReadyBody = ZmtpCommands.BuildReady(type.Name);
     }
 
     /// <summary>The routable-peer snapshot (dispatch policies read it for outbound selection).</summary>
@@ -502,7 +507,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
             using var handshake = new ZmtpHandshake(
                 connection,
                 mechanism,
-                ZmtpCommands.BuildReady(type.Name),
+                localReadyBody,
                 maxCommandSize,
                 Pool);
             var result = await EstablishWithTimeoutAsync(handshake, role, attemptToken);
@@ -514,7 +519,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
                 return;
             }
 
-            var peerType = ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody);
+            var peerType = ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span);
             if (!type.AcceptsPeer(peerType))
             {
                 // RFC 23: on socket-type validation failure, return an

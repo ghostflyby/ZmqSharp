@@ -17,6 +17,7 @@
 
     <ItemGroup>
         <ProjectReference Include="../ZmqSharp/ZmqSharp.csproj"/>
+        <ProjectReference Include="../ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -20,6 +20,7 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="ZmqSharp.Tests"/>
+        <InternalsVisibleTo Include="ZmqSharp.AllocationTests"/>
     </ItemGroup>
 
     <ItemGroup>
