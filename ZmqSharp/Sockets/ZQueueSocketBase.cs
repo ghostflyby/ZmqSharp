@@ -10,11 +10,12 @@ namespace ZmqSharp;
 /// default (0023): each peer's messages land in that peer's own bounded queue
 /// and are read through <see cref="Messages"/> (0004). The queue machinery
 /// lived in the retired <c>ZQueueSocket&lt;TSocket&gt;</c> wrapper; it is now
-/// owned by the socket itself. <see cref="ZReceiveSurface.Callback"/> opts
-/// out: no queue is composed and the raw <c>OnFrame</c> /
-/// <see cref="ZSocketBase.BindMessageSink"/> surface is the delivery path.
-/// REQ and REP do not derive from this type - their protocol cores consume
-/// inbound messages regardless of surface.
+/// owned by the socket itself. A custom <see cref="ZSocketOptions.MessageSink"/>
+/// opts out: no queue is composed and messages are delivered to the sink; with
+/// no sink, <see cref="ZReceiveSurface.Callback"/> leaves the raw
+/// <c>OnFrame</c> surface as the delivery path. REQ and REP do not derive from
+/// this type - their protocol cores consume inbound messages regardless of
+/// surface.
 /// </summary>
 public abstract class ZQueueSocketBase : ZSocketBase
 {
@@ -99,16 +100,25 @@ public abstract class ZQueueSocketBase : ZSocketBase
 
     /// <summary>
     /// The socket composition face, same shape as <see cref="ZSocketBase"/>
-    /// (0019 section 2). When <see cref="ZSocketOptions.ReceiveSurface"/> is
+    /// (0019 section 2). A custom <see cref="ZSocketOptions.MessageSink"/> is
+    /// delivered to directly (no queue). Otherwise, when
+    /// <see cref="ZSocketOptions.ReceiveSurface"/> is
     /// <see cref="ZReceiveSurface.Queue"/> (the default), the queue surface is
     /// bound at construction: per-peer queues, an optional outbound channel,
-    /// and per-peer message delivery through <see cref="Messages"/>.
+    /// and per-peer message delivery through <see cref="Messages"/>; with
+    /// <see cref="ZReceiveSurface.Callback"/> the socket composes nothing and
+    /// the raw <c>OnFrame</c> surface is the delivery path.
     /// </summary>
     protected ZQueueSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
         IZInboundPolicy? inbound = null)
         : base(options, dispatch, type, inbound)
     {
-        queueSurface = options.ReceiveSurface == ZReceiveSurface.Queue;
+        // A custom sink is configured through options (bound by the base
+        // constructor); it implies callback semantics, so no queue is
+        // composed. Otherwise the surface option decides between the queue
+        // surface (default) and the bare OnFrame surface.
+        var customSink = options.MessageSink is not null;
+        queueSurface = !customSink && options.ReceiveSurface == ZReceiveSurface.Queue;
         receiveQueueFactory = options.ReceiveQueueFactory;
         ArgumentNullException.ThrowIfNull(receiveQueueFactory);
 
@@ -143,7 +153,7 @@ public abstract class ZQueueSocketBase : ZSocketBase
     /// so accessing this throws.
     /// </summary>
     public ChannelReader<ZMessage> Messages => messages
-        ?? throw new InvalidOperationException("callback surface: the socket composes no queue (set ReceiveSurface = ZReceiveSurface.Queue)");
+        ?? throw new InvalidOperationException("no queue composed: remove MessageSink or set ReceiveSurface = ZReceiveSurface.Queue");
 
     /// <summary>Total frames rejected by the receive materialization since construction.</summary>
     public long ReceiveRejections => ReceiveRejectionsCount;

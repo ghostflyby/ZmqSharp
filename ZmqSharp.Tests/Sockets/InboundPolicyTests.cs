@@ -74,12 +74,10 @@ public sealed class InboundPolicyTests
         // message is the policy's replacement (frames moved, 0019 section 3).
         // The socket reuses the PAIR identity, so a built-in pair connects.
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var server = new CustomTransformSocket();
+        var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new CustomTransformSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
         await using var client = new ZPairSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-
-        var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
 
         await server.BindAsync(endpoint, cts.Token);
         await client.ConnectAsync(endpoint, cts.Token);

@@ -82,18 +82,30 @@ public sealed class ZSocketOptions
     /// queue surface - per-peer bounded queues read through
     /// <see cref="ZQueueSocketBase.Messages"/> - and <see
     /// cref="ZReceiveSurface.Callback"/> opts out to the raw
-    /// <c>OnFrame</c> / <see cref="ZSocketBase.BindMessageSink"/> surface.
-    /// Ignored by REQ and REP, whose protocol cores consume inbound messages
-    /// regardless of surface.
+    /// <c>OnFrame</c> surface. Only consulted when <see cref="MessageSink"/>
+    /// is null: a custom sink implies callback semantics. Ignored by REQ and
+    /// REP, whose protocol cores consume inbound messages regardless of
+    /// surface.
     /// </summary>
     public ZReceiveSurface ReceiveSurface { get; init; } = ZReceiveSurface.Queue;
+
+    /// <summary>
+    /// Custom delivery sink, bound at construction (0023): complete messages
+    /// are delivered to the sink, per peer and serialized, and the socket
+    /// composes no queue surface - <see cref="ReceiveSurface"/> is not
+    /// consulted and <see cref="ZQueueSocketBase.Messages"/> is unavailable.
+    /// Defaults to null, in which case <see cref="ReceiveSurface"/> decides
+    /// between the queue surface and the raw <c>OnFrame</c> surface.
+    /// </summary>
+    public IPatternSink? MessageSink { get; init; }
 
     /// <summary>
     /// Per-peer receive queue factory (0009); the library forces
     /// SingleReader and the factory's SingleWriter per connection. Defaults
     /// to a bounded SPSC queue with capacity 16. BCL channel options convert
     /// implicitly into a factory, so <c>new BoundedChannelOptions(16)</c> is
-    /// assignable here. Ignored on the callback surface.
+    /// assignable here. Ignored on the callback surface or with a custom
+    /// <see cref="MessageSink"/>.
     /// </summary>
     public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true };
 

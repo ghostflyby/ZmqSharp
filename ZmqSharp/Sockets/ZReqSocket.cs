@@ -9,8 +9,8 @@ namespace ZmqSharp;
 /// current peer. The current connection is owned by the composed
 /// <see cref="ZCurrentPeerDispatch"/>; the request send routes through it and
 /// the reply intake is the consume arm of the composed inbound policy (the
-/// <see cref="ZReqCore"/>), so a bound <see cref="BindMessageSink"/> consumer
-/// is never hijacked by the protocol. Sends go through
+/// <see cref="ZReqCore"/>), so a <see cref="ZSocketOptions.MessageSink"/>
+/// consumer is never hijacked by the protocol. Sends go through
 /// <see cref="RequestAsync"/>; the generic base send path is rejected when no
 /// request is in flight.
 /// </summary>

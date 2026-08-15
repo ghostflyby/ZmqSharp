@@ -8,7 +8,7 @@ namespace ZmqSharp;
 /// serialized across peers (one at a time, strict alternation), delivered as
 /// a <see cref="ZRequestContext"/>; replies route back to the originating
 /// peer. The request intake is the consume arm of the composed inbound policy
-/// (the <see cref="ZRepCore"/>), so a bound <see cref="BindMessageSink"/>
+/// (the <see cref="ZRepCore"/>), so a <see cref="ZSocketOptions.MessageSink"/>
 /// consumer is never hijacked by the protocol.
 /// </summary>
 public sealed class ZRepSocket : ZSocketBase

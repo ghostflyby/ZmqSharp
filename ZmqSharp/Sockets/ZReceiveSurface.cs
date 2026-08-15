@@ -6,9 +6,10 @@ namespace ZmqSharp;
 /// messages: each peer's messages land in that peer's bounded queue and are
 /// read through <see cref="ZQueueSocketBase.Messages"/>. <see
 /// cref="Callback"/> opts out: the socket binds no queue and the raw
-/// <c>OnFrame</c> / <see cref="ZSocketBase.BindMessageSink"/> surface is the
-/// delivery path. REQ and REP are excluded either way - their protocol cores
-/// consume inbound messages before any surface could see them.
+/// <c>OnFrame</c> surface is the delivery path (a custom
+/// <see cref="ZSocketOptions.MessageSink"/> implies callback semantics and
+/// makes this option redundant). REQ and REP are excluded either way - their
+/// protocol cores consume inbound messages before any surface could see them.
 /// </summary>
 public enum ZReceiveSurface
 {

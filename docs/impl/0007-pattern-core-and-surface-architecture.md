@@ -288,7 +288,8 @@ design docs 0010-0014 fix the exact signatures.
 Construction is direct (0022, 0023): each composition root takes
 `ZSocketOptions?` (defaults to a fresh options bag) and composes the queue
 surface by default (`ZQueueSocketBase`); `ZReceiveSurface.Callback` opts out
-to the raw `OnFrame` / `BindMessageSink` surface. The binding completes before
+to the raw `OnFrame` surface, or to a custom `ZSocketOptions.MessageSink`
+delivered to directly. The binding completes before
 any connection is established. REQ and REP stay on `ZSocketBase` - their
 protocol cores consume inbound messages, so a queue surface would be dead
 configuration.
@@ -309,7 +310,7 @@ invalid after the reply is sent or the peer ends.
    low-level surface.
    Implemented: the transport core now aggregates complete messages per peer
    and delivers them through the public semantic seam `IPatternSink`
-   (`BindMessageSink`); a bound sink is mutually exclusive with `OnFrame` on
+   (a `ZSocketOptions.MessageSink`); a bound sink is mutually exclusive with `OnFrame` on
    the same instance. Per-frame receive materialization (the receive policy
    allocator, the 0008 guard counters, and the rejection counter) also lives
    in the transport core's per-connection `ReceiveMaterializer`, configured
