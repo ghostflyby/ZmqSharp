@@ -546,6 +546,44 @@ public sealed class ZSocketTests
         act.Should().Throw<InvalidOperationException>();
     }
 
+    [Fact]
+    public void QueueOptions_WithCustomSink_Throws()
+    {
+        // Queue configuration on a sink-composed socket would be silently
+        // ignored; it fails loudly at construction instead (0023).
+        var act = () => new ZPairSocket(new ZSocketOptions
+        {
+            MessageSink = new TestMessageSink(_ => { }),
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+        });
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*queue surface*");
+    }
+
+    [Fact]
+    public void QueueOptions_OnCallbackSurface_Throws()
+    {
+        var act = () => new ZPairSocket(new ZSocketOptions
+        {
+            ReceiveSurface = ZReceiveSurface.Callback,
+            MaxFrameLength = 4
+        });
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*queue surface*");
+    }
+
+    [Fact]
+    public void Req_WithQueueOptions_Throws()
+    {
+        // REQ never composes a queue; queue configuration is a contradiction.
+        var act = () => new ZReqSocket(new ZSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+        });
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*never composes a queue*");
+    }
+
     [Theory]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task MessageSink_AggregatesMultipart_AndDeliversCompleteMessage(TransportKind kind)

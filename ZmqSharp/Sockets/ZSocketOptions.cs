@@ -104,14 +104,20 @@ public sealed class ZSocketOptions
     /// SingleReader and the factory's SingleWriter per connection. Defaults
     /// to a bounded SPSC queue with capacity 16. BCL channel options convert
     /// implicitly into a factory, so <c>new BoundedChannelOptions(16)</c> is
-    /// assignable here. Ignored on the callback surface or with a custom
-    /// <see cref="MessageSink"/>.
+    /// assignable here. Must not be set on the callback surface or with a
+    /// custom <see cref="MessageSink"/> - the queue is never composed there
+    /// (throws at construction).
     /// </summary>
-    public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true };
+    public ZQueueFactory ReceiveQueueFactory
+    {
+        get => receiveQueueFactory ?? new BoundedChannelOptions(16) { SingleWriter = true };
+        init => receiveQueueFactory = value;
+    }
 
     /// <summary>
     /// When set, enables the optional outbound channel built by this factory
-    /// (0009) on the queue surface.
+    /// (0009) on the queue surface. Must not be set on the callback surface
+    /// or with a custom <see cref="MessageSink"/>.
     /// </summary>
     public ZQueueFactory? SendQueueFactory { get; init; }
 
@@ -120,25 +126,71 @@ public sealed class ZSocketOptions
     /// <see cref="ZReceiveOptions"/> configuration, which accepts every frame
     /// pooled, contiguous up to <c>ContiguousFrameLimit</c> and segmented
     /// above it. The policy only decides allocation; the rejection limits
-    /// below are enforced outside it.
+    /// below are enforced outside it. Must not be set on the callback surface
+    /// or with a custom <see cref="MessageSink"/>.
     /// </summary>
-    public IZReceivePolicy ReceivePolicy { get; init; } = new ZReceiveOptions();
+    public IZReceivePolicy ReceivePolicy
+    {
+        get => receivePolicy ?? new ZReceiveOptions();
+        init => receivePolicy = value;
+    }
 
     /// <summary>
     /// Maximum accepted frame length; a longer frame rejects the connection
-    /// (0008 D3/D6). Defaults to effectively unlimited.
+    /// (0008 D3/D6). Defaults to effectively unlimited. Must not be set on
+    /// the callback surface or with a custom <see cref="MessageSink"/>.
     /// </summary>
-    public long MaxFrameLength { get; init; } = long.MaxValue;
+    public long MaxFrameLength
+    {
+        get => maxFrameLength ?? long.MaxValue;
+        init => maxFrameLength = value;
+    }
 
     /// <summary>
     /// Maximum accepted accumulated message length; a larger total rejects
-    /// the connection (0008 D3/D6). Defaults to effectively unlimited.
+    /// the connection (0008 D3/D6). Defaults to effectively unlimited. Must
+    /// not be set on the callback surface or with a custom
+    /// <see cref="MessageSink"/>.
     /// </summary>
-    public long MaxMessageLength { get; init; } = long.MaxValue;
+    public long MaxMessageLength
+    {
+        get => maxMessageLength ?? long.MaxValue;
+        init => maxMessageLength = value;
+    }
 
     /// <summary>
     /// Maximum accepted frames per message; more frames reject the connection
-    /// (0008 D3/D6). Defaults to effectively unlimited.
+    /// (0008 D3/D6). Defaults to effectively unlimited. Must not be set on
+    /// the callback surface or with a custom <see cref="MessageSink"/>.
     /// </summary>
-    public int MaxFramesPerMessage { get; init; } = int.MaxValue;
+    public int MaxFramesPerMessage
+    {
+        get => maxFramesPerMessage ?? int.MaxValue;
+        init => maxFramesPerMessage = value;
+    }
+
+    // Nullable backing fields: a null means "not configured", so a socket
+    // that never composes the queue surface can detect explicit queue
+    // configuration and reject it at construction instead of silently
+    // ignoring it (0023). The public getters stay non-null and declarative
+    // (0008 D2). ReceivePolicy caches its lazily-created default.
+    private ZQueueFactory? receiveQueueFactory;
+    private IZReceivePolicy? receivePolicy;
+    private long? maxFrameLength;
+    private long? maxMessageLength;
+    private int? maxFramesPerMessage;
+
+    /// <summary>
+    /// True when any queue-surface option was explicitly set (0023). A socket
+    /// that composes no queue - a custom <see cref="MessageSink"/>, the
+    /// callback surface, or REQ/REP - throws at construction when this is
+    /// set, so silently-ignored configuration fails loudly.
+    /// </summary>
+    internal bool HasQueueConfiguration =>
+        receiveQueueFactory is not null
+        || SendQueueFactory is not null
+        || receivePolicy is not null
+        || maxFrameLength is not null
+        || maxMessageLength is not null
+        || maxFramesPerMessage is not null;
 }

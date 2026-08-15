@@ -98,6 +98,12 @@ public abstract class ZQueueSocketBase : ZSocketBase
     private TaskCompletionSource wakeGate = CreateGate();
     private readonly ChannelReader<ZMessage>? messages;
 
+    /// <summary>This type composes the queue surface (0023); the per-instance
+    /// surface split (queue vs custom sink vs bare OnFrame) is decided in the
+    /// constructor, whose own guard rejects queue options on the no-queue
+    /// branches.</summary>
+    protected override bool ComposesQueueSurface => true;
+
     /// <summary>
     /// The socket composition face, same shape as <see cref="ZSocketBase"/>
     /// (0019 section 2). A custom <see cref="ZSocketOptions.MessageSink"/> is
@@ -107,7 +113,9 @@ public abstract class ZQueueSocketBase : ZSocketBase
     /// bound at construction: per-peer queues, an optional outbound channel,
     /// and per-peer message delivery through <see cref="Messages"/>; with
     /// <see cref="ZReceiveSurface.Callback"/> the socket composes nothing and
-    /// the raw <c>OnFrame</c> surface is the delivery path.
+    /// the raw <c>OnFrame</c> surface is the delivery path. Queue
+    /// configuration on a socket that composes no queue fails loudly here
+    /// instead of being silently ignored.
     /// </summary>
     protected ZQueueSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
         IZInboundPolicy? inbound = null)
@@ -119,6 +127,9 @@ public abstract class ZQueueSocketBase : ZSocketBase
         // surface (default) and the bare OnFrame surface.
         var customSink = options.MessageSink is not null;
         queueSurface = !customSink && options.ReceiveSurface == ZReceiveSurface.Queue;
+        if (!queueSurface && options.HasQueueConfiguration)
+            throw new InvalidOperationException(
+                "queue configuration (ReceiveQueueFactory/ReceivePolicy/limits) requires the queue surface; remove MessageSink or set ReceiveSurface = ZReceiveSurface.Queue");
         receiveQueueFactory = options.ReceiveQueueFactory;
         ArgumentNullException.ThrowIfNull(receiveQueueFactory);
 
