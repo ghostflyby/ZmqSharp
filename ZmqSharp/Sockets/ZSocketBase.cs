@@ -80,7 +80,9 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     /// The socket composition face (0019 section 2): outbound dispatch, socket
     /// identity, and inbound processing. <paramref name="inbound"/> defaults to
     /// pass-through delivery, so sockets that only route outbound (single-peer,
-    /// round-robin, broadcast) declare nothing inbound.
+    /// round-robin, broadcast) declare nothing inbound. Queue configuration is
+    /// rejected here when the socket never composes a queue
+    /// (see <see cref="ComposesQueueSurface"/>).
     /// </summary>
     protected ZSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
         IZInboundPolicy? inbound = null)
@@ -97,11 +99,22 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         handshakeTimeoutMs = options.HandshakeTimeoutMs;
         maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
         messageSink = options.MessageSink;
+        if (!ComposesQueueSurface && options.HasQueueConfiguration)
+            throw new InvalidOperationException(
+                "queue configuration (ReceiveQueueFactory/ReceivePolicy/limits) requires the queue surface; this socket never composes a queue");
         // The local READY body depends only on the socket type; building it
         // once per socket instead of once per connection keeps the handshake
         // cold path allocation-free (0023 D6).
         localReadyBody = ZmtpCommands.BuildReady(type.Name);
     }
+
+    /// <summary>
+    /// True when the socket composes the queue receive surface (0023).
+    /// Override in a custom socket type that derives from
+    /// <see cref="ZQueueSocketBase"/>; queue options on a socket that returns
+    /// false are rejected at construction instead of silently ignored.
+    /// </summary>
+    protected virtual bool ComposesQueueSurface => false;
 
     /// <summary>The routable-peer snapshot (dispatch policies read it for outbound selection).</summary>
     internal IZConnection[] PeerSnapshot => peerSnapshot;

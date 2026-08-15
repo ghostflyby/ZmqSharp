@@ -136,8 +136,8 @@ handshake metadata, so the limits are purely local policy and are never
 negotiated or transmitted.
 
 Therefore the numeric receive limits default to **effectively unlimited**
-(`long.MaxValue` / `int.MaxValue`), expressed as non-null defaults on
-`ZSocketOptions` rather than nullable fields: explicit configuration is
+(`long.MaxValue` / `int.MaxValue`), expressed as non-null public defaults on
+`ZSocketOptions` rather than nullable public fields: explicit configuration is
 the user's informed opt-in. The mandatory command size limit (see D5) is the
 only limit that is not opt-out.
 

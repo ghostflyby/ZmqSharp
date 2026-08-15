@@ -97,14 +97,23 @@ hosted a queue-wrapped SUB; the flip makes the combination the default.
 - `ZReceiveSurface ReceiveSurface` (new, default `Queue`)
 - `IPatternSink? MessageSink` (new, default null): custom sink, delivered to
   directly; implies callback semantics and composes no queue
-- `ZQueueFactory ReceiveQueueFactory` (default bounded 16 SPSC)
+- `ZQueueFactory ReceiveQueueFactory` (default bounded 16 SPSC) - settable
+  only on the queue surface
 - `ZQueueFactory? SendQueueFactory` (default null)
 - `IZReceivePolicy ReceivePolicy` (default `ZReceiveOptions`)
 - `long MaxFrameLength` / `MaxMessageLength` (default `long.MaxValue`)
 - `int MaxFramesPerMessage` (default `int.MaxValue`)
 
 One configuration surface per socket: queue tuning is now set in the same bag
-as the pool, security, and handshake limits.
+as the pool, security, and handshake limits. Queue configuration is
+verifiable: the six options track whether they were explicitly set, and a
+socket that composes no queue - a custom `MessageSink`, the callback surface,
+REQ/REP, or a custom `ZSocketBase` subclass - throws at construction when any
+was set, so silently-ignored configuration fails loudly. The guard lives in
+`ZSocketBase`'s constructor behind the protected `ComposesQueueSurface`
+virtual (overridden to true by `ZQueueSocketBase`), so every no-queue socket
+is covered. The public getters keep their non-null, declarative defaults
+(0008 D2); the explicit-set tracking is internal backing state.
 
 ## 5. Migration
 

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Net.Sockets;
+using System.Threading.Channels;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
@@ -18,6 +19,19 @@ namespace ZmqSharp.Tests.Sockets;
 public sealed class CustomSocketTypeTests
 {
     private const string CustomName = "FOO";
+
+    [Fact]
+    public void CustomSocketBaseSubclass_WithQueueOptions_Throws()
+    {
+        // A custom ZSocketBase subclass never composes a queue; queue options
+        // on it are rejected at construction (0023).
+        var act = () => new CustomTypeSocket(CustomName, new ZSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+        });
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*never composes a queue*");
+    }
 
     [Theory]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
