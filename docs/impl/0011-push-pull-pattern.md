@@ -6,8 +6,8 @@ Date: 2026-08-11
 Designs the PUSH and PULL pattern cores on the 0007 architecture, following
 libzmq semantics: PUSH is send-only with round-robin outbound; PULL is
 receive-only with fair-queue inbound. Both are implemented as IPatternCore
-compositions with no new surfaces (PUSH uses the generic SendAsync; PULL uses
-the channel surface).
+compositions with no new surfaces (PUSH exposes its own SendAsync forwarding
+the base core; PULL uses the channel surface).
 
 ## 1. Wire semantics
 
@@ -24,9 +24,8 @@ it as-is. Multipart is preserved (0001 D3).
 
 ## 3. PULL pattern core
 
-- Receive-only: `RouteOutbound` throws `InvalidOperationException` so the
-  generic send path is rejected (the queue surface's `SendAsync` forwards to
-  it).
+- Receive-only: PULL exposes no send member at all (0024); the dispatch
+  policy still rejects the internal send path for the outbound channel.
 - Fair-queue inbound: the transport core's per-peer pumps feed the channel
   surface's aggregate reader, whose fixed-order scan of the peer snapshot
   approximates fair intake with an ordering bias (a busy early-connected peer

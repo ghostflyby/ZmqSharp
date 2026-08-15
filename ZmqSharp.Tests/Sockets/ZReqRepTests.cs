@@ -122,17 +122,6 @@ public sealed class ZReqRepTests
             .Should().ThrowAsync<InvalidOperationException>();
     }
 
-    [Fact]
-    public async Task Req_GenericSend_WithoutInFlightRequest_Throws()
-    {
-        // REQ sends only through RequestAsync; the current-connection dispatch
-        // rejects the generic send path when no request is in flight.
-        await using var req = new ZReqSocket();
-        (await FluentActions.Awaiting(() => req.SendAsync(ZMessage.FromOwned([.. "x"u8])).AsTask())
-                .Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("*RequestAsync*");
-    }
-
     [Theory]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task Rep_RoutesReplyToOriginatingPeer_WithTwoPeers(TransportKind kind)

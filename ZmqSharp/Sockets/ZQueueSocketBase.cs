@@ -392,7 +392,7 @@ public abstract class ZQueueSocketBase : ZSocketBase
             await foreach (var message in channel.Reader.ReadAllAsync(token))
                 try
                 {
-                    await SendAsync(message, token);
+                    await SendAsyncCore(message, token);
                 }
                 catch (OperationCanceledException)
                 {

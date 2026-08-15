@@ -41,23 +41,22 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
     Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-
-    // Send: direct, ownership transfers.
-    ValueTask SendAsync(ZMessage message, CancellationToken token = default);
-    ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
 }
 ```
 
-- `IZSocket` is the small common contract (endpoints + direct send) shared by
-  every socket surface; there is no receive interface - the callback surface
-  is the borrowed `OnFrame` member of `ZSocketBase` itself (0023).
+- `IZSocket` is the small common contract (endpoints only, 0024) shared by
+  every socket surface; there is no send or receive contract - each socket
+  type exposes its own public send surface, and the callback surface is the
+  borrowed `OnFrame` member of `ZSocketBase` itself (0023, 0024).
 - `OnFrame` delivers each frame borrowed (valid only during the call); a
   multipart message arrives as consecutive frames until `More` is false.
   Returning false pauses the receive pump; `PeerEnded` reports connection
   teardown; `ResumePaused` resumes paused pumps.
 - Send is direct and synchronous-with-ownership: the socket type's
   `RouteOutbound` selects the target connection(s) and the message is disposed
-  after the last peer send.
+  after the last peer send. The public send surface is decided per type
+  (0024): send-capable types expose `SendAsync`, protocol types expose their
+  operation surfaces, receive-only types expose none.
 - No queues on this interface; queue semantics live on the socket itself
   (`ZQueueSocketBase`, 0023).
 
@@ -147,9 +146,9 @@ As implemented:
 
 ## 7. Send Path
 
-- Direct send on `IZSocket`: the socket type's `RouteOutbound` selects the
-  connection(s), writes each selected connection, disposes the message after
-  the last peer send.
+- Direct send (per-type public surface, 0024): the socket type's
+  `RouteOutbound` selects the connection(s), writes each selected connection,
+  disposes the message after the last peer send.
 - Queue tier: `Outbound` is bounded when `SendQueueFactory` builds a bounded
   channel; the socket routes each message to the
   selected peers (direct write today; per-peer send queues with one pump per
@@ -190,7 +189,7 @@ binding/connection is the only repeatable surface
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D9 | `IZSocket` is the small common contract (endpoints + send); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
+| D9 | `IZSocket` is the small common contract (endpoints only, 0024); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
 | D10 | Generic transport factory (`IZTransport<TSelf, TEndpoint>`) is the core | Transports plug in with typed endpoints and compile-time selection |
 | D11 | The queue surface is the default receive surface, owned by `ZQueueSocketBase` (0023); the callback surface is an explicit opt-out | Matches 0001 D7/D8; the two tiers are mutually exclusive by construction |
 | D12 | Queue capacity is per peer (HWM per peer) | Matches libzmq; per-peer backpressure isolation (0004) |

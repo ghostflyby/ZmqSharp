@@ -117,7 +117,7 @@ internal sealed class ZReqCore : IZInboundPolicy
             // The request send routes through the current-connection dispatch:
             // the selective send path asks the policy for the target, which
             // returns the in-flight request's current connection.
-            await socket.SendAsync(framed, token);
+            await socket.SendRequestFrameAsync(framed, token);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

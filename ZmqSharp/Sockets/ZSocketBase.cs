@@ -376,9 +376,11 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     /// peer set, and the message is sent to exactly those peers, once each.
     /// Caller-addressed sends (ROUTER identity, REP replies) bypass this path
     /// through <see cref="SendToAsync"/>. The message is disposed once after
-    /// the loop, in <see cref="SendAsync"/>.
+    /// the loop, in <see cref="SendAsyncCore(ZMessage, CancellationToken)"/>.
+    /// Protected: the public send surface is decided by each socket type
+    /// (0024), not inherited from the base.
     /// </summary>
-    public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
+    protected async ValueTask SendAsyncCore(ZMessage message, CancellationToken token = default)
     {
         ThrowIfClosed();
         try
@@ -477,14 +479,19 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         }
     }
 
-    public async ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    /// <summary>
+    /// Bytes overload of the selective send: pools a copy of the payload and
+    /// routes it through <see cref="SendAsyncCore(ZMessage, CancellationToken)"/>.
+    /// Protected; the public send surface is decided by each socket type (0024).
+    /// </summary>
+    protected async ValueTask SendAsyncCore(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         ThrowIfClosed();
         var owner = Pool.Rent(bytes.Length);
         bytes.CopyTo(owner.Memory);
         var message = new ZMessage(new ZSingleMessage(
             new ZFrame(new ZSegment(owner, 0, bytes.Length))));
-        await SendAsync(message, token);
+        await SendAsyncCore(message, token);
     }
 
     private ValueTask AcceptConnection(IZConnection connection, CancellationToken token)

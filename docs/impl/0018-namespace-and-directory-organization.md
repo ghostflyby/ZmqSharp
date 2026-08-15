@@ -45,7 +45,8 @@ needs.
 A single `using ZmqSharp;` covers all basic usage:
 
 - Entry points and surfaces: the concrete socket composition roots (directly
-  constructed, 0022/0023), `IZSocket`, `IPatternSink`.
+  constructed, 0022/0023, each with its own public send surface per 0024),
+  `IZSocket` (endpoints only), `IPatternSink`.
 - Base classes: `ZSocketBase`, `ZQueueSocketBase` (the default queue surface,
   0023), `ZAsyncState` (public because public socket types derive from it; its
   members are protected).

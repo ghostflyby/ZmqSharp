@@ -195,9 +195,10 @@ Three independent axes compose:
 
 Public types are thin composition roots that bind exactly one core and one
 surface (section 5). There is no general `IZSocket.SendAsync` surface contract
-and no `ZQueueSocket<TSocket>` generic wrapper (0023): an instance of a concrete
-type has exactly one set of members, so raw and pattern-wrapped modes are
-mutually exclusive by type, not by convention.
+(0024) and no `ZQueueSocket<TSocket>` generic wrapper (0023): an instance of a
+concrete type has exactly one set of members - including its own public send
+surface - so raw and pattern-wrapped modes are mutually exclusive by type, not
+by convention.
 
 ## 3. Message ownership and move rules
 
@@ -259,7 +260,7 @@ boundaries and by M3 at internal seams - never by wrapper indirection.
 5. Send is not on the seam. Outbound goes through the core: `RouteOutbound`
    selection plus `BuildOutbound` framing plus directed send where the pattern
    requires it. `IZSocket.SendAsync` is not preserved as the pattern public
-   shape (0006 section 2.4).
+   shape (0006 section 2.4); each type exposes its own send surface (0024).
 6. Send-path state machine gates live in the core: surfaces invoke core
    operations (`RequestAsync`, `SendReplyAsync`), and the core throws on
    illegal timing (send while a request is in flight, reply without a
