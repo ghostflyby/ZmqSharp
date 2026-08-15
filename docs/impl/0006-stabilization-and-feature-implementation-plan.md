@@ -324,7 +324,7 @@ Implemented:
   optimized build (0004 constraint 4; the absolute allocation gate is
   asserted under Release because Debug boxes async state machines).
 - The send path routes to establishing peers and awaits their establishment
-  gate (the failure still surfaces from `SendAsync`, per the decided
+  gate (the failure still surfaces from the send mechanism, per the decided
   semantics); the gate fast path skips the wait when the peer is already
   established. A peer that retires before or during its write is dropped
   (decided), not a fault, and never aborts the send.
@@ -449,6 +449,8 @@ The design track must evaluate operation-oriented candidates such as a
 reply-returning REQ send, a reply-capable REP request context, and explicit
 ROUTER routing values. It must not preserve `IZSocket.SendAsync` or public
 channel pairs solely for compatibility with the current prototype.
+Implemented (0024): `IZSocket` carries no send contract; each socket type
+exposes its own send surface.
 
 ## 7. Documentation and Release Preparation
 

@@ -53,8 +53,9 @@ in-flight peer), and the pending reply task.
   `current` is cleared; the next `RequestAsync` round-robins on. A live-but-
   silent peer blocks the socket by design (no timeout, libzmq semantics).
 
-`RouteOutbound` (the generic base send path) throws for REQ: sends go through
-`RequestAsync` only.
+REQ exposes no generic `SendAsync` (0024): its public send surface is
+`RequestAsync` only, and the core routes the framed request through the
+current-connection dispatch.
 
 ## 3. REP pattern core
 

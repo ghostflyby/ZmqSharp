@@ -91,6 +91,15 @@ public sealed class CustomSocketTypeTests
         new ZSinglePeerDispatch(),
         ZSocketType.ForCustom(name))
     {
+        public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
+        {
+            return SendAsyncCore(message, token);
+        }
+
+        public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+        {
+            return SendAsyncCore(bytes, token);
+        }
     }
 
     private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink

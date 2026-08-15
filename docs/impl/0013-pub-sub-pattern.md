@@ -21,10 +21,10 @@ and subscription propagation to publishers.
 
 ## 2. PUB pattern core
 
-- Send-only broadcast: `SendAsync` overrides the generic single-target path
-  and broadcasts to every peer in the snapshot (`BroadcastAsync`, a transport
-  primitive); the message is disposed once after the loop.
-- The base `RouteOutbound` (single target) is rejected for PUB.
+- Send-only broadcast: PUB exposes its own `SendAsync`, which routes through
+  the broadcast dispatch to every peer in the snapshot; the message is
+  disposed once after the loop (0024).
+- The broadcast dispatch selects every peer; there is no single-target path (0015).
 - Socket-Type compatibility: PUB <-> SUB.
 
 ## 3. SUB pattern core

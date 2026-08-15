@@ -40,4 +40,14 @@ public sealed class ZReqSocket : ZSocketBase
     {
         return core.RequestAsync(this, message, token);
     }
+
+    /// <summary>
+    /// Internal frame send for the REQ core (0024): routes the framed request
+    /// through the current-connection dispatch. REQ exposes no public generic
+    /// SendAsync - sends go through <see cref="RequestAsync"/>.
+    /// </summary>
+    internal ValueTask SendRequestFrameAsync(ZMessage framed, CancellationToken token)
+    {
+        return SendAsyncCore(framed, token);
+    }
 }

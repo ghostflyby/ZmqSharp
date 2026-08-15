@@ -20,4 +20,19 @@ public class ZPubSocket : ZQueueSocketBase
         : base(options, new ZBroadcastDispatch(), type, inbound)
     {
     }
+
+    /// <summary>
+    /// Direct send, broadcast to every peer (0024; ZXPubSocket inherits this
+    /// surface). The message is disposed after the loop.
+    /// </summary>
+    public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
+    {
+        return SendAsyncCore(message, token);
+    }
+
+    /// <summary>Direct send: copies the payload into an owned message before routing.</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    {
+        return SendAsyncCore(bytes, token);
+    }
 }
