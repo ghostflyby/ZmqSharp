@@ -52,8 +52,7 @@ public sealed class DealerRouterInteropTests
         dealer.Bind($"tcp://127.0.0.1:{port}");
 
         var routedMessage = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var router = new ZRouterSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
-        router.BindMessageSink(new TestSink(message => routedMessage.TrySetResult(message)));
+        await using var router = new ZRouterSocket(new ZSocketOptions { MessageSink = new TestSink(message => routedMessage.TrySetResult(message)) });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await router.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 

@@ -92,8 +92,9 @@ public sealed class ZRepSocket : ZSocketBase, IPatternSink
 }
 ```
 
-Each socket binds itself as the message sink (`BindMessageSink(this)`), so the
-raw `OnFrame` surface is mutually exclusive with the pattern surface.
+Each socket's protocol core consumes inbound messages before any surface
+could see them, so a configured sink never receives and the raw `OnFrame`
+surface is mutually exclusive with the pattern surface.
 
 Construction: `new ZReqSocket(ZSocketOptions?)` / `new ZRepSocket(ZSocketOptions?)`
 (no queue variants: REQ is operation-oriented, REP is a typed callback; 0022).

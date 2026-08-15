@@ -97,7 +97,9 @@ public sealed class ZSocketOptions
   and the surface writes them to the peer queues, so the two tiers are
   mutually exclusive by construction (a bound seam also rejects raw `OnFrame`
   subscription). `ZReceiveSurface.Callback` opts out: no queue is composed and
-  the raw `OnFrame` / `BindMessageSink` surface is the delivery path.
+  the raw `OnFrame` surface is the delivery path; a custom
+  `ZSocketOptions.MessageSink` implies callback semantics and is delivered to
+  directly.
 - Capacity is per peer (each peer gets its own bounded queue with the
   configured HWM), following 0004. `Messages` exposes the socket-level
   aggregated view selected by the socket type (fair-queue, direct, ...).

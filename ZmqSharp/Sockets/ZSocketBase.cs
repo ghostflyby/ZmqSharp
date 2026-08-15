@@ -96,6 +96,7 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
         mechanism = options.Security.Mechanism;
         handshakeTimeoutMs = options.HandshakeTimeoutMs;
         maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
+        messageSink = options.MessageSink;
         // The local READY body depends only on the socket type; building it
         // once per socket instead of once per connection keeps the handshake
         // cold path allocation-free (0023 D6).
@@ -194,12 +195,14 @@ public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
     }
 
     /// <summary>
-    /// Binds the semantic delivery seam (0007 section 2.3): the transport core
-    /// aggregates complete messages and delivers them to the sink, per peer and
-    /// serialized. Must be called before any connection is established. A bound
-    /// sink is mutually exclusive with the raw <see cref="OnFrame"/> surface.
+    /// Binds a delivery sink for the composed surface (0023): the queue
+    /// surface binds its internal <c>QueueSurface</c> here at construction,
+    /// and a custom sink is configured through
+    /// <see cref="ZSocketOptions.MessageSink"/> - user code never calls this.
+    /// Must be called before any connection is established; a bound sink is
+    /// mutually exclusive with the raw <see cref="OnFrame"/> surface.
     /// </summary>
-    public void BindMessageSink(IPatternSink sink)
+    internal void BindMessageSink(IPatternSink sink)
     {
         ArgumentNullException.ThrowIfNull(sink);
         lock (StateLock)

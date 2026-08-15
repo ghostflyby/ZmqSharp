@@ -24,12 +24,10 @@ public sealed class CustomSocketTypeTests
     public async Task CustomType_Pair_HandshakeCompletesAndMessagesRoundTrip(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var server = new CustomTypeSocket(CustomName);
+        var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new CustomTypeSocket(CustomName, new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
         await using var client = new CustomTypeSocket(CustomName);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-
-        var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
 
         await server.BindAsync(endpoint, cts.Token);
         await client.ConnectAsync(endpoint, cts.Token);
@@ -74,8 +72,8 @@ public sealed class CustomSocketTypeTests
     /// a pair-shaped single-peer dispatch (0015 section 2.1 / 0019). The
     /// composition face is the protected base constructor.
     /// </summary>
-    private sealed class CustomTypeSocket(string name) : ZSocketBase(
-        new ZSocketOptions(),
+    private sealed class CustomTypeSocket(string name, ZSocketOptions? options = null) : ZSocketBase(
+        options ?? new ZSocketOptions(),
         new ZSinglePeerDispatch(),
         ZSocketType.ForCustom(name))
     {

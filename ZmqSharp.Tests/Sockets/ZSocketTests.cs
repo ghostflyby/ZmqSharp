@@ -536,15 +536,24 @@ public sealed class ZSocketTests
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
+    [Fact]
+    public async Task CustomMessageSink_ComposesNoQueueSurface()
+    {
+        // A custom sink implies callback semantics (0023): the socket does
+        // not compose a queue, so Messages is unavailable.
+        await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = new TestMessageSink(_ => { }) });
+        var act = () => socket.Messages;
+        act.Should().Throw<InvalidOperationException>();
+    }
+
     [Theory]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task MessageSink_AggregatesMultipart_AndDeliversCompleteMessage(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = new ZPairSocket(new ZSocketOptions { Pool = pool, ReceiveSurface = ZReceiveSurface.Callback });
         var sink = new TestMessageSink(message => received.TrySetResult(message));
-        server.BindMessageSink(sink);
+        await using var server = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -611,8 +620,7 @@ public sealed class ZSocketTests
     {
         // The raw frame surface and the message sink are mutually exclusive
         // (0007 section 1): exactly one consumer of the delivery stream.
-        await using var socket = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
-        socket.BindMessageSink(new TestMessageSink(_ => { }));
+        await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = new TestMessageSink(_ => { }) });
         var act = () => socket.OnFrame += (_, _) => true;
         act.Should().Throw<InvalidOperationException>();
     }

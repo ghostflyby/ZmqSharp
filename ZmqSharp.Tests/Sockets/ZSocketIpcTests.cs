@@ -145,8 +145,7 @@ public sealed class ZSocketIpcTests
 
         var endpoint = $"ipc://@{name}";
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
-        server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
+        await using var server = new ZPairSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
         await server.BindAsync(endpoint);
 
         File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeFalse(

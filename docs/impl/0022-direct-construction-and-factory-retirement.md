@@ -14,7 +14,9 @@ times in any order (0002, 0020, 0021).
 two-object composition (`new ZQueueSocket<T>(new T(...), options)`) - the
 wrapper is retired and the queue surface is the default surface of the socket
 itself (`ZQueueSocketBase`). The factory-retirement rule (set-once is `init`
-/ constructor; endpoints are the repeatable surface) stands unchanged.
+/ constructor; endpoints are the repeatable surface) stands unchanged; with
+`ZSocketOptions.MessageSink`, the last post-construction set-once seam
+(`BindMessageSink`) is gone, so the rule is fully realized.
 
 ## 1. Problem
 
@@ -53,7 +55,9 @@ that remain (`BindMessageSink`, and the internal `SetPeerConnectedHandler` /
 `SetReceiveMaterialization`) are not user set-once knobs: the queue wrapper
 binds its own sink and materialization to an already-constructed callback
 socket inside its constructor, and a wrapping type cannot assign a `new`-built
-socket's `init` property, so these stay methods.
+socket's `init` property, so these stay methods. (As of 0023 this rationale
+applies to the wrapper era: `BindMessageSink` is now an internal seam and the
+sink itself is `ZSocketOptions.MessageSink` - see the supersede note above.)
 
 ## 3. The new surface
 

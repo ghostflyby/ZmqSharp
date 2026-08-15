@@ -6,8 +6,9 @@ Revision: 1
 
 Flips the surface relationship: the queue surface becomes the **default**
 receive surface for every concrete socket that can deliver messages, and the
-callback surface (raw `OnFrame` / `BindMessageSink`) becomes an explicit
-opt-out. The `ZQueueSocket<TSocket>` generic wrapper is retired and its queue
+callback surface (raw `OnFrame`, or a custom `ZSocketOptions.MessageSink`)
+becomes an explicit opt-out. The `ZQueueSocket<TSocket>` generic wrapper is
+retired and its queue
 machinery moves into a new `ZQueueSocketBase`; `ZQueueSocketOptions` is
 absorbed into `ZSocketOptions`. Partially supersedes 0022 (queue surface is
 now the default shape, not an explicit two-object composition).
@@ -32,8 +33,10 @@ artifact rather than a design.
   derive from the same base and compose an inert queue surface that never
   receives.
 - `ZReceiveSurface.Callback` (new enum, `ZmqSharp` namespace) opts out: the
-  socket composes no queue and the raw `OnFrame` / `BindMessageSink` surface
-  is the delivery path.
+  socket composes no queue and the raw `OnFrame` surface is the delivery path.
+  Only needed when no sink is configured: a custom
+  `ZSocketOptions.MessageSink` implies callback semantics and makes this
+  option redundant.
 - REQ and REP stay on `ZSocketBase` (no `.Messages`): their protocol cores
   consume inbound messages before any surface could see them, so a queue
   surface would be dead configuration. `ReceiveSurface` is ignored on them.
@@ -43,9 +46,11 @@ var pair = new ZPairSocket();                       // queue surface by default
 await pair.BindAsync("tcp://*:5555");
 var message = await pair.Messages.ReadAsync();      // reads per-peer queues
 
-// Callback opt-out:
-var raw = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
-raw.BindMessageSink(mySink);
+// Custom sink: configured at construction, no queue composed.
+var raw = new ZPairSocket(new ZSocketOptions { MessageSink = mySink });
+
+// Bare callback surface (raw frames): only needs ReceiveSurface.
+var frames = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
 ```
 
 ## 3. Machinery
@@ -70,6 +75,15 @@ pass-through sockets run the borrowed frame tier and policy-composing sockets
 preserving the pre-flip behavior exactly (this is why the materialization
 config is composed by the queue base, not by `ZSocketBase`'s constructor).
 
+The sink itself is constructor configuration: `ZSocketOptions.MessageSink`
+(default null) is snapped by `ZSocketBase` at construction, and
+`BindMessageSink` is now an internal seam used only by `ZQueueSocketBase` to
+bind its own `QueueSurface`. A custom sink therefore implies callback
+semantics and composes no queue (no materialization, no per-peer queues);
+`ReceiveSurface` is only consulted when no sink is set. This closes the last
+post-construction set-once seam - set-once is now entirely `init` properties
+and constructors (0022's rule, fully realized).
+
 `SetPeerConnectedHandler` became multicast: SUB's subscription propagation
 (`SendSubscriptionsTo`) and the queue surface's per-peer state both register,
 and both run on every new peer. The single-slot version could never have
@@ -81,6 +95,8 @@ hosted a queue-wrapped SUB; the flip makes the combination the default.
 `ZSocketOptions` alongside the existing five:
 
 - `ZReceiveSurface ReceiveSurface` (new, default `Queue`)
+- `IPatternSink? MessageSink` (new, default null): custom sink, delivered to
+  directly; implies callback semantics and composes no queue
 - `ZQueueFactory ReceiveQueueFactory` (default bounded 16 SPSC)
 - `ZQueueFactory? SendQueueFactory` (default null)
 - `IZReceivePolicy ReceivePolicy` (default `ZReceiveOptions`)
@@ -93,12 +109,13 @@ as the pool, security, and handshake limits.
 ## 5. Migration
 
 `new ZQueueSocket<T>(new T())` → `new T()`; the queue options bag merges into
-the socket's `ZSocketOptions`; a callback-mode socket on a built-in type adds
-`ReceiveSurface = ZReceiveSurface.Callback`. `.Messages` / `.Outbound` /
-`.ReceiveRejections` read the same names directly on the socket. All 308 tests
-were migrated without behavioral change; the receive allocation tests keep
-measuring the pump-thread `IPatternSink` seam by explicitly opting out to the
-callback surface.
+the socket's `ZSocketOptions`; a sink-bound socket sets
+`MessageSink = sink` at construction (no `ReceiveSurface` needed), and a bare
+frame socket adds `ReceiveSurface = ZReceiveSurface.Callback`. `.Messages` /
+`.Outbound` / `.ReceiveRejections` read the same names directly on the socket.
+All 309 tests were migrated without behavioral change; the receive allocation
+tests keep measuring the pump-thread `IPatternSink` seam through a
+constructor-configured sink.
 
 ## 6. Consequences
 

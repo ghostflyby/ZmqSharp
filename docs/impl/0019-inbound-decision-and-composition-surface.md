@@ -36,7 +36,7 @@ three places at once:
 - REQ and REP implement `IPatternSink` and bind themselves as the socket's
   sink, intercepting inbound messages to consume them (delimiter stripping,
   current-peer gate, request slot). This hijacks the public delivery surface:
-  a `BindMessageSink` consumer can never attach to a REQ.
+  a `ZSocketOptions.MessageSink` consumer can never attach to a REQ.
 - `ZSocketBase.OnPatternPeerEnded` (whose name still says "Pattern") is the
   teardown hook for per-pattern state such as ROUTER's identity map.
 
@@ -146,11 +146,12 @@ public sealed class ZDelegateInboundPolicy(ZInboundDecide decide) : IZInboundPol
   non-default inbound policy (protocol sockets such as REQ/REP need the
   aggregation but no public sink). A `Deliver` decision on the aggregated
   tier with no bound sink drops the message.
-- `BindMessageSink` stays the delivery surface for the queue surface's
-  internal `QueueSurface` (bound by `ZQueueSocketBase` at construction, 0023)
-  and for user sinks on callback-opted-out sockets; protocol sockets (REQ/REP)
-  stop implementing `IPatternSink` and stop binding themselves, so
-  `BindMessageSink` is no longer hijacked.
+- A custom sink is configured at construction through
+  `ZSocketOptions.MessageSink` (0023): `BindMessageSink` is now an internal
+  seam used only by `ZQueueSocketBase` to bind its own `QueueSurface`; user
+  sinks are constructor configuration, so set-once is enforced by the
+  language. Protocol sockets (REQ/REP) stop implementing `IPatternSink` and
+  stop binding themselves, so the seam is no longer hijacked.
 - The aggregated tier tail becomes:
 
   ```csharp
@@ -342,7 +343,7 @@ All three work items landed. Deviations from the draft, recorded honestly:
   finding): a non-default inbound policy (ROUTER, SUB, XPUB, REQ, REP) always
   aggregates, so subscribing to the raw frame surface on those sockets would
   silently deliver nothing; the `OnFrame` add path throws instead. This
-  replaces the pre-refactor REQ/REP behavior (their `BindMessageSink(this)`
+  replaces the pre-refactor REQ/REP behavior (their self-binding)
   interception made `OnFrame` throw) and the pre-refactor ROUTER/SUB/XPUB
   behavior (raw frames without filtering/prefixing/forwarding).
 - The base constructor is `protected` and is the third-party composition
