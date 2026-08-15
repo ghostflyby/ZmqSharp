@@ -6,14 +6,14 @@ Date: 2026-08-07
 Defines how the queue surface (`ZQueueSocketBase`, 0002/0023) materializes
 received messages: per message, whether the result is pooled or owned, and
 how frame continuity is chosen. The low-level borrowed callback is a
-separate, complete mode on `IZCallbackSocket`; this document covers the
-materialization policy only.
+separate, complete mode on the `OnFrame` member of `ZSocketBase`; this
+document covers the materialization policy only.
 
 ## 1. Context
 
 Receive has two tiers, aligned with 0002 and 0004:
 
-- Low tier: `IZCallbackSocket.OnFrame` delivers borrowed frames, zero copy, always.
+- Low tier: the borrowed `OnFrame` surface delivers raw frames, zero copy, always.
   The caller owns everything it does with a frame during the callback.
 - Queue tier: each peer's parser materializes messages directly into that
   peer's bounded receive queue, then the socket type aggregates the peer
@@ -99,7 +99,7 @@ separation are defined by 0008.
 - Carried by `ZSocketOptions.ReceivePolicy` as a non-null
   `IZReceivePolicy` defaulting to `new ZReceiveOptions()` (0002), so the
   default behavior is the declarative default configuration; the low-tier
-  `IZCallbackSocket.OnFrame` is not involved and stays borrowed.
+  `OnFrame` is not involved and stays borrowed.
 - `Decide` is invoked **once per frame**, with the current frame's context
   plus message accumulation: `FrameIndex` is the zero-based index within the
   message and `AccumulatedLength` is the total bytes up to and including the
@@ -113,7 +113,7 @@ separation are defined by 0008.
   the guard (0008 D6), and it is not a per-message drop. Consumers that want
   per-message filtering must do it at the message API, not in the allocator.
 - `Borrowed` is not a mode here: borrowed delivery is the identity of the
-  `IZCallbackSocket` tier, not an option of queue materialization.
+  `OnFrame` tier, not an option of queue materialization.
 
 ### 4.2 Continuity policy
 

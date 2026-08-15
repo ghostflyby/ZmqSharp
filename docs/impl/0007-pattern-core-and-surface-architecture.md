@@ -166,10 +166,10 @@ Rules of the seam:
 
 ### 2.4 Surfaces
 
-1. Raw callback surface (existing `IZCallbackSocket`): borrowed frames, valid
-   only during the call. This is the low-level primitive and bypasses the
-   pattern core entirely; an instance is either raw or pattern-wrapped, never
-   both.
+1. Raw callback surface (the borrowed `OnFrame` member of `ZSocketBase`):
+   borrowed frames, valid only during the call. This is the low-level
+   primitive and bypasses the pattern core entirely; an instance is either
+   raw or pattern-wrapped, never both.
 2. Typed callback surface: implements `IPatternSink`, presents `(peer,
    message)` as pattern-typed events (REP `ZRequestContext`, ROUTER routed
    value). Pattern delegates may be asynchronous (`ValueTask`); backpressure is
@@ -390,7 +390,7 @@ documents fix exact signatures.
 ## 8. References
 
 - 0001 - message model and API layering (borrowed vs owned, D1-D8).
-- 0002 - socket architecture and queue socket (callback primitive, layering).
+- 0002 - socket architecture and queue socket (callback surface, layering).
 - 0004 - per-peer queue model (per-type selection table, hard constraints).
 - 0005 - union-like value types (candidate shape for decision and routed
   values).

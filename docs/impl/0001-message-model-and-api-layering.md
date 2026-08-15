@@ -25,7 +25,7 @@ Non-goals:
 Application
   |
   +-- ZQueueSocketBase      queue surface (default, 0023): Channel API, per-peer queues (0002)
-  +-- IZCallbackSocket      callback surface (opt-out, 0023): borrowed frame callback (0002)
+  +-- OnFrame (base)    callback surface (opt-out, 0023): borrowed frame callback (0002)
   +-- ZMTP Session     per-peer connection: greeting / handshake / traffic
   +-- Transport        TCP / IPC / inproc (pluggable)
 ```

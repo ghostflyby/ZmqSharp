@@ -59,7 +59,7 @@ protected constructor is therefore the whole composition surface, and it must
 exactly contain what a developer decides:
 
 ```csharp
-public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
+public abstract class ZSocketBase : ZAsyncState, IZSocket
 {
     protected ZSocketBase(
         ZSocketOptions options,
