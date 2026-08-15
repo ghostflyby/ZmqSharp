@@ -125,5 +125,11 @@ constructor-configured sink.
   queues coexist through the multicast handler).
 - The 0022 rule stands: set-once is `init` / constructor; endpoints
   (`BindAsync` / `ConnectAsync`) are the only repeatable surface.
+- There is no receive interface: `IZSocket` is endpoints + send only, and the
+  callback surface is the borrowed `OnFrame` member of `ZSocketBase` itself.
+  The retired `IZCallbackSocket` promised callback capability on the default
+  queue surface where `OnFrame` throws and `ResumePaused` is a no-op; the
+  concrete members say what each socket actually supports, so both surfaces
+  are honest.
 - Design documents 0001, 0002, 0004, 0006, 0007, 0008, 0009, 0011, 0012,
   0013, 0018, 0019 and the README were updated to the queue-default shapes.

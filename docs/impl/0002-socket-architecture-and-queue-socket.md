@@ -1,13 +1,13 @@
-# 0002 - Socket Architecture: Callback Primitive and Queue Socket
+# 0002 - Socket Architecture: Callback Surface and Queue Socket
 
 Status: draft
 Date: 2026-08-07
 
-Extends 0001 into the socket layer: a low-level callback primitive
-(`IZCallbackSocket`) and the queue surface (`ZQueueSocketBase`) that every
-deliverable socket composes by default (0023), following the per-peer queue
-model of 0004. The transport/connection separation matches the current
-implementation.
+Extends 0001 into the socket layer: a low-level callback surface (the
+borrowed `OnFrame` member of `ZSocketBase`) and the queue surface
+(`ZQueueSocketBase`) that every deliverable socket composes by default (0023),
+following the per-peer queue model of 0004. The transport/connection
+separation matches the current implementation.
 
 ## 1. Layering
 
@@ -16,8 +16,8 @@ Application
   |
   +-- ZQueueSocketBase      queue surface (default, 0023): per-peer queues; Channel delivery (0004)
   |
-  +-- IZCallbackSocket   low-level primitive: bind/connect, peer management,
-  |                      borrowed frame callback, direct send
+  +-- OnFrame (base)    callback surface (opt-out, 0023): borrowed frame callback,
+  |                      direct send
   |
   +-- ZConnection        per-peer full-duplex session (internal)
   +-- ZmtpParser         per-peer frame parser (borrowed, see 0001)
@@ -28,7 +28,7 @@ Socket types are subtypes of a shared base (libzmq-style): each type is its
 own class implementing its routing and aggregation semantics; the callback is
 the low-level receive contract and stays independent of the queue tier.
 
-## 2. IZSocket (Common Contract) and IZCallbackSocket
+## 2. IZSocket (Common Contract)
 
 ```csharp
 public interface IZSocket : IAsyncDisposable
@@ -43,23 +43,15 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
     // Send: direct, ownership transfers.
+    ValueTask SendAsync(ZMessage message, CancellationToken token = default);
     ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
-    ValueTask SendAsync(IZMessage message, CancellationToken token = default);
-}
-
-public interface IZCallbackSocket : IZSocket
-{
-    // Receive: borrowed streaming frame callback (low-level).
-    event ZFrameHandler? OnFrame;
-    event Action<Exception?>? PeerEnded;
-    void ResumePaused();
 }
 ```
 
 - `IZSocket` is the small common contract (endpoints + direct send) shared by
-  every socket surface.
-- `IZCallbackSocket` adds the borrowed receive surface; `OnFrame` delivers each frame
-  borrowed (valid only during the call); a
+  every socket surface; there is no receive interface - the callback surface
+  is the borrowed `OnFrame` member of `ZSocketBase` itself (0023).
+- `OnFrame` delivers each frame borrowed (valid only during the call); a
   multipart message arrives as consecutive frames until `More` is false.
   Returning false pauses the receive pump; `PeerEnded` reports connection
   teardown; `ResumePaused` resumes paused pumps.
@@ -133,7 +125,7 @@ As implemented:
 
 ## 6. Receive Pipeline
 
-- Low level: `IZCallbackSocket.OnFrame` streams borrowed frames (0001 section 4).
+- Low level: the borrowed `OnFrame` surface streams raw frames (0001 section 4).
 - Delivery chain: the parser awaits an async sink (`IZMessageSink.OnFrameAsync`
   returning `ValueTask<bool>`); a pending task pauses that peer's pump until it
   completes (0007 section 6 step 2).
@@ -207,7 +199,7 @@ binding/connection is the only repeatable surface
 
 ## 10. Test Plan
 
-- TCP loopback round-trip through `IZCallbackSocket.OnFrame` (borrowed, multipart
+- TCP loopback round-trip through the borrowed `OnFrame` surface (multipart
   streamed) and through `Messages` on the default queue surface (assembled).
 - Per-peer isolation: one slow peer must not pause another peer's receive
   queue.

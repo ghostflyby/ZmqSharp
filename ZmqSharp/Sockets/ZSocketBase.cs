@@ -19,7 +19,7 @@ namespace ZmqSharp;
 /// socket identity (<see cref="ZSocketType"/>); socket types are thin
 /// composition roots over the protected constructor.
 /// </summary>
-public abstract class ZSocketBase : ZAsyncState, IZCallbackSocket
+public abstract class ZSocketBase : ZAsyncState, IZSocket
 {
     /// <summary>
     /// Copy-on-write routable-peer snapshot: rebuilt only when a peer is
