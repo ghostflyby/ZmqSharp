@@ -13,7 +13,7 @@ namespace ZmqSharp;
 /// inbound policy; this socket only delegates. Wire frames carry no identity
 /// (ZMTP 3.0 routing ids are local to the router).
 /// </summary>
-public sealed class ZRouterSocket : ZSocketBase
+public sealed class ZRouterSocket : ZQueueSocketBase
 {
     private readonly ZIdentityDispatch dispatch;
 

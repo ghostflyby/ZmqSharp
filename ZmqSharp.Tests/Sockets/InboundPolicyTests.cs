@@ -122,7 +122,7 @@ public sealed class InboundPolicyTests
         // A non-default inbound policy consumes the aggregated delivery
         // stream, so the raw frame surface must fail loudly instead of
         // silently delivering nothing (subagent review finding).
-        await using var router = new ZRouterSocket();
+        await using var router = new ZRouterSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
         var act = () => router.OnFrame += (_, _) => true;
 
         act.Should().Throw<InvalidOperationException>()
@@ -132,7 +132,7 @@ public sealed class InboundPolicyTests
     [Fact]
     public async Task OnFrame_OnPassThroughSocket_Subscribes()
     {
-        await using var pair = new ZPairSocket();
+        await using var pair = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
         var subscribed = false;
         pair.OnFrame += (_, _) =>
         {

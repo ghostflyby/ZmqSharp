@@ -261,7 +261,7 @@ Implemented:
   that peer's pump (0007 section 6 step 2). The owning queue tier no longer
   depends on `ResumePaused`; the low-level borrowed callback API retains its
   own synchronous pause model.
-- Receive full modes are configurable via `ZQueueSocketOptions.ReceiveQueueFactory`
+- Receive full modes are configurable via `ZSocketOptions.ReceiveQueueFactory`
   (`Wait`, `DropWrite`, `DropNewest`, `DropOldest`, 0009). Drop modes create the
   per-peer bounded channel with the BCL `itemDropped` callback wired to the
   library's mandatory `ZMessage.Dispose`, so the item selected by each mode is
@@ -275,7 +275,7 @@ Implemented:
   per-peer single writer), so a continuously readable queue does not produce a
   notification busy loop.
 - Send-side (outbound) full modes are configurable via
-  `ZQueueSocketOptions.SendQueueFactory` (`Wait`, `DropWrite`, `DropNewest`,
+  `ZSocketOptions.SendQueueFactory` (`Wait`, `DropWrite`, `DropNewest`,
   `DropOldest`, 0009). The outbound channel is a BCL bounded channel with the same
   mandatory `itemDropped` disposal, so a drop mode never blocks a producer and
   every dropped message is reclaimed.
@@ -316,7 +316,7 @@ Implemented:
 
 - Both hot paths read a copy-on-write snapshot as a single volatile load
   instead of allocating a list per operation: `ZSocketBase.peerSnapshot`
-  (routable connections) and `ZQueueSocket.peerSnapshot` (active peer states)
+  (routable connections) and `ZQueueSocketBase.peerSnapshot` (active peer states)
   are rebuilt only when a peer is added or removed. `RouteOutbound` takes the
   snapshot as a `ReadOnlySpan<IZConnection>` and returns a single target
   (`IZConnection?`; null = drop), so the send path allocates no peer list and
@@ -329,7 +329,7 @@ Implemented:
   established. A peer that retires before or during its write is dropped
   (decided), not a fault, and never aborts the send.
 - Peer receive-queue lifetime is modeled as `Active`, `Draining`, and
-  `Closed` (`ZQueueSocket.PeerPhase`). On disconnect the peer is moved to
+  `Closed` (`ZQueueSocketBase.PeerPhase`). On disconnect the peer is moved to
   `Draining`, removed from the aggregate snapshot, and reclaimed immediately
   (accumulated frames plus buffered messages disposed through the 0006 2.2
   path), then marked `Closed`; this satisfies the completion-gate
@@ -426,7 +426,7 @@ its public API is implemented.
 Recommended exploration order:
 
 1. PAIR as the minimal single-peer lifecycle surface.
-   Implemented: `ZPairSocket` / `ZQueueSocket&lt;ZPairSocket&gt;` with NetMQ
+   Implemented: `ZPairSocket` (queue surface by default, 0023) with NetMQ
    interop both directions (0006 section 5).
 2. PUSH/PULL as one-directional load balancing and fair intake.
    Implemented (0011): send-only round-robin PUSH, receive-only fair-queue

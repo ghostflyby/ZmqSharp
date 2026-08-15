@@ -84,10 +84,8 @@ public sealed class ZSocketIpcTests
     {
         var endpointA = $"ipc://{pathA}";
         var endpointB = $"ipc://{TestTransports.IpcSocketPath("zmqsharp-test-")}";
-        await using var pullA = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        await using var pullB = new ZQueueSocket<ZPullSocket>(new ZPullSocket(), new ZQueueSocketOptions
-        { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var pullA = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
+        await using var pullB = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var push = new ZPushSocket();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -147,7 +145,7 @@ public sealed class ZSocketIpcTests
 
         var endpoint = $"ipc://@{name}";
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = new ZPairSocket();
+        await using var server = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
         server.BindMessageSink(new TestSink(message => received.TrySetResult(message)));
         await server.BindAsync(endpoint);
 
@@ -174,9 +172,8 @@ public sealed class ZSocketIpcTests
         }
     }
 
-    private static async Task DrainAsync<TSocket>(ZQueueSocket<TSocket> socket, Action onMessage,
+    private static async Task DrainAsync(ZQueueSocketBase socket, Action onMessage,
         CancellationToken token)
-        where TSocket : ZSocketBase
     {
         await foreach (var message in socket.Messages.ReadAllAsync(token))
         {

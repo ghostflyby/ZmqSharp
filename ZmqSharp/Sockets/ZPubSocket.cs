@@ -9,7 +9,7 @@ namespace ZmqSharp;
 /// Non-sealed with an internal type/inbound-taking constructor so XPUB can
 /// reuse the broadcast send.
 /// </summary>
-public class ZPubSocket : ZSocketBase
+public class ZPubSocket : ZQueueSocketBase
 {
     public ZPubSocket(ZSocketOptions? options = null)
         : this(options ?? new ZSocketOptions(), ZSocketTypes.Pub)

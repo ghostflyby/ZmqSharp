@@ -5,12 +5,16 @@ Date: 2026-08-14
 Revision: 1
 
 Retires the `ZSocket` static factory. Every socket is constructed directly
-with `new`; set-once configuration lives in `ZSocketOptions` /
-`ZQueueSocketOptions` as `init` properties; the queue surface is an explicit
-two-object composition (`new ZQueueSocket<T>(new T(...), options)`). The only
-repeatable surface is endpoint management: `BindAsync` / `ConnectAsync` /
-`UnbindAsync` / `DisconnectAsync`, callable any number of times in any order
-(0002, 0020, 0021).
+with `new`; set-once configuration lives in `ZSocketOptions` as `init`
+properties. The only repeatable surface is endpoint management: `BindAsync` /
+`ConnectAsync` / `UnbindAsync` / `DisconnectAsync`, callable any number of
+times in any order (0002, 0020, 0021).
+
+**Partially superseded by 0023**: the queue surface is no longer an explicit
+two-object composition (`new ZQueueSocket<T>(new T(...), options)`) - the
+wrapper is retired and the queue surface is the default surface of the socket
+itself (`ZQueueSocketBase`). The factory-retirement rule (set-once is `init`
+/ constructor; endpoints are the repeatable surface) stands unchanged.
 
 ## 1. Problem
 

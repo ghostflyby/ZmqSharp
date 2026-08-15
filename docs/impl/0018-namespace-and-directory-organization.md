@@ -44,11 +44,11 @@ needs.
 
 A single `using ZmqSharp;` covers all basic usage:
 
-- Entry points and surfaces: `ZQueueSocket<TSocket>`, the concrete socket
-  composition roots (directly constructed, 0022), `IZSocket`, `IZCallbackSocket`,
-  `IPatternSink`.
-- Base classes: `ZSocketBase`, `ZAsyncState` (public because public socket
-  types derive from it; its members are protected).
+- Entry points and surfaces: the concrete socket composition roots (directly
+  constructed, 0022/0023), `IZSocket`, `IZCallbackSocket`, `IPatternSink`.
+- Base classes: `ZSocketBase`, `ZQueueSocketBase` (the default queue surface,
+  0023), `ZAsyncState` (public because public socket types derive from it; its
+  members are protected).
 - Concrete sockets: `ZPairSocket`, `ZDealerSocket`, `ZReqSocket`, `ZRepSocket`,
   `ZPushSocket`, `ZPullSocket`, `ZRouterSocket`, `ZPubSocket`, `ZSubSocket`,
   `ZXPubSocket`, `ZXSubSocket`.
@@ -56,13 +56,13 @@ A single `using ZmqSharp;` covers all basic usage:
   REQ/REP example).
 - Message model: `ZMessage`, `ZFrame`, `ZSegment`, `ZSegments`,
   `ZSingleMessage`, `ZMultiMessage` (with their nested enumerators).
-- Configuration: `ZSocketOptions`, `ZQueueSocketOptions`, `ZSecurityOptions`,
-  `ZSocketExtensions`.
+- Configuration: `ZSocketOptions` (one bag per socket, including queue tuning
+  and `ZReceiveSurface`, 0023), `ZSecurityOptions`, `ZSocketExtensions`.
 - Receive/queue tuning: `ZReceiveMode`, `ZReceiveAllocation`, `ZReceiveContext`,
   `IZReceivePolicy`, `ZDecide`, `ZDelegateReceivePolicy`, `ZReceiveOptions`,
   `ZReceiveRejectionReason`, `ZReceiveRejection`, `IZQueueFactory`,
   `ZQueueFactory`. These live with the configuration they feed
-  (`ZQueueSocketOptions`), so one import covers all configuration scenarios.
+  (`ZSocketOptions`), so one import covers all configuration scenarios.
 - Exceptions: `ZeroMqProtocolException`.
 
 ### Sub-namespaces - domain-specific feature areas
@@ -134,7 +134,7 @@ place.
   extension author pays the extra import, exactly as a mechanism author
   imports `ZmqSharp.Security`.
 - **Receive/queue tuning types stay in the top-level `ZmqSharp`**: they are
-  configuration for `ZQueueSocketOptions` and are needed by the same import.
+  configuration for `ZSocketOptions` and are needed by the same import.
 - **No behavior changes**: this is a pure structural reorganization; socket
   type names, members, and semantics are unchanged.
 

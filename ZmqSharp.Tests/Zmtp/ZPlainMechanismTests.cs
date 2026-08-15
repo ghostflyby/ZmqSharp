@@ -139,19 +139,18 @@ public sealed class ZPlainMechanismTests
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes(TransportKind kind)
     {
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
+        await using var server = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
             {
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("secret"u8))
-            }
-        }), new ZQueueSocketOptions
-        {
+            },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
-        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "secret"u8) } }), new ZQueueSocketOptions
+        await using var client = new ZPairSocket(new ZSocketOptions
         {
+            Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "secret"u8) },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -171,19 +170,18 @@ public sealed class ZPlainMechanismTests
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task PlainMechanism_BadPassword_FaultsClientConnect(TransportKind kind)
     {
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
+        await using var server = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
             {
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("secret"u8))
-            }
-        }), new ZQueueSocketOptions
-        {
+            },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
-        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "wrong"u8) } }), new ZQueueSocketOptions
+        await using var client = new ZPairSocket(new ZSocketOptions
         {
+            Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "wrong"u8) },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
 

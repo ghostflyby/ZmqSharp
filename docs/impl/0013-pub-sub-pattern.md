@@ -44,7 +44,7 @@ and subscription propagation to publishers.
 
 ```csharp
 new ZPubSocket(ZSocketOptions?)    -> ZPubSocket   // SendAsync broadcast
-new ZSubSocket(ZSocketOptions?)    -> ZSubSocket   // Subscribe/Unsubscribe + BindMessageSink
+new ZSubSocket(ZSocketOptions?)    -> ZSubSocket   // Subscribe/Unsubscribe + queue surface (Messages, 0023)
 ```
 
 ## 5. Interop acceptance

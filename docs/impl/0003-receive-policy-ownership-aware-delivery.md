@@ -3,7 +3,7 @@
 Status: draft
 Date: 2026-08-07
 
-Defines how the queue tier (`ZQueueSocket<TSocket>`, 0002) materializes
+Defines how the queue surface (`ZQueueSocketBase`, 0002/0023) materializes
 received messages: per message, whether the result is pooled or owned, and
 how frame continuity is chosen. The low-level borrowed callback is a
 separate, complete mode on `IZCallbackSocket`; this document covers the
@@ -88,7 +88,7 @@ public sealed class ZDelegateReceivePolicy(ZDecide decide) : IZReceivePolicy;
 
 `Decide` returns the allocation only - there is no rejection case, because
 whether a frame may be received is not a per-frame policy concern (0008 D1):
-the resource limits are connection-level options on `ZQueueSocketOptions`
+the resource limits are connection-level options on `ZSocketOptions`
 enforced by a guard outside the policy, and content-based filtering happens at
 the message API, not in the allocator. `ZReceiveOptions` is the
 configuration-only policy (fixed allocation); custom policies implement
@@ -96,7 +96,7 @@ configuration-only policy (fixed allocation); custom policies implement
 `ZDelegateReceivePolicy`. The rejection contract, limits, and failure-class
 separation are defined by 0008.
 
-- Carried by `ZQueueSocketOptions.ReceivePolicy` as a non-null
+- Carried by `ZSocketOptions.ReceivePolicy` as a non-null
   `IZReceivePolicy` defaulting to `new ZReceiveOptions()` (0002), so the
   default behavior is the declarative default configuration; the low-tier
   `IZCallbackSocket.OnFrame` is not involved and stays borrowed.

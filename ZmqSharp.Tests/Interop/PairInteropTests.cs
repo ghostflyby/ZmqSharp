@@ -24,10 +24,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
-        });
+        await using var server = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await server.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -52,10 +49,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
-        });
+        await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -80,10 +74,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
-        });
+        await using var socket = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -122,10 +113,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
-        });
+        await using var socket = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
@@ -151,10 +139,7 @@ public sealed class PairInteropTests
         var port = InteropHelpers.GetFreePort();
         peer.Bind($"tcp://127.0.0.1:{port}");
 
-        await using var socket = new ZQueueSocket<ZPairSocket>(new ZPairSocket(), new ZQueueSocketOptions
-        {
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
-        });
+        await using var socket = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
         socket.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await socket.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);

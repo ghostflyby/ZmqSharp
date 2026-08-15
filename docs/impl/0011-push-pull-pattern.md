@@ -35,11 +35,11 @@ it as-is. Multipart is preserved (0001 D3).
 ## 4. Public shapes
 
 ```csharp
-public sealed class ZPushSocket(ZSocketOptions? options = null) : ZSocketBase(...)   // SendAsync only
-public sealed class ZPullSocket(ZSocketOptions? options = null) : ZSocketBase(...)   // wrapped by ZQueueSocket
+public sealed class ZPushSocket(ZSocketOptions? options = null) : ZQueueSocketBase(...)   // SendAsync only
+public sealed class ZPullSocket(ZSocketOptions? options = null) : ZQueueSocketBase(...)    // queue surface by default (0023)
 
-new ZPushSocket()                                -> ZPushSocket
-new ZQueueSocket<ZPullSocket>(new ZPullSocket()) -> ZQueueSocket<ZPullSocket>
+new ZPushSocket()   -> ZPushSocket
+new ZPullSocket()   -> ZPullSocket   // Messages reads the per-peer queues
 ```
 
 Socket-Type compatibility: PUSH <-> PULL.

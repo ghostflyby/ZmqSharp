@@ -25,19 +25,18 @@ public sealed class CurveEndToEndTests
         var serverKeys = (Public: serverPublic, Secret: serverSecret);
         var clientKeys = (Public: clientPublic, Secret: clientSecret);
 
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys.Secret) } }), new ZQueueSocketOptions
+        await using var server = new ZPairSocket(new ZSocketOptions
         {
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys.Secret) },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
 
-        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
+        await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
             {
                 Mechanism = new CurveMechanism(crypto, clientKeys.Secret, serverKeys.Public)
-            }
-        }), new ZQueueSocketOptions
-        {
+            },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -75,21 +74,20 @@ public sealed class CurveEndToEndTests
         crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
         crypto.GenerateKeyPair(out var wrongPublic, out _);
 
-        await using var server = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverSecret) } }), new ZQueueSocketOptions
+        await using var server = new ZPairSocket(new ZSocketOptions
         {
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverSecret) },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
 
-        await using var client = new ZQueueSocket<ZPairSocket>(new ZPairSocket(new ZSocketOptions
+        await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
             {
                 // The client holds a different server public key: the WELCOME
                 // box never opens, and establishment must fault.
                 Mechanism = new CurveMechanism(crypto, clientSecret, wrongPublic)
-            }
-        }), new ZQueueSocketOptions
-        {
+            },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
 

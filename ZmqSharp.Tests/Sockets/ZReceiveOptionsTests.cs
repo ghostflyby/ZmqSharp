@@ -145,7 +145,7 @@ public sealed class ZReceiveOptionsTests
     [Fact]
     public void QueueOptions_DefaultPolicy_IsDefaultConfiguration()
     {
-        var options = new ZQueueSocketOptions();
+        var options = new ZSocketOptions();
 
         var policy = options.ReceivePolicy;
         policy.Should().BeOfType<ZReceiveOptions>();

@@ -3,11 +3,11 @@
 Status: draft
 Date: 2026-08-10
 
-Defines the declaration-style channel construction system for
-`ZQueueSocket<TSocket>`: a `ZQueueFactory` strategy type with bounded and
-unbounded implementations, mirroring the receive policy system (0003/0008).
-Channel configuration moves from the four scalar `ZQueueSocketOptions`
-fields to two factory properties; BCL channel options convert implicitly
+Defines the declaration-style channel construction system for the queue
+surface (`ZQueueSocketBase`, 0002/0023): a `ZQueueFactory` strategy type with
+bounded and unbounded implementations, mirroring the receive policy system
+(0003/0008). Channel configuration lives in two factory properties on
+`ZSocketOptions`; BCL channel options convert implicitly
 into a factory.
 
 This document supersedes the channel-configuration parts of 0002, 0004, 0006,
@@ -17,7 +17,7 @@ and `SendFullMode`.
 ## 1. Motivation
 
 The receive and outbound channels of the queue socket were configured through
-scalar fields on `ZQueueSocketOptions`. That shape cannot express bounded
+scalar fields on `ZSocketOptions`. That shape cannot express bounded
 versus unbounded channels, thread-safety flags, or synchronous-continuation
 preferences, and it duplicated BCL's own `BoundedChannelOptions` /
 `UnboundedChannelOptions`. The factory system makes channel construction a
@@ -50,7 +50,8 @@ implicitly into a factory, so all configuration goes through the one
 uniform shape:
 
 ```csharp
-public sealed class ZQueueSocketOptions
+// Queue factories live on ZSocketOptions (0023); the queue surface is the default.
+public sealed class ZSocketOptions
 {
     public ZQueueFactory ReceiveQueueFactory { get; init; } = new BoundedChannelOptions(16) { SingleWriter = true };
     public ZQueueFactory? SendQueueFactory { get; init; }   // null = outbound disabled
@@ -58,7 +59,7 @@ public sealed class ZQueueSocketOptions
 ```
 
 ```csharp
-var options = new ZQueueSocketOptions
+var options = new ZSocketOptions
 {
     ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
     SendQueueFactory = new BoundedChannelOptions(8)
@@ -82,7 +83,7 @@ non-generic `ZQueueFactory` base hosts both conversion operators, so this
 compiles:
 
 ```csharp
-var options = new ZQueueSocketOptions
+var options = new ZSocketOptions
 {
     ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
 };

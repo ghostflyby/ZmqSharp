@@ -73,7 +73,7 @@ public delegate ZReceiveAllocation ZDecide(ZReceiveContext context);
 /// Numeric-configuration receive policy: fixed ownership plus a frame-length
 /// threshold that decides continuity. Allocation only; rejection limits are
 /// not part of the policy - they are enforced by a connection-level guard on
-/// <see cref="ZQueueSocketOptions"/> (0008 D1/D6), so a custom policy can
+/// <see cref="ZSocketOptions"/> (0008 D1/D6), so a custom policy can
 /// never bypass them.
 /// </summary>
 public sealed class ZReceiveOptions : IZReceivePolicy

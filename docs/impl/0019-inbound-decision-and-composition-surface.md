@@ -146,10 +146,11 @@ public sealed class ZDelegateInboundPolicy(ZInboundDecide decide) : IZInboundPol
   non-default inbound policy (protocol sockets such as REQ/REP need the
   aggregation but no public sink). A `Deliver` decision on the aggregated
   tier with no bound sink drops the message.
-- `BindMessageSink` stays the delivery surface for `ZQueueSocket`'s
-  `QueueSurface` and user sinks; protocol sockets stop implementing
-  `IPatternSink` and stop binding themselves, so `BindMessageSink` is no
-  longer hijacked.
+- `BindMessageSink` stays the delivery surface for the queue surface's
+  internal `QueueSurface` (bound by `ZQueueSocketBase` at construction, 0023)
+  and for user sinks on callback-opted-out sockets; protocol sockets (REQ/REP)
+  stop implementing `IPatternSink` and stop binding themselves, so
+  `BindMessageSink` is no longer hijacked.
 - The aggregated tier tail becomes:
 
   ```csharp

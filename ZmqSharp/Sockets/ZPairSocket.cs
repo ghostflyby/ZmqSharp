@@ -2,6 +2,6 @@ using ZmqSharp.Patterns;
 
 namespace ZmqSharp;
 
-/// <summary>PAIR composition root: single peer, no routing (0007 section 5).</summary>
+/// <summary>PAIR composition root: single peer, no routing, queue receive surface (0007 section 5, 0023).</summary>
 public sealed class ZPairSocket(ZSocketOptions? options = null)
-    : ZSocketBase(options ?? new ZSocketOptions(), new ZSinglePeerDispatch(), ZSocketTypes.Pair);
+    : ZQueueSocketBase(options ?? new ZSocketOptions(), new ZSinglePeerDispatch(), ZSocketTypes.Pair);
