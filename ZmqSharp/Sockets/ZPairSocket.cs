@@ -13,10 +13,19 @@ public sealed class ZPairSocket(ZSocketOptions? options = null)
         return SendAsyncCore(message, token);
     }
 
-    /// <summary>Direct send: copies the payload into an owned message before routing.</summary>
+    /// <summary>
+    /// Direct send that borrows the caller's buffer instead of copying
+    /// (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
+    /// (a non-array backing may be copied inside the awaited write). The
+    /// caller must not modify the buffer until the returned task completes;
+    /// after the await the buffer is free again. Use
+    /// <c>ZMessage.Copy</c> + <see cref="SendAsync(ZMessage, CancellationToken)"/>
+    /// when the buffer must stay mutable across the send.
+    /// </summary>
     public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        return SendAsyncCore(bytes, token);
+        var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(bytes))));
+        return SendAsyncCore(message, token);
     }
 
     /// <summary>Direct send of a single frame with non-contiguous content, copied (0026).</summary>

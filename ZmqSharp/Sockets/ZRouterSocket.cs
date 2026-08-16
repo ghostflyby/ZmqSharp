@@ -50,13 +50,20 @@ public sealed class ZRouterSocket : ZQueueSocketBase
         await SendToAsync(peer, message, token);
     }
 
+    /// <summary>
+    /// Identity-addressed send that borrows the caller's buffer instead of
+    /// copying (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
+    /// (a non-array backing may be copied inside the awaited write). The caller must not modify
+    /// the buffer until the returned task completes; after the await the
+    /// buffer is free again.
+    /// </summary>
     public async ValueTask SendAsync(ReadOnlyMemory<byte> identity, ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        var owner = Pool.Rent(bytes.Length);
-        bytes.CopyTo(owner.Memory);
-        var message = new ZMessage(new ZSingleMessage(
-            new ZFrame(new ZSegment(owner, 0, bytes.Length))));
-        await SendAsync(identity, message, token);
+        if (identity.IsEmpty || !dispatch.TryResolve(identity.Span, out var peer) || peer is null)
+            return;
+
+        var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(bytes))));
+        await SendToAsync(peer, message, token);
     }
 
     /// <summary>Addresses a peer by identity with a non-contiguous frame, copied (0026).</summary>

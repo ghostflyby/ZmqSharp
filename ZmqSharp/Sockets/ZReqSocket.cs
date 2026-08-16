@@ -42,19 +42,24 @@ public sealed class ZReqSocket : ZSocketBase
         return core.RequestAsync(this, message, token);
     }
 
-    /// <summary>Sends a request copied into an owned buffer and waits for its reply (0026).</summary>
+    /// <summary>
+    /// Sends a request that borrows the caller's buffer instead of copying
+    /// (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
+    /// (a non-array backing may be copied inside the awaited write). The caller must not modify
+    /// the buffer until the reply arrives (the request is consumed only after
+    /// the reply, by protocol causality); a synchronous throw (no peer, a
+    /// request in flight) ends the borrow immediately.
+    /// </summary>
     public Task<ZMessage> RequestAsync(ReadOnlyMemory<byte> request, CancellationToken token = default)
     {
-        var message = ZMessage.Copy(request);
+        var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(request))));
         try
         {
             return core.RequestAsync(this, message, token);
         }
         catch
         {
-            // RequestAsync throws synchronously (no peer, request in flight)
-            // before the send takes ownership: the internally built message
-            // must not leak its rented buffers.
+            // Synchronous throw (no peer, in-flight): nothing owns the message.
             message.Dispose();
             throw;
         }

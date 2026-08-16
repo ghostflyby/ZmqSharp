@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-08-16
-Revision: 1
+Revision: 2
 
 Gives users a public way to build and send multipart messages. Today the
 multi-frame construction path is entirely internal (`ZSegment`,
@@ -208,17 +208,22 @@ borrowed overloads:
 
 The one infeasible row is the outbound channel: it is a pure producer
 surface whose await means "accepted into the queue", with no completion
-signal tied to the send. Everything else on the public send surface already
-waits for the write, so a borrowed overload would be implementable - the
-library would pin/hold the caller's buffer until the awaited write
-completes, exactly the BCL receive model. None of this is done in this
-design: a borrowed overload is a one-off optimization (single caller
-benefiting, no reuse in the steady state), it adds a lifetime contract the
-rest of the API does not carry, and the copy face already serves the Jupyter
-shape at equal correctness. The matrix exists so the decision is recorded,
-not because a borrowed surface is planned. Where a row is feasible, the
-borrow belongs to that socket API's parameter contract (3.5) - it never
-becomes a `ZMessage` construction face.
+signal tied to the send. Everything else on the public send surface waits
+for the write, and the feasible rows are **implemented** (Revision 2):
+`SendAsync(ReadOnlyMemory<byte>)` on PAIR/DEALER/PUSH/PUB,
+`SendAsync(identity, ReadOnlyMemory<byte>)` on ROUTER, `RequestAsync(ROM)`
+on REQ, and `SendReplyAsync(ROM)` on REP now **borrow** the caller's buffer
+(zero copy, zero pool rent for `byte[]`-backed memory; a non-array backing
+such as a custom `MemoryManager` falls back to a pooled copy inside the
+awaited write on the socket transport, so the borrow window still holds but
+is not zero-copy there). The borrow lives in each surface's parameter
+contract - the caller must not modify the buffer until the awaited send
+completes, after which it is free again. `ZSegment` gained the borrowed-view
+owner case for this; `ZMessage` construction faces stay storage-only
+(3.5), and the outbound channel row remains unimplemented and infeasible.
+The matrix above remains the record of which surfaces carry the contract;
+a feasible row's borrow belongs to that socket API's parameter contract
+(3.5) - it never becomes a `ZMessage` construction face.
 
 ### 3.7 No segment types leak
 

@@ -54,10 +54,17 @@ public sealed class ZRepSocket : ZSocketBase
         return core.SendReplyAsync(this, context, reply, token);
     }
 
-    /// <summary>Routes a reply copied into an owned buffer back to the originating peer (0026).</summary>
+    /// <summary>
+    /// Routes a reply that borrows the caller's buffer instead of copying
+    /// (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
+    /// (a non-array backing may be copied inside the awaited write). The caller must not modify
+    /// the buffer until the returned task completes (the reply send is
+    /// awaited); after the await the buffer is free again.
+    /// </summary>
     public ValueTask SendReplyAsync(ZRequestContext context, ReadOnlyMemory<byte> reply, CancellationToken token = default)
     {
-        return core.SendReplyAsync(this, context, ZMessage.Copy(reply), token);
+        var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(reply))));
+        return core.SendReplyAsync(this, context, message, token);
     }
 
     /// <summary>Routes a reply with non-contiguous content, copied, back to the originating peer (0026).</summary>
