@@ -15,11 +15,11 @@ public sealed class ZPairSocket(ZSocketOptions? options = null)
 
     /// <summary>
     /// Direct send that borrows the caller's buffer instead of copying
-    /// (0026 3.6): zero-copy, no pool rent, for any <see cref="ReadOnlyMemory{T}"/>
-    /// backing (<c>byte[]</c>, <c>string</c>, a custom
-    /// <see cref="MemoryManager{T}"/>). The caller must not modify the buffer
-    /// until the returned task completes; after the await the buffer is free
-    /// again. Use <c>ZMessage.Copy</c> + <see cref="SendAsync(ZMessage, CancellationToken)"/>
+    /// (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
+    /// (a non-array backing may be copied inside the awaited write). The
+    /// caller must not modify the buffer until the returned task completes;
+    /// after the await the buffer is free again. Use
+    /// <c>ZMessage.Copy</c> + <see cref="SendAsync(ZMessage, CancellationToken)"/>
     /// when the buffer must stay mutable across the send.
     /// </summary>
     public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)

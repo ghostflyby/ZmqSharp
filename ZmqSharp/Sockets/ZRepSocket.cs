@@ -56,8 +56,8 @@ public sealed class ZRepSocket : ZSocketBase
 
     /// <summary>
     /// Routes a reply that borrows the caller's buffer instead of copying
-    /// (0026 3.6): zero-copy, no pool rent, for any
-    /// <see cref="ReadOnlyMemory{T}"/> backing. The caller must not modify
+    /// (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
+    /// (a non-array backing may be copied inside the awaited write). The caller must not modify
     /// the buffer until the returned task completes (the reply send is
     /// awaited); after the await the buffer is free again.
     /// </summary>
