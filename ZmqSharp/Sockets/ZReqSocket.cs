@@ -1,3 +1,4 @@
+using System.Buffers;
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
 
@@ -39,6 +40,24 @@ public sealed class ZReqSocket : ZSocketBase
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token = default)
     {
         return core.RequestAsync(this, message, token);
+    }
+
+    /// <summary>Sends a request copied into an owned buffer and waits for its reply (0026).</summary>
+    public Task<ZMessage> RequestAsync(ReadOnlyMemory<byte> request, CancellationToken token = default)
+    {
+        return core.RequestAsync(this, ZMessage.Copy(request), token);
+    }
+
+    /// <summary>Sends a request with non-contiguous content, copied, and waits for its reply (0026).</summary>
+    public Task<ZMessage> RequestAsync(ReadOnlySequence<byte> request, CancellationToken token = default)
+    {
+        return core.RequestAsync(this, ZMessage.Copy(request), token);
+    }
+
+    /// <summary>Sends a multipart request, copied frame by frame, and waits for its reply (0026).</summary>
+    public Task<ZMessage> RequestAsync(IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default)
+    {
+        return core.RequestAsync(this, ZMessage.Copy(frames), token);
     }
 
     /// <summary>

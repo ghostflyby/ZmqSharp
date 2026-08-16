@@ -1,3 +1,4 @@
+using System.Buffers;
 using ZmqSharp.Patterns;
 
 namespace ZmqSharp;
@@ -16,5 +17,17 @@ public sealed class ZDealerSocket(ZSocketOptions? options = null)
     public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         return SendAsyncCore(bytes, token);
+    }
+
+    /// <summary>Direct send of a single frame with non-contiguous content, copied (0026).</summary>
+    public ValueTask SendAsync(ReadOnlySequence<byte> frame, CancellationToken token = default)
+    {
+        return SendAsyncCore(ZMessage.Copy(frame), token);
+    }
+
+    /// <summary>Direct send of a multipart message, copied frame by frame (0026).</summary>
+    public ValueTask SendAsync(IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default)
+    {
+        return SendAsyncCore(ZMessage.Copy(frames), token);
     }
 }

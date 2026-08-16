@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections;
 
 namespace ZmqSharp;
@@ -39,6 +40,36 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
     {
         ArgumentNullException.ThrowIfNull(data);
         return new ZMessage(new ZSingleMessage(new ZFrame(new ZSegment(data, 0, data.Length))));
+    }
+
+    /// <summary>Zero-copy multipart message from owned frame arrays (0026).</summary>
+    public static ZMessage FromOwned(byte[][] frames)
+    {
+        return new ZMessage(ZMultiMessage.FromOwned(frames));
+    }
+
+    /// <summary>Zero-copy single-frame message from a pooled buffer (0026).</summary>
+    public static ZMessage FromPooled(IMemoryOwner<byte> owner)
+    {
+        return new ZMessage(ZSingleMessage.FromPooled(owner));
+    }
+
+    /// <summary>Single-frame message copied into an owned buffer (0026).</summary>
+    public static ZMessage Copy(ReadOnlyMemory<byte> data)
+    {
+        return new ZMessage(ZSingleMessage.Copy(data));
+    }
+
+    /// <summary>Multipart message copied frame by frame into owned buffers (0026).</summary>
+    public static ZMessage Copy(IEnumerable<ReadOnlyMemory<byte>> frames)
+    {
+        return new ZMessage(ZMultiMessage.Copy(frames));
+    }
+
+    /// <summary>Single-frame message with non-contiguous content, copied (0026).</summary>
+    public static ZMessage Copy(ReadOnlySequence<byte> frame)
+    {
+        return new ZMessage(ZSingleMessage.Copy(frame));
     }
 
     public bool TryGetValue(out ZSingleMessage singleMessage)
