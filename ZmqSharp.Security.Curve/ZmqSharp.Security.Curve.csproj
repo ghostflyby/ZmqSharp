@@ -8,7 +8,9 @@
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <IsPackable>true</IsPackable>
         <PackageId>ZmqSharp.Security.Curve</PackageId>
-        <Version>0.1.0</Version>
+        <!-- Package version is injected by the publish workflow (-p:Version=<tag version>);
+             no Version property here so the file never drifts from the released version.
+             A local `dotnet pack` therefore defaults to 1.0.0 - only for local experiments. -->
         <Authors>ZmqSharp contributors</Authors>
         <Description>Optional CURVE security mechanism (RFC 24 / CurveZMQ) for ZmqSharp, built on the public mechanism seam with a pluggable crypto backend (BouncyCastle).</Description>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
