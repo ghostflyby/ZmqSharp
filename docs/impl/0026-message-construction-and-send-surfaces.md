@@ -174,6 +174,18 @@ library cannot dispose. Our message owns its disposal, so borrowed storage
 would split ownership between caller (mutate) and library (dispose) -
 impossible.
 
+Borrowing therefore never appears on `ZMessage`. Its three construction
+faces are all **storage shapes** - the message owns its memory (copy) or
+takes ownership (transfer). A borrow is not a storage shape; it is a
+**send-time lifetime contract** that only a socket API can hold: the awaited
+send's completion guarantees the buffer is no longer in use, and the API
+pins/holds the buffer until then. So even if a future socket surface gains a
+borrowed overload (3.6), the borrow lives in that API's parameter contract -
+`SendAsync(ReadOnlyMemory<byte> borrowed, ...)` - and never materializes as
+a `ZMessage` case. The same principle is why borrowed segments exist only on
+the receive side (`ZSegment.Borrowed`): the parser's callback confines the
+borrow, an API contract again, not a message capability.
+
 ### 3.6 Borrowing feasibility across all send surfaces
 
 Borrowing a caller buffer is feasible exactly when the **caller-observable
@@ -204,7 +216,9 @@ design: a borrowed overload is a one-off optimization (single caller
 benefiting, no reuse in the steady state), it adds a lifetime contract the
 rest of the API does not carry, and the copy face already serves the Jupyter
 shape at equal correctness. The matrix exists so the decision is recorded,
-not because a borrowed surface is planned.
+not because a borrowed surface is planned. Where a row is feasible, the
+borrow belongs to that socket API's parameter contract (3.5) - it never
+becomes a `ZMessage` construction face.
 
 ### 3.7 No segment types leak
 
