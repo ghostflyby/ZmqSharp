@@ -1,3 +1,4 @@
+using System.Buffers;
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
 
@@ -51,6 +52,30 @@ public sealed class ZRepSocket : ZSocketBase
     public ValueTask SendReplyAsync(ZRequestContext context, ZMessage reply, CancellationToken token = default)
     {
         return core.SendReplyAsync(this, context, reply, token);
+    }
+
+    /// <summary>Routes a reply copied into an owned buffer back to the originating peer (0026).</summary>
+    public ValueTask SendReplyAsync(ZRequestContext context, ReadOnlyMemory<byte> reply, CancellationToken token = default)
+    {
+        return core.SendReplyAsync(this, context, ZMessage.Copy(reply), token);
+    }
+
+    /// <summary>Routes a reply with non-contiguous content, copied, back to the originating peer (0026).</summary>
+    public ValueTask SendReplyAsync(ZRequestContext context, ReadOnlySequence<byte> reply, CancellationToken token = default)
+    {
+        return core.SendReplyAsync(this, context, ZMessage.Copy(reply), token);
+    }
+
+    /// <summary>Routes a multipart reply, copied frame by frame, back to the originating peer (0026).</summary>
+    public ValueTask SendReplyAsync(ZRequestContext context, IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default)
+    {
+        return core.SendReplyAsync(this, context, ZMessage.Copy(frames), token);
+    }
+
+    /// <summary>Routes a multipart reply from a <c>byte[][]</c> collection, copied, back to the originating peer (0026).</summary>
+    public ValueTask SendReplyAsync(ZRequestContext context, IEnumerable<byte[]> frames, CancellationToken token = default)
+    {
+        return core.SendReplyAsync(this, context, ZMessage.Copy(frames), token);
     }
 
     internal ValueTask RaiseRequestAsync(ZRequestContext context, CancellationToken token)

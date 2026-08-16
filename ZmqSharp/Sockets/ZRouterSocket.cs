@@ -1,3 +1,4 @@
+using System.Buffers;
 using ZmqSharp.Patterns;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
@@ -56,6 +57,24 @@ public sealed class ZRouterSocket : ZQueueSocketBase
         var message = new ZMessage(new ZSingleMessage(
             new ZFrame(new ZSegment(owner, 0, bytes.Length))));
         await SendAsync(identity, message, token);
+    }
+
+    /// <summary>Addresses a peer by identity with a non-contiguous frame, copied (0026).</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> identity, ReadOnlySequence<byte> frame, CancellationToken token = default)
+    {
+        return SendAsync(identity, ZMessage.Copy(frame), token);
+    }
+
+    /// <summary>Addresses a peer by identity with a multipart message, copied frame by frame (0026).</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> identity, IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default)
+    {
+        return SendAsync(identity, ZMessage.Copy(frames), token);
+    }
+
+    /// <summary>Addresses a peer by identity with a multipart message from a <c>byte[][]</c> collection, copied (0026).</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> identity, IEnumerable<byte[]> frames, CancellationToken token = default)
+    {
+        return SendAsync(identity, ZMessage.Copy(frames), token);
     }
 
     /// <summary>
