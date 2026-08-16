@@ -46,7 +46,10 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
         throw new InvalidOperationException("ROUTER sends through SendAsync(identity, message)");
     }
 
-    /// <summary>Returns the peer's routing identity, assigning one on first use.</summary>
+    /// <summary>
+    /// Returns the peer's routing identity: the identity it advertised in
+    /// READY when one was registered, otherwise a locally assigned id (0025).
+    /// </summary>
     internal byte[] AssignIdentity(IZConnection peer)
     {
         lock (identityLock)
@@ -60,6 +63,32 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
             peerIdentities[peer] = identity;
             identities[Encoding.Latin1.GetString(identity)] = peer;
             return identity;
+        }
+    }
+
+    /// <summary>
+    /// Registers the routing identity the peer advertised in READY (0025):
+    /// the peer is henceforth addressed by that identity on inbound and
+    /// outbound. Returns false when another live peer already claimed it, in
+    /// which case the socket refuses the connection (libzmq's ROUTER
+    /// duplicate-id behavior); the caller is responsible for rejecting the
+    /// peer. A peer registered with an advertised identity is not re-assigned
+    /// a local id.
+    /// </summary>
+    internal bool TryRegisterIdentity(IZConnection peer, ReadOnlyMemory<byte> advertisedIdentity)
+    {
+        lock (identityLock)
+        {
+            if (peerIdentities.ContainsKey(peer)) return true;
+
+            var key = Encoding.Latin1.GetString(advertisedIdentity.Span);
+            if (identities.TryGetValue(key, out var existing) && !ReferenceEquals(existing, peer))
+                return false;
+
+            var identity = advertisedIdentity.ToArray();
+            peerIdentities[peer] = identity;
+            identities[key] = peer;
+            return true;
         }
     }
 

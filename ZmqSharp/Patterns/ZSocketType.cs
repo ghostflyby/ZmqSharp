@@ -46,6 +46,14 @@ public sealed class ZSocketType
     public required Func<string, bool> AcceptsPeer { get; init; }
 
     /// <summary>
+    /// Whether this socket type attaches an Identity metadata property to its
+    /// READY. True for REQ, DEALER, and ROUTER only - the roles libzmq's
+    /// add_basic_properties gate includes (mechanism.cpp); every other type
+    /// accepts an Identity option but omits the property from the wire (0025).
+    /// </summary>
+    public bool AdvertisesIdentity { get; init; }
+
+    /// <summary>
     /// A custom socket type (0015 section 2.3): the name is advertised in
     /// READY and only a peer advertising the same name is accepted, so custom
     /// types interoperate only between ZmqSharp endpoints.

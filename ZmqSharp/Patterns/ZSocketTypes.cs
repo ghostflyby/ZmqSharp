@@ -19,18 +19,20 @@ public static class ZSocketTypes
         AcceptsPeer = peerType => peerType == "PAIR"
     };
 
-    /// <summary>DEALER: accepts DEALER, REP, or ROUTER peers.</summary>
+    /// <summary>DEALER: accepts DEALER, REP, or ROUTER peers; advertises an identity (0025).</summary>
     public static ZSocketType Dealer { get; } = new()
     {
         Name = "DEALER",
-        AcceptsPeer = peerType => peerType is "DEALER" or "REP" or "ROUTER"
+        AcceptsPeer = peerType => peerType is "DEALER" or "REP" or "ROUTER",
+        AdvertisesIdentity = true
     };
 
-    /// <summary>REQ: accepts a peer advertising REP.</summary>
+    /// <summary>REQ: accepts a peer advertising REP; advertises an identity (0025).</summary>
     public static ZSocketType Req { get; } = new()
     {
         Name = "REQ",
-        AcceptsPeer = peerType => peerType == "REP"
+        AcceptsPeer = peerType => peerType == "REP",
+        AdvertisesIdentity = true
     };
 
     /// <summary>REP: accepts REQ or DEALER peers.</summary>
@@ -54,11 +56,12 @@ public static class ZSocketTypes
         AcceptsPeer = peerType => peerType == "PUSH"
     };
 
-    /// <summary>ROUTER: accepts DEALER, REQ, or ROUTER peers.</summary>
+    /// <summary>ROUTER: accepts DEALER, REQ, or ROUTER peers; advertises an identity (0025).</summary>
     public static ZSocketType Router { get; } = new()
     {
         Name = "ROUTER",
-        AcceptsPeer = peerType => peerType is "DEALER" or "REQ" or "ROUTER"
+        AcceptsPeer = peerType => peerType is "DEALER" or "REQ" or "ROUTER",
+        AdvertisesIdentity = true
     };
 
     /// <summary>PUB: accepts a peer advertising SUB.</summary>

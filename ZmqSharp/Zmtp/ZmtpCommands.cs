@@ -14,18 +14,29 @@ public static class ZmtpCommands
 {
     private static readonly byte[] ReadyName = [.. "READY"u8];
     private static readonly byte[] SocketTypePropertyName = [.. "Socket-Type"u8];
+    private static readonly byte[] IdentityPropertyName = [.. "Identity"u8];
     private static readonly byte[] ErrorName = [.. "ERROR"u8];
 
-    /// <summary>Builds a READY body carrying the Socket-Type metadata property.</summary>
-    public static byte[] BuildReady(string socketType)
+    /// <summary>
+    /// Builds a READY body carrying the Socket-Type metadata property and,
+    /// when <paramref name="identity"/> is non-empty, the Identity property
+    /// (0025). The socket layer gates on the type's
+    /// <see cref="ZmqSharp.Patterns.ZSocketType.AdvertisesIdentity"/> before
+    /// calling with a non-empty value.
+    /// </summary>
+    public static byte[] BuildReady(string socketType, ReadOnlyMemory<byte> identity = default)
     {
         ArgumentNullException.ThrowIfNull(socketType);
         var socketTypeBytes = Encoding.ASCII.GetBytes(socketType);
+        var identityLength = identity.IsEmpty
+            ? 0
+            : ZmtpCommandCodec.MetadataPropertyLength(IdentityPropertyName.Length, identity.Length);
 
         var body = new byte[
             1 + ReadyName.Length
               + 1 + SocketTypePropertyName.Length
-              + sizeof(int) + socketTypeBytes.Length];
+              + sizeof(int) + socketTypeBytes.Length
+              + identityLength];
 
         var span = body.AsSpan();
         span[0] = (byte)ReadyName.Length;
@@ -39,6 +50,10 @@ public static class ZmtpCommands
         BinaryPrimitives.WriteInt32BigEndian(span[offset..], socketTypeBytes.Length);
         offset += sizeof(int);
         socketTypeBytes.CopyTo(span[offset..]);
+        offset += socketTypeBytes.Length;
+
+        if (!identity.IsEmpty)
+            offset += ZmtpCommandCodec.WriteMetadataProperty(span[offset..], IdentityPropertyName, identity.Span);
 
         return body;
     }
