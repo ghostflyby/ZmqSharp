@@ -144,8 +144,8 @@ jobs:
               try {
                   $dll = @($zip.Entries | Where-Object { $_.FullName -like 'lib/net10.0/*.dll' })
                   $nuspec = @($zip.Entries | Where-Object { $_.FullName -like '*.nuspec' })
-                  if ($dll.Count -ne 1) { throw "$name: expected 1 lib dll, found $($dll.Count)" }
-                  if ($nuspec.Count -ne 1) { throw "$name: expected 1 nuspec, found $($nuspec.Count)" }
+                  if ($dll.Count -ne 1) { throw "${name}: expected 1 lib dll, found $($dll.Count)" }
+                  if ($nuspec.Count -ne 1) { throw "${name}: expected 1 nuspec, found $($nuspec.Count)" }
               } finally { $zip.Dispose() }
           }
 
