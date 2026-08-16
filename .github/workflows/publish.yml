@@ -191,7 +191,31 @@ jobs:
           dotnet-version: 10.0.x
 
       # Version comes from the tag; the consumer csproj defaults to 0.1.0 for local runs.
+      # NuGet's flat-container index can lag the upload by minutes, and the smoke job
+      # starts right after publish — so wait until both versions are visible before
+      # restoring, instead of racing the index (NU1101 on the very first publish).
       - name: Smoke test the published packages
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $deadline = (Get-Date).AddMinutes(5)
+          foreach ($id in 'zmqsharp', 'zmqsharp.security.curve') {
+              $url = "https://api.nuget.org/v3-flatcontainer/$id/index.json"
+              while ($true) {
+                  try {
+                      $versions = @((Invoke-RestMethod -Uri $url -TimeoutSec 20).versions)
+                      if ($versions -contains $version) {
+                          Write-Host "ok: $id $version visible on nuget.org"
+                          break
+                      }
+                  } catch {
+                      Write-Host "index check failed for $id, retrying: $_"
+                  }
+                  if ((Get-Date) -ge $deadline) {
+                      throw "package $id version $version not visible on nuget.org within 5 minutes"
+                  }
+                  Start-Sleep -Seconds 15
+              }
+          }
           dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=$version
