@@ -22,6 +22,28 @@ public sealed class ZSocketOptions
     public MemoryPool<byte> Pool { get; init; } = MemoryPool<byte>.Shared;
 
     /// <summary>
+    /// ZMTP 3.1 routing identity advertised in this socket's READY (RFC 23
+    /// Identity metadata property, 0025). Opaque bytes, 1-255; empty (default)
+    /// sends no identity and the peer assigns a local one. The Identity
+    /// property is attached to the READY only for REQ, DEALER, and ROUTER
+    /// sockets (the type's <see cref="Patterns.ZSocketType.AdvertisesIdentity"/>
+    /// gate, matching libzmq's add_basic_properties); other types accept the
+    /// option but never send it. Copied into the READY at construction, so the
+    /// backing array is never retained or modified by the socket.
+    /// </summary>
+    public ReadOnlyMemory<byte> Identity
+    {
+        get;
+        init
+        {
+            if (value.Length > byte.MaxValue)
+                throw new ArgumentOutOfRangeException(nameof(Identity),
+                    "routing identity must not exceed 255 bytes");
+            field = value;
+        }
+    } = ReadOnlyMemory<byte>.Empty;
+
+    /// <summary>
     /// Maximum accepted ZMTP command-frame size; a larger command rejects the
     /// connection (0006 3.2, 0008 Slice B). Defaults to 1 MiB and cannot be
     /// lowered below <see cref="MinMaxCommandSize"/>.

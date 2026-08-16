@@ -70,6 +70,40 @@ public sealed class DealerRouterInteropTests
         reply.Should().Equal([.. "pong"u8]);
     }
 
+    [Fact]
+    public async Task ZmqSharpDealer_WithAdvertisedIdentity_NetMQRouterRoutesByIt()
+    {
+        // The reverse interop (0025): a ZmqSharp DEALER advertising a READY
+        // identity is addressed by that identity on a real libzmq ROUTER -
+        // exactly the Jupyter client shape (shell/stdin DEALERs with a shared
+        // identity against the kernel's ROUTERs).
+        using var router = new RouterSocket();
+        router.Options.Linger = TimeSpan.Zero;
+        var port = InteropHelpers.GetFreePort();
+        router.Bind($"tcp://127.0.0.1:{port}");
+
+        var identity = Guid.NewGuid().ToByteArray();
+        await using var dealer = new ZDealerSocket(new ZSocketOptions { Identity = identity });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+
+        // Dealer -> NetMQ router: the first frame the router sees is the
+        // advertised identity, followed by the payload.
+        await dealer.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
+        var message = new NetMQMessage();
+        router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
+        message.FrameCount.Should().Be(2);
+        message[0].ToByteArray().Should().Equal(identity);
+        message[1].ToByteArray().Should().Equal([.. "hello"u8]);
+
+        // NetMQ router -> dealer, addressed by that identity: routes back.
+        router.SendMoreFrame(identity).SendFrame([.. "pong"u8]);
+        var reply = await ReadMessageAsync(dealer.Messages, TimeSpan.FromSeconds(5));
+        reply.Should().NotBeNull();
+        reply.Value[0].ToSequence().ToArray().Should().Equal([.. "pong"u8]);
+        reply.Value.Dispose();
+    }
+
     private static async Task<ZMessage?> ReadMessageAsync(ChannelReader<ZMessage> reader, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);

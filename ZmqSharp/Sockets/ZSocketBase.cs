@@ -102,10 +102,14 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         if (!ComposesQueueSurface && options.HasQueueConfiguration)
             throw new InvalidOperationException(
                 "queue configuration (ReceiveQueueFactory/ReceivePolicy/limits) requires the queue surface; this socket never composes a queue");
-        // The local READY body depends only on the socket type; building it
-        // once per socket instead of once per connection keeps the handshake
-        // cold path allocation-free (0023 D6).
-        localReadyBody = ZmtpCommands.BuildReady(type.Name);
+        // The local READY body depends only on the socket type and the
+        // configured identity; building it once per socket instead of once
+        // per connection keeps the handshake cold path allocation-free (0023
+        // D6). The Identity property is attached only by types that advertise
+        // one (REQ/DEALER/ROUTER, 0025) - the libzmq add_basic_properties gate.
+        localReadyBody = ZmtpCommands.BuildReady(
+            type.Name,
+            type.AdvertisesIdentity ? options.Identity : ReadOnlyMemory<byte>.Empty);
     }
 
     /// <summary>
@@ -115,6 +119,17 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     /// false are rejected at construction instead of silently ignored.
     /// </summary>
     protected virtual bool ComposesQueueSurface => false;
+
+    /// <summary>
+    /// Notifies a socket type when a peer completes the ZMTP handshake,
+    /// carrying the identity the peer advertised in READY (0025). The default
+    /// is a no-op; ROUTER overrides it to register the advertised identity in
+    /// its routing dispatch. The identity is null when the peer sent none.
+    /// Runs on the connection pump, before the peer becomes routable.
+    /// </summary>
+    protected virtual void OnPeerEstablished(IZConnection peer, ReadOnlyMemory<byte>? advertisedIdentity)
+    {
+    }
 
     /// <summary>The routable-peer snapshot (dispatch policies read it for outbound selection).</summary>
     internal IZConnection[] PeerSnapshot => peerSnapshot;
@@ -598,6 +613,11 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
                 throw new ZeroMqProtocolException(
                     $"peer socket type '{peerType}' is not accepted by local socket type '{type.Name}'");
             }
+
+            // The peer's advertised identity, if any, is registered by the
+            // socket type (ROUTER) before the peer becomes routable, so a
+            // message routed by identity can never precede its registration.
+            OnPeerEstablished(connection, ZmtpCommandCodec.ParseReadyIdentity(result.Value.PeerReadyBody.Span));
 
             parser = new ZmtpParser(result.Value.SessionConnection, allocator, Pool, maxCommandSize);
             // Aggregation runs when a sink is bound or the composed inbound

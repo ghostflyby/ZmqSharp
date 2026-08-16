@@ -1,5 +1,6 @@
 using ZmqSharp.Patterns;
 using ZmqSharp.Transports;
+using ZmqSharp.Zmtp;
 
 namespace ZmqSharp;
 
@@ -37,10 +38,9 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     /// identity drops the message (libzmq ROUTER default). The message is
     /// disposed after the send.
     /// </summary>
-    public async ValueTask SendAsync(byte[] identity, ZMessage message, CancellationToken token = default)
+    public async ValueTask SendAsync(ReadOnlyMemory<byte> identity, ZMessage message, CancellationToken token = default)
     {
-        ArgumentNullException.ThrowIfNull(identity);
-        if (!dispatch.TryResolve(identity, out var peer) || peer is null)
+        if (identity.IsEmpty || !dispatch.TryResolve(identity.Span, out var peer) || peer is null)
         {
             message.Dispose();
             return;
@@ -49,13 +49,27 @@ public sealed class ZRouterSocket : ZQueueSocketBase
         await SendToAsync(peer, message, token);
     }
 
-    public async ValueTask SendAsync(byte[] identity, ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public async ValueTask SendAsync(ReadOnlyMemory<byte> identity, ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         var owner = Pool.Rent(bytes.Length);
         bytes.CopyTo(owner.Memory);
         var message = new ZMessage(new ZSingleMessage(
             new ZFrame(new ZSegment(owner, 0, bytes.Length))));
         await SendAsync(identity, message, token);
+    }
+
+    /// <summary>
+    /// Registers the peer's advertised READY identity in the routing dispatch
+    /// (0025). A peer that advertised none keeps the local assignment. A
+    /// second peer claiming an in-use identity is refused at establishment -
+    /// the libzmq ROUTER duplicate-id behavior (mechanism/router sources).
+    /// </summary>
+    protected override void OnPeerEstablished(IZConnection peer, ReadOnlyMemory<byte>? advertisedIdentity)
+    {
+        if (advertisedIdentity is not { Length: > 0 } identity) return;
+
+        if (!dispatch.TryRegisterIdentity(peer, identity))
+            throw new ZeroMqProtocolException("peer advertises an in-use routing identity");
     }
 
     /// <summary>

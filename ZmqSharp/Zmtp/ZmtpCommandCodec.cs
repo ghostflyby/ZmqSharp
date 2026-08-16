@@ -66,6 +66,64 @@ public static class ZmtpCommandCodec
     }
 
     /// <summary>
+    /// Reads the peer's READY metadata Identity property as raw bytes (0025).
+    /// Returns null when the property is absent or empty - the peer does not
+    /// advertise an identity and the router assigns a local one. The value is
+    /// returned opaque: an identity is binary (a Guid-shaped value is not
+    /// valid UTF-8 and may start with 0x00), so unlike
+    /// <see cref="ParseMetadata"/> this path never decodes it as text. A
+    /// duplicate Identity property is a protocol error, same as
+    /// <see cref="ParseMetadata"/>.
+    /// </summary>
+    public static ReadOnlyMemory<byte>? ParseReadyIdentity(ReadOnlySpan<byte> metadata)
+    {
+        ReadOnlySpan<byte> identity = default;
+        var found = false;
+        var offset = 0;
+        while (offset < metadata.Length)
+        {
+            var nameLength = metadata[offset];
+            offset++;
+            if (nameLength == 0) throw new ZeroMqProtocolException("metadata property name is empty");
+
+            if (metadata.Length - offset < nameLength)
+                throw new ZeroMqProtocolException("metadata property name exceeds command body");
+
+            var name = metadata.Slice(offset, nameLength);
+            foreach (var c in name)
+                if (!IsMetadataNameChar(c))
+                    throw new ZeroMqProtocolException("metadata property name contains an invalid character");
+
+            offset += nameLength;
+            if (metadata.Length - offset < sizeof(int))
+                throw new ZeroMqProtocolException("metadata property value length is truncated");
+
+            var valueLength = BinaryPrimitives.ReadInt32BigEndian(metadata[offset..]);
+            offset += sizeof(int);
+            if (valueLength < 0 || valueLength > metadata.Length - offset)
+                throw new ZeroMqProtocolException("metadata property value exceeds command body");
+
+            var nameString = Encoding.ASCII.GetString(name);
+            var value = metadata.Slice(offset, valueLength);
+            offset += valueLength;
+            if (nameString == "Identity")
+            {
+                if (found) throw new ZeroMqProtocolException("duplicate metadata property 'Identity'");
+
+                found = true;
+                identity = value;
+            }
+        }
+
+        // Note: no ternary here - `null` would take the byte[] arm of the
+        // conditional and be converted through the implicit byte[] ->
+        // ReadOnlyMemory<byte> operator into a non-null empty memory.
+        if (!found || identity.IsEmpty) return null;
+
+        return identity.ToArray();
+    }
+
+    /// <summary>
     /// Parses the peer's ERROR command arguments and returns the reason string;
     /// a malformed ERROR body is a protocol error. The reason is free-form
     /// printable ASCII including spaces - libzmq's rejection reasons (e.g.
