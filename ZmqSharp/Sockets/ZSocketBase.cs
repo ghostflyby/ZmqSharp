@@ -397,9 +397,12 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     /// </summary>
     protected async ValueTask SendAsyncCore(ZMessage message, CancellationToken token = default)
     {
-        ThrowIfClosed();
+        // The closed check is inside the try so a send on a closed socket
+        // still disposes the message (a byte-input overload that constructed
+        // it just before the call must not leak its rented buffers).
         try
         {
+            ThrowIfClosed();
             await SendToTargetsAsync(message, token);
         }
         finally

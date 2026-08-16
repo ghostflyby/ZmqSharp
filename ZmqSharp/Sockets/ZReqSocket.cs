@@ -45,19 +45,64 @@ public sealed class ZReqSocket : ZSocketBase
     /// <summary>Sends a request copied into an owned buffer and waits for its reply (0026).</summary>
     public Task<ZMessage> RequestAsync(ReadOnlyMemory<byte> request, CancellationToken token = default)
     {
-        return core.RequestAsync(this, ZMessage.Copy(request), token);
+        var message = ZMessage.Copy(request);
+        try
+        {
+            return core.RequestAsync(this, message, token);
+        }
+        catch
+        {
+            // RequestAsync throws synchronously (no peer, request in flight)
+            // before the send takes ownership: the internally built message
+            // must not leak its rented buffers.
+            message.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Sends a request with non-contiguous content, copied, and waits for its reply (0026).</summary>
     public Task<ZMessage> RequestAsync(ReadOnlySequence<byte> request, CancellationToken token = default)
     {
-        return core.RequestAsync(this, ZMessage.Copy(request), token);
+        var message = ZMessage.Copy(request);
+        try
+        {
+            return core.RequestAsync(this, message, token);
+        }
+        catch
+        {
+            message.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Sends a multipart request, copied frame by frame, and waits for its reply (0026).</summary>
     public Task<ZMessage> RequestAsync(IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default)
     {
-        return core.RequestAsync(this, ZMessage.Copy(frames), token);
+        var message = ZMessage.Copy(frames);
+        try
+        {
+            return core.RequestAsync(this, message, token);
+        }
+        catch
+        {
+            message.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Sends a multipart request from a <c>byte[][]</c> collection, copied, and waits for its reply (0026).</summary>
+    public Task<ZMessage> RequestAsync(IEnumerable<byte[]> frames, CancellationToken token = default)
+    {
+        var message = ZMessage.Copy(frames);
+        try
+        {
+            return core.RequestAsync(this, message, token);
+        }
+        catch
+        {
+            message.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

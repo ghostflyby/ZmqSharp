@@ -23,6 +23,9 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
     /// <summary>
     /// Zero-copy single frame from a pooled buffer: the caller transfers the
     /// <see cref="IMemoryOwner{T}"/>; it is disposed with the message (0026).
+    /// The frame covers the owner's <b>whole</b> rented memory - a pool grants
+    /// at least the requested size, so fill the segment you hand over
+    /// completely (there is no length argument here).
     /// </summary>
     public static ZSingleMessage FromPooled(IMemoryOwner<byte> owner)
     {
@@ -41,6 +44,8 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
     /// <summary>
     /// Single frame with non-contiguous content, copied segment by segment
     /// (0026). A single-segment sequence collapses to the contiguous form.
+    /// A sequence that faults mid-iteration releases every segment rented so
+    /// far before propagating.
     /// </summary>
     public static ZSingleMessage Copy(ReadOnlySequence<byte> frame)
     {
@@ -53,11 +58,19 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
         }
 
         var segments = new List<ZSegment>();
-        foreach (var memory in frame)
+        try
         {
-            var owner = MemoryPool<byte>.Shared.Rent(memory.Length);
-            memory.CopyTo(owner.Memory);
-            segments.Add(new ZSegment(owner, 0, memory.Length));
+            foreach (var memory in frame)
+            {
+                var owner = MemoryPool<byte>.Shared.Rent(memory.Length);
+                memory.CopyTo(owner.Memory);
+                segments.Add(new ZSegment(owner, 0, memory.Length));
+            }
+        }
+        catch
+        {
+            foreach (var segment in segments) segment.Dispose();
+            throw;
         }
 
         return new ZSingleMessage(new ZFrame(new ZSegments([.. segments])));

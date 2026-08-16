@@ -71,6 +71,12 @@ public sealed class ZRouterSocket : ZQueueSocketBase
         return SendAsync(identity, ZMessage.Copy(frames), token);
     }
 
+    /// <summary>Addresses a peer by identity with a multipart message from a <c>byte[][]</c> collection, copied (0026).</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> identity, IEnumerable<byte[]> frames, CancellationToken token = default)
+    {
+        return SendAsync(identity, ZMessage.Copy(frames), token);
+    }
+
     /// <summary>
     /// Registers the peer's advertised READY identity in the routing dispatch
     /// (0025). A peer that advertised none keeps the local assignment. A

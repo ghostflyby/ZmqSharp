@@ -29,8 +29,9 @@ public sealed class MultipartSendTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await dealer.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
 
-        // Jupyter-shaped five-frame message, one frame per element.
-        ReadOnlyMemory<byte>[] frames =
+        // Jupyter-shaped five-frame message, one frame per element; a
+        // byte[][] binds the IEnumerable<byte[]> overload directly.
+        byte[][] frames =
         [
             "identity"u8.ToArray(),
             "hmac"u8.ToArray(),

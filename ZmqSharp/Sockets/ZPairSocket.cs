@@ -30,4 +30,10 @@ public sealed class ZPairSocket(ZSocketOptions? options = null)
     {
         return SendAsyncCore(ZMessage.Copy(frames), token);
     }
+
+    /// <summary>Direct send of a multipart message from a <c>byte[][]</c> collection, copied (0026).</summary>
+    public ValueTask SendAsync(IEnumerable<byte[]> frames, CancellationToken token = default)
+    {
+        return SendAsyncCore(ZMessage.Copy(frames), token);
+    }
 }

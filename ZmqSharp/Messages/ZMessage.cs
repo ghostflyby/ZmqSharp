@@ -66,6 +66,12 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
         return new ZMessage(ZMultiMessage.Copy(frames));
     }
 
+    /// <summary>Multipart message copied frame by frame from a <c>byte[][]</c> frame collection (0026).</summary>
+    public static ZMessage Copy(IEnumerable<byte[]> frames)
+    {
+        return new ZMessage(ZMultiMessage.Copy(frames));
+    }
+
     /// <summary>Single-frame message with non-contiguous content, copied (0026).</summary>
     public static ZMessage Copy(ReadOnlySequence<byte> frame)
     {

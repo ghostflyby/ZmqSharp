@@ -266,6 +266,7 @@ public ValueTask SendAsync(ZMessage message, CancellationToken token = default);
 public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);       // existing
 public ValueTask SendAsync(ReadOnlySequence<byte> frame, CancellationToken token = default);     // new
 public ValueTask SendAsync(IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default); // new
+public ValueTask SendAsync(IEnumerable<byte[]> frames, CancellationToken token = default);       // new
 ```
 
 ### 5.2 ROUTER
@@ -275,14 +276,18 @@ public ValueTask SendAsync(ReadOnlyMemory<byte> identity, ZMessage message, Canc
 public ValueTask SendAsync(ReadOnlyMemory<byte> identity, ReadOnlyMemory<byte> bytes, CancellationToken token = default);
 public ValueTask SendAsync(ReadOnlyMemory<byte> identity, ReadOnlySequence<byte> frame, CancellationToken token = default);
 public ValueTask SendAsync(ReadOnlyMemory<byte> identity, IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default);
+public ValueTask SendAsync(ReadOnlyMemory<byte> identity, IEnumerable<byte[]> frames, CancellationToken token = default);
 ```
 
 ### 5.3 REQ and REP
 
 `RequestAsync` and `SendReplyAsync(context, ...)` mirror the four-input set
-(reply/request can be multipart; REQ's fair-queue selection and REP's
-directed reply are untouched). PULL, SUB, and XSUB keep **no** send member
-(0024) - the new overloads are added only to types that already send.
+plus the `IEnumerable<byte[]>` variant (reply/request can be multipart; REQ's
+fair-queue selection and REP's directed reply are untouched). PULL, SUB, and
+XSUB keep **no** send member (0024) - the new overloads are added only to
+types that already send. REQ's byte-input overloads dispose the internally
+built message when `RequestAsync` throws synchronously (no peer, request in
+flight), so the copy's rented buffers never leak.
 
 ### 5.4 Rationale
 
@@ -295,18 +300,22 @@ directed reply are untouched). PULL, SUB, and XSUB keep **no** send member
   or `ZMessage.Copy` once and `SendAsync(message)`. The `ReadOnlySequence`
   variant covers single-frame multi-buffer sends (e.g. a segmented iopub
   payload) without a copy into one contiguous buffer first.
-- **params convenience**: an `IEnumerable` overload accepts `byte[][]` /
-  `ReadOnlyMemory<byte>[]` directly; a `params ReadOnlyMemory<byte>[]`
-  overload is intentionally **not** added to the send surface because it
-  collides with the existing single-argument `SendAsync(ReadOnlyMemory<byte>)`
-  on the call `SendAsync(singleFrame)` (both forms are applicable). Callers
-  pass an array literal instead, which is unambiguous and keeps the surface
-  flat. The construction surface has the same reasoning: `Copy` takes
-  `IEnumerable<ReadOnlyMemory<byte>>`, not a params overload.
-- **Zero-frame rejection**: empty `IEnumerable` / empty `ReadOnlySequence`
-  throw `ArgumentException` at construction - a ZMTP message has at least
-  one frame, and silently sending an empty multipart message would be a
-  protocol ambiguity.
+- **params convenience**: the `IEnumerable<byte[]>` overload accepts a
+  `byte[][]` frame collection directly - a clean reference conversion that
+  binds the Jupyter shape (`new[] { hmac, ... }` over serialization-produced
+  `byte[]` frames) without a `ReadOnlyMemory<byte>[]` allocation. A
+  `params ReadOnlyMemory<byte>[]` overload is intentionally **not** added to
+  the send surface because it collides with the existing single-argument
+  `SendAsync(ReadOnlyMemory<byte>)` on the call `SendAsync(singleFrame)`
+  (both forms are applicable). Callers pass an array literal instead, which
+  is unambiguous and keeps the surface flat. The construction surface has
+  the same reasoning: `Copy` takes `IEnumerable<ReadOnlyMemory<byte>>` /
+  `IEnumerable<byte[]>`, not a params overload.
+- **Zero-frame rejection**: an empty `IEnumerable` (both overloads) throws
+  `ArgumentException` at construction - a ZMTP message has at least one
+  frame. An empty `ReadOnlySequence` is **not** rejected: per the section 2
+  mapping it is a single frame whose content is zero-length, and sending it
+  transmits an empty frame (the same as `SendAsync(ReadOnlyMemory<byte>.Empty)`).
 
 ## 6. Ownership and allocation contract
 
@@ -327,26 +336,35 @@ dynamic generation; the enumerable is consumed with a plain foreach.
 
 ## 7. Test plan
 
-- **Construction**: each `From`/`FromOwned`/`FromPooled` factory produces
+- **Construction**: each `Copy`/`FromOwned`/`FromPooled` factory produces
   the expected case (`TryGetValue(out ZSingleMessage)` /
   `TryGetValue(out ZMultiMessage)`), the expected contiguity
   (single-segment sequence collapses to contiguous; multi-segment sequence
   yields `ZSegments` with per-memory segments), and owned buffers
-  throughout. `FromOwned` and `FromPooled` are zero copy (pooling counters
-  assert no extra rent in AllocationTests). Empty input throws.
-- **Send**: for each direct type (PAIR and DEALER suffice; ROUTER with the
-  identity overloads), send one frame via each of the three copy inputs and
-  via `FromOwned`, and receive the identical bytes; send a five-frame
-  message and verify frame count and per-frame content on the wire (Jupyter
-  shape) through both `FromOwned(byte[][])` and `Copy(IEnumerable)`.
+  throughout. Empty `IEnumerable` (both overloads) throws; an empty
+  `ReadOnlySequence` builds a single zero-length frame (not rejected).
+  Exception paths release: a throwing enumerable / sequence frees every
+  segment rented before the fault (`Copy` loops are guarded).
+- **Send**: for each direct type (PAIR, DEALER, PUSH, PUB), send one frame
+  via each of the three copy inputs and via `FromOwned`, and receive the
+  identical bytes; send a five-frame message and verify frame count and
+  per-frame content on the wire (Jupyter shape) through `FromOwned(byte[][])`
+  and the `IEnumerable<byte[]>` send overload. ROUTER multipart with identity
+  prefix; REQ/REP multipart round trip.
 - **NetMQ interop**: a ZmqSharp DEALER sends a five-frame message to a
-  NetMQ ROUTER; frame count and contents match. Round trip both directions.
-- **REQ/REP and ROUTER**: multipart request/reply; ROUTER multipart with
-  identity prefix.
-- **Allocation**: `SendAsync(ReadOnlySequence<byte>)` on a single-segment
-  sequence avoids the node-chain path (encoder `PrependHeader` single-segment
-  branch); multi-segment accepts the transient chain (outside measured
-  gates). `FromPooled` disposal returns the pool buffer exactly once.
+  NetMQ ROUTER; frame count and contents match (including the router's
+  identity prefix). Round trip both directions.
+- **Allocation** (`MessageConstructionAllocationTests`, all strong
+  assertions): `FromOwned` rents nothing from the pool (counting pool) and
+  retains the caller's arrays by reference (zero copy); `FromPooled` disposal
+  returns the owner once and is idempotent on double-dispose; `Copy` is
+  isolated from the caller's buffer (mutation after construction does not
+  affect the message). The single-segment `ReadOnlySequence` send path avoids
+  the encoder's node-chain branch; multi-segment accepts the transient chain
+  (outside measured gates).
+- **Closed-socket leak**: `SendAsyncCore` disposes the message when the
+  socket is already closed (`ThrowIfClosed` inside the try), so the
+  byte-input overloads never leak their freshly rented buffers.
 
 ## 8. Migration
 

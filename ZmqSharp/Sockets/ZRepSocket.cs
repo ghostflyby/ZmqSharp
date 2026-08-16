@@ -72,6 +72,12 @@ public sealed class ZRepSocket : ZSocketBase
         return core.SendReplyAsync(this, context, ZMessage.Copy(frames), token);
     }
 
+    /// <summary>Routes a multipart reply from a <c>byte[][]</c> collection, copied, back to the originating peer (0026).</summary>
+    public ValueTask SendReplyAsync(ZRequestContext context, IEnumerable<byte[]> frames, CancellationToken token = default)
+    {
+        return core.SendReplyAsync(this, context, ZMessage.Copy(frames), token);
+    }
+
     internal ValueTask RaiseRequestAsync(ZRequestContext context, CancellationToken token)
     {
         Func<ZRequestContext, CancellationToken, ValueTask>? handler;
