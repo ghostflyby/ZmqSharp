@@ -1,0 +1,197 @@
+name: publish
+
+# Tag-triggered release: push a vX.Y.Z tag (e.g. v0.1.0) to build, test, pack the
+# two NuGet packages (ZmqSharp core + the optional ZmqSharp.Security.Curve) and
+# publish them to nuget.org plus a GitHub release. The version is derived from the
+# tag — the single source of truth — not from the csproj.
+# Publish uses NuGet Trusted Publishing (OIDC): no long-lived API key in secrets; the
+# short-lived key is exchanged by NuGet/login@v1. Register the matching policy on
+# nuget.org (owner: ghostflyby, repo: ghostflyby/ZmqSharp, workflow file: publish.yml).
+#
+# Unlike Pty.Net there is no build matrix and no cross-platform nupkg assembly: the
+# managed dll is identical on every OS (no P/Invoke, no per-OS file splits), so one
+# build job and one nupkg per package is the whole flow.
+on:
+  push:
+    tags: ['v*.*.*']
+
+# A publish must never be cancelled mid-flight (a half-pushed release), and two pushes
+# of the same tag cannot happen — but guard anyway: same-ref publishes serialize.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+# Every run: step uses pwsh (PowerShell Core), preinstalled on all GitHub-hosted
+# runners, so the same script syntax works everywhere — no bash-isms anywhere.
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    name: Build, test & pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set version from tag
+        run: |
+          "VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+
+      # A release candidate must pass the full suite before anything ships.
+      - name: Test
+        run: dotnet test ZmqSharp.slnx -c Release --nologo
+
+      # Both packable projects get the tag version. Packing the Curve project pulls
+      # the core project into the same version, so its nuspec dependency on ZmqSharp
+      # matches the package pushed in this same run.
+      - name: Pack
+        run: |
+          dotnet pack ZmqSharp/ZmqSharp.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION
+          dotnet pack ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg
+          path: pkg/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to nuget.org + GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # id-token: write lets NuGet/login exchange the OIDC token for a short-lived NuGet
+    # API key (Trusted Publishing); contents: write is for gh release create.
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      # gh release create resolves the repository through git, so this job needs the
+      # checkout even though it builds nothing (packages come from the build job).
+      - uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v7
+        with:
+          name: pkg
+          path: pkgs
+
+      - name: Validate tag is SemVer and not a downgrade
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          "VERSION=$version" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+              throw "tag '$env:GITHUB_REF_NAME' is not a valid vX.Y.Z[(-suffix)] version"
+          }
+          # 'gh release list' exits 1 when no release exists yet (first publish); with
+          # $PSNativeCommandUseErrorActionPreference = $true that becomes a terminating
+          # error, so wrap it. The catch must also reset $LASTEXITCODE: pwsh exits the
+          # script with the last external command's code, so a swallowed '1' would still
+          # fail the step.
+          $latest = try {
+              gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>$null
+          } catch {
+              $global:LASTEXITCODE = 0
+              $null
+          }
+          if ($latest) {
+              function Test-Newer([string]$candidate, [string]$previous) {
+                  $c = $candidate -split '-'; $p = $previous -split '-'
+                  $cNum = [version]$c[0]; $pNum = [version]$p[0]
+                  if ($cNum -gt $pNum) { return $true }
+                  if ($cNum -lt $pNum) { return $false }
+                  $cPre = if ($c.Count -gt 1) { $c[1] } else { '' }
+                  $pPre = if ($p.Count -gt 1) { $p[1] } else { '' }
+                  if ($pPre -eq '' -and $cPre -ne '') { return $false }   # 1.0.0-beta < 1.0.0
+                  if ($cPre -eq '' -and $pPre -ne '') { return $true }
+                  return $cPre -gt $pPre
+              }
+              $latestV = $latest -replace '^v', ''
+              if (-not (Test-Newer $version $latestV)) {
+                  throw "version '$version' is not newer than the latest release '$latestV'"
+              }
+              Write-Host "ok: $version > $latestV"
+          } else {
+              Write-Host 'no previous release; this is the first publish'
+          }
+          # Normal path ends cleanly even if an external command left $LASTEXITCODE set;
+          # throw paths above terminate with a non-zero exit before reaching here.
+          exit 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Verify both packages are well-formed
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $expected = @("ZmqSharp.$env:VERSION.nupkg", "ZmqSharp.Security.Curve.$env:VERSION.nupkg")
+          foreach ($name in $expected) {
+              $path = "pkgs/$name"
+              if (-not (Test-Path -LiteralPath $path)) { throw "missing package: $name" }
+              $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $path))
+              try {
+                  $dll = @($zip.Entries | Where-Object { $_.FullName -like 'lib/net10.0/*.dll' })
+                  $nuspec = @($zip.Entries | Where-Object { $_.FullName -like '*.nuspec' })
+                  if ($dll.Count -ne 1) { throw "$name: expected 1 lib dll, found $($dll.Count)" }
+                  if ($nuspec.Count -ne 1) { throw "$name: expected 1 nuspec, found $($nuspec.Count)" }
+              } finally { $zip.Dispose() }
+          }
+
+      - name: NuGet login (OIDC → temporary API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          # nuget.org username (profile name), not an email address. The temp key is
+          # valid for 1 hour and is exchanged right before the push.
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish to nuget.org
+        run: |
+          dotnet nuget push "pkgs/ZmqSharp.$env:VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --skip-duplicate
+          dotnet nuget push "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --skip-duplicate
+
+      - name: Create GitHub release
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" --title "$env:GITHUB_REF_NAME" `
+            --notes "ZmqSharp $env:VERSION — see https://www.nuget.org/packages/ZmqSharp/$env:VERSION and https://www.nuget.org/packages/ZmqSharp.Security.Curve/$env:VERSION for package details." `
+            "pkgs/ZmqSharp.$env:VERSION.nupkg" "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  smoke:
+    # Post-publish verification: consume the real ZmqSharp + ZmqSharp.Security.Curve
+    # packages from nuget.org with a dedicated consumer project (ZmqSharp.Smoke) and
+    # run a loopback PAIR exchange and a CURVE exchange. This proves the shipped
+    # packages — the nupkgs that were actually pushed — restore and work end to end,
+    # including the core/Curve dependency graph. One OS is enough: the managed dll has
+    # no platform-specific code (no P/Invoke), unlike Pty.Net. Runs after publish, so a
+    # failure marks the run red for manual review; the release itself has already happened.
+    name: Package smoke
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7 # for ZmqSharp.Smoke
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      # Version comes from the tag; the consumer csproj defaults to 0.1.0 for local runs.
+      - name: Smoke test the published packages
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=$version

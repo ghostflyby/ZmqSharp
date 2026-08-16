@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Consumer-facing smoke test: consumes the real ZmqSharp and
+         ZmqSharp.Security.Curve packages from nuget.org exactly like a user, then
+         runs a loopback PAIR exchange and a CURVE exchange. Kept out of the solution
+         so it does not affect the library build/test. The publish workflow runs it
+         after publish and overrides the version with the tag. -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <!-- Default for local runs; the publish workflow overrides it with the tag
+             version (dotnet run -p:ZmqSharpVersion=$VERSION). -->
+        <ZmqSharpVersion Condition="'$(ZmqSharpVersion)' == ''">0.1.0</ZmqSharpVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="ZmqSharp" Version="$(ZmqSharpVersion)" />
+        <PackageReference Include="ZmqSharp.Security.Curve" Version="$(ZmqSharpVersion)" />
+    </ItemGroup>
+
+</Project>
