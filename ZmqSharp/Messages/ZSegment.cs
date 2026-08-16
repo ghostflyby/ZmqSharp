@@ -5,11 +5,12 @@ namespace ZmqSharp;
 
 /// <summary>
 /// Contiguous case of a frame: one buffer plus its ownership token. The owner
-/// is either the byte[] itself (owned) or an IMemoryOwner (pooled); a borrowed
-/// segment refers to the parser's scratch source without taking ownership and
-/// Dispose never touches it. Content is stored as an offset and length into
-/// the owner; <see cref="Memory"/> reacquires and slices on every access, so
-/// the segment stores no <c>Memory&lt;byte&gt;</c> field (0006 3.4).
+/// is the byte[] itself (owned), an IMemoryOwner (pooled), or a borrowed view
+/// (a caller <see cref="ReadOnlyMemory{T}"/> of any backing). Borrowed
+/// segments never take ownership - Dispose is a no-op for them (0026 3.6).
+/// Content is stored as an offset and length into the owner;
+/// <see cref="Memory"/> reacquires and slices on every access, so the segment
+/// stores no <c>Memory&lt;byte&gt;</c> field (0006 3.4).
 /// </summary>
 public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
 {
@@ -44,11 +45,40 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         return new ZSegment(source, offset, length, true);
     }
 
+    /// <summary>
+    /// Borrowed view: refers to a caller <see cref="ReadOnlyMemory{T}"/> of
+    /// any backing (<c>byte[]</c>, <c>string</c>, a custom
+    /// <see cref="MemoryManager{T}"/>) without taking ownership, so
+    /// <see cref="Dispose"/> is a no-op. The caller must not modify the memory
+    /// until the send completes (0026 3.6).
+    /// </summary>
+    internal static ZSegment Borrowed(ReadOnlyMemory<byte> memory)
+    {
+        return new ZSegment(new BorrowedMemory(memory), 0, memory.Length, true);
+    }
+
     /// <summary>The segment content; reacquires the owner memory on every access.</summary>
-    public ReadOnlyMemory<byte> Memory => Reacquire().Slice(offset, length);
+    public ReadOnlyMemory<byte> Memory
+    {
+        get
+        {
+            if (owner is BorrowedMemory borrowed) return borrowed.Memory.Slice(offset, length);
+
+            return Reacquire().Slice(offset, length);
+        }
+    }
 
     /// <summary>Writable view, used by the parser to fill the buffer during materialization.</summary>
-    internal Memory<byte> Writable => Reacquire().Slice(offset, length);
+    internal Memory<byte> Writable
+    {
+        get
+        {
+            if (owner is BorrowedMemory)
+                throw new InvalidOperationException("a borrowed view segment has no writable view");
+
+            return Reacquire().Slice(offset, length);
+        }
+    }
 
     /// <summary>True when the segment is owned (backed by a caller byte[]).</summary>
     public bool IsOwned => owner is byte[];
@@ -151,4 +181,15 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         {
         }
     }
+}
+
+/// <summary>
+/// The owner of a borrowed-view segment (0026 3.6): holds the caller's
+/// <see cref="ReadOnlyMemory{T}"/> of any backing without taking ownership.
+/// One small allocation per borrowed send; the receive hot path never builds
+/// one of these.
+/// </summary>
+internal sealed class BorrowedMemory(ReadOnlyMemory<byte> memory)
+{
+    public ReadOnlyMemory<byte> Memory { get; } = memory;
 }

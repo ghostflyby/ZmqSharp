@@ -31,10 +31,16 @@ public class ZPubSocket : ZQueueSocketBase
         return SendAsyncCore(message, token);
     }
 
-    /// <summary>Direct send: copies the payload into an owned message before routing.</summary>
+    /// <summary>
+    /// Direct send that borrows the caller's buffer instead of copying
+    /// (0026 3.6): zero-copy, no pool rent, for any <see cref="ReadOnlyMemory{T}"/>
+    /// backing. The caller must not modify the buffer until the returned task
+    /// completes; after the await the buffer is free again.
+    /// </summary>
     public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        return SendAsyncCore(bytes, token);
+        var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(bytes))));
+        return SendAsyncCore(message, token);
     }
 
     /// <summary>Direct send of a single frame with non-contiguous content, copied (0026).</summary>
