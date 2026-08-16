@@ -1,5 +1,7 @@
 # ZmqSharp
 
+[![CI](https://github.com/ghostflyby/ZmqSharp/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostflyby/ZmqSharp/actions/workflows/ci.yml) · [![NuGet Version](https://img.shields.io/nuget/v/ZmqSharp)](https://www.nuget.org/packages/ZmqSharp) · License: [Apache-2.0](LICENSE)
+
 A fully asynchronous, AOT-compatible .NET implementation of the ZMTP 3.0 protocol (ZeroMQ wire protocol) with
 libzmq-compatible socket semantics.
 
