@@ -92,9 +92,15 @@ public sealed class DealerRouterInteropTests
         await dealer.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
         var message = new NetMQMessage();
         router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
+        message.Should().NotBeNull();
         message.FrameCount.Should().Be(2);
-        message[0].ToByteArray().Should().Equal(identity);
-        message[1].ToByteArray().Should().Equal([.. "hello"u8]);
+        if (message[0] is not { } identityFrame)
+            throw new InvalidOperationException("the router must prefix the advertised identity");
+        if (message[1] is not { } payloadFrame)
+            throw new InvalidOperationException("the router must deliver the payload frame");
+
+        identityFrame.ToByteArray().Should().Equal(identity);
+        payloadFrame.ToByteArray().Should().Equal([.. "hello"u8]);
 
         // NetMQ router -> dealer, addressed by that identity: routes back.
         router.SendMoreFrame(identity).SendFrame([.. "pong"u8]);
