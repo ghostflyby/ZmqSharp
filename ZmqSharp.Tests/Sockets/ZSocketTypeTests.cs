@@ -125,8 +125,8 @@ public sealed class ZSocketTypeTests
             "REP" => peer is "REQ" or "DEALER",
             "PUSH" => peer == "PULL",
             "PULL" => peer == "PUSH",
-            "PUB" => peer == "SUB",
-            "SUB" => peer == "PUB",
+            "PUB" => peer is "SUB" or "XSUB",
+            "SUB" => peer is "PUB" or "XPUB",
             "XPUB" => peer is "SUB" or "XSUB" or "XPUB",
             "XSUB" => peer is "PUB" or "XPUB" or "XSUB",
             _ => false

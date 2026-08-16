@@ -64,18 +64,21 @@ public static class ZSocketTypes
         AdvertisesIdentity = true
     };
 
-    /// <summary>PUB: accepts a peer advertising SUB.</summary>
+    /// <summary>PUB: accepts SUB or XSUB peers (libzmq's PUB matrix).</summary>
     public static ZSocketType Pub { get; } = new()
     {
         Name = "PUB",
-        AcceptsPeer = peerType => peerType == "SUB"
+        AcceptsPeer = peerType => peerType is "SUB" or "XSUB"
     };
 
-    /// <summary>SUB: accepts a peer advertising PUB.</summary>
+    /// <summary>
+    /// SUB: accepts PUB or XPUB peers (libzmq's SUB matrix; the XPUB arm is
+    /// the Jupyter IOPub shape - a kernel XPUB with a SUB client).
+    /// </summary>
     public static ZSocketType Sub { get; } = new()
     {
         Name = "SUB",
-        AcceptsPeer = peerType => peerType == "PUB"
+        AcceptsPeer = peerType => peerType is "PUB" or "XPUB"
     };
 
     /// <summary>XPUB: accepts SUB, XSUB, or XPUB peers (the XPUB/XSUB interchange).</summary>
