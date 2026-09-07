@@ -77,7 +77,13 @@ jobs:
     steps:
       # gh release create resolves the repository through git, so this job needs the
       # checkout even though it builds nothing (packages come from the build job).
+      # Full history: the tag-on-main guard runs git merge-base --is-ancestor, and on
+      # a shallow (depth-1) checkout the two commits share no common ancestor unless
+      # the tag is exactly main's tip — a hotfix tag on an older main commit would be
+      # falsely rejected.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Download packages
         uses: actions/download-artifact@v7
@@ -94,14 +100,17 @@ jobs:
           if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
               throw "tag '$env:GITHUB_REF_NAME' is not a valid vX.Y.Z[(-suffix)] version"
           }
-          # Refuse versions nuget.org already has, before anything builds. With
+          # Refuse versions nuget.org already has, before anything is pushed. With
           # --skip-duplicate gone from the push this is the belt to its suspenders,
           # and it gives traceability-only tag pushes (a re-tag of a historical
-          # version) a clear early exit instead of a full build that cannot be
-          # pushed.
-          $index = try { Invoke-RestMethod -Uri 'https://api.nuget.org/v3-flatcontainer/zmqsharp/index.json' -TimeoutSec 30 } catch { $null }
-          if ($index -and ($index.versions -contains $version)) {
-              throw "version '$version' is already published on nuget.org — refusing to republish (traceability tag only)"
+          # version) a clear early exit instead of a push that cannot succeed.
+          # Both packages: a partial previous release (core pushed, Curve not) must
+          # not be silently re-pushed either.
+          foreach ($id in 'zmqsharp', 'zmqsharp.security.curve') {
+              $index = try { Invoke-RestMethod -Uri "https://api.nuget.org/v3-flatcontainer/$id/index.json" -TimeoutSec 30 } catch { $null }
+              if ($index -and ($index.versions -contains $version)) {
+                  throw "version '$version' of $id is already published on nuget.org — refusing to republish (traceability tag only)"
+              }
           }
           # The tag commit must sit on main's history: a tag on a side branch or a
           # stray commit never reaches the production publish.
@@ -123,7 +132,7 @@ jobs:
               $global:LASTEXITCODE = 0
               $null
           }
-          if (-not $run) { throw "no successful ci.yml run found for tag commit $env:GITHUB_SHA — tag before merging, not after" }
+          if (-not $run) { throw "no successful (completed) ci.yml run found for tag commit $env:GITHUB_SHA — merge first, wait for CI on main to go green, then tag" }
           Write-Host "ok: tag commit is on main with green CI (run $run)"
           # 'gh release list' exits 1 when no release exists yet (first publish); with
           # $PSNativeCommandUseErrorActionPreference = $true that becomes a terminating

@@ -13,9 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Published ZmqSharp version to verify, e.g. 0.5.0'
+        description: 'Published ZmqSharp version to verify, e.g. 0.5.0 (a leading "v" is stripped)'
         required: true
         type: string
+
+permissions:
+  contents: read
 
 jobs:
   package-smoke:
@@ -33,6 +36,10 @@ jobs:
           dotnet-version: 10.0.x
 
       # The consumer csproj defaults to 0.1.0 for local runs; the manual trigger
-      # overrides it with the version being verified.
+      # overrides it with the version being verified (a habitual "v0.5.0" input
+      # is stripped to the bare version nuget restore expects).
       - name: Smoke test the published packages
-        run: dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=${{ inputs.version }}
+        shell: pwsh
+        run: dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=$("$env:VERSION" -replace '^v', '')
+        env:
+          VERSION: ${{ inputs.version }}
