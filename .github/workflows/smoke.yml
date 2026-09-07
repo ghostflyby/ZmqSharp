@@ -3,23 +3,27 @@ name: smoke
 # Manual post-publish verification: consume the real ZmqSharp +
 # ZmqSharp.Security.Curve packages from nuget.org with a dedicated consumer
 # project (ZmqSharp.Smoke) and run a loopback PAIR exchange and a CURVE
-# exchange. Manual because nuget.org's flat-container index propagation is
-# not bounded - it has lagged the upload by more than 5 minutes (v0.4.0,
-# v0.4.1), so an automatic job right after publish failed on external index
-# delay rather than on a real defect. Trigger with the released version
-# (e.g. v0.4.1); the consumer project defaults to 0.1.0 for local runs.
+# exchange. Kept out of the publish workflow: the feed is eventually
+# consistent, and a freshly pushed version becomes visible only after an
+# unbounded, unobservable delay — so smoke cannot run in lockstep with the
+# release (it would fail on index lag, as it did on v0.4.0/v0.4.1). Trigger
+# it manually once the version is confirmed available on nuget.org; a failure
+# here flags a packaging problem that a release did not catch.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Released version to smoke-test (e.g. v0.4.1).'
+        description: 'Published ZmqSharp version to verify, e.g. 0.5.0'
         required: true
+        type: string
 
 jobs:
-  smoke:
+  package-smoke:
+    # One OS is enough: the managed dll has no platform-specific code (no
+    # P/Invoke), unlike Pty.Net.
     name: Package smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7 # for ZmqSharp.Smoke
 
@@ -28,32 +32,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      # Flat-container index can lag the upload by minutes (occasionally more
-      # than 5); a manual smoke can wait longer, so 15 minutes.
+      # The consumer csproj defaults to 0.1.0 for local runs; the manual trigger
+      # overrides it with the version being verified.
       - name: Smoke test the published packages
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $version = $env:VERSION -replace '^v', ''
-          $deadline = (Get-Date).AddMinutes(15)
-          foreach ($id in 'zmqsharp', 'zmqsharp.security.curve') {
-              $url = "https://api.nuget.org/v3-flatcontainer/$id/index.json"
-              while ($true) {
-                  try {
-                      $versions = @((Invoke-RestMethod -Uri $url -TimeoutSec 20).versions)
-                      if ($versions -contains $version) {
-                          Write-Host "ok: $id $version visible on nuget.org"
-                          break
-                      }
-                  } catch {
-                      Write-Host "index check failed for $id, retrying: $_"
-                  }
-                  if ((Get-Date) -ge $deadline) {
-                      throw "package $id version $version not visible on nuget.org within 15 minutes"
-                  }
-                  Start-Sleep -Seconds 15
-              }
-          }
-          dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=$version
-        env:
-          VERSION: ${{ inputs.version }}
+        run: dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=${{ inputs.version }}

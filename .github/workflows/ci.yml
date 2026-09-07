@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# A new push to the same ref supersedes the in-flight CI run: the 3-job matrix
+# is expensive, and only the latest commit's result matters for the merge gate.
+# Tag-only pushes do not match the branches filter, so publish runs
+# (tag-triggered) are never cancelled by this.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
