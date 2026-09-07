@@ -53,8 +53,10 @@ jobs:
       # matches the package pushed in this same run.
       - name: Pack
         run: |
-          dotnet pack ZmqSharp/ZmqSharp.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION
-          dotnet pack ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION
+          # --symbols produces the .snupkg symbol packages (csproj: snupkg format,
+          # deterministic build, SourceLink) so consumers can debug into sources.
+          dotnet pack ZmqSharp/ZmqSharp.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION --symbols
+          dotnet pack ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION --symbols
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
@@ -199,13 +201,18 @@ jobs:
 
       - name: Publish to nuget.org
         run: |
+          # Symbol packages push to nuget.org with the same key (no extra auth);
+          # a snupkg must be pushed after its nupkg is validated on the gallery.
           dotnet nuget push "pkgs/ZmqSharp.$env:VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          dotnet nuget push "pkgs/ZmqSharp.$env:VERSION.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           dotnet nuget push "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          dotnet nuget push "pkgs/ZmqSharp.Security.Curve.$env:VERSION.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
 
       - name: Create GitHub release
         run: |
           gh release create "$env:GITHUB_REF_NAME" --title "$env:GITHUB_REF_NAME" `
-            --notes "ZmqSharp $env:VERSION — see https://www.nuget.org/packages/ZmqSharp/$env:VERSION and https://www.nuget.org/packages/ZmqSharp.Security.Curve/$env:VERSION for package details." `
-            "pkgs/ZmqSharp.$env:VERSION.nupkg" "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg"
+            --notes "ZmqSharp $env:VERSION — see https://www.nuget.org/packages/ZmqSharp/$env:VERSION and https://www.nuget.org/packages/ZmqSharp.Security.Curve/$env:VERSION for package details. Symbol packages (.snupkg) are on nuget.org; debuggers fetch them automatically." `
+            "pkgs/ZmqSharp.$env:VERSION.nupkg" "pkgs/ZmqSharp.$env:VERSION.snupkg" `
+            "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg" "pkgs/ZmqSharp.Security.Curve.$env:VERSION.snupkg"
         env:
           GH_TOKEN: ${{ github.token }}

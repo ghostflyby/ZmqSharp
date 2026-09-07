@@ -8,6 +8,14 @@
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <IsPackable>true</IsPackable>
         <PackageId>ZmqSharp.Security.Curve</PackageId>
+        <!-- Symbol packages: a .snupkg with the portable PDB ships alongside the
+             nupkg so consumers can debug into the sources (stack traces with line
+             numbers). Deterministic build + embedded untracked sources keep the PDB
+             reproducible; SourceLink maps the PDB back to the GitHub commit. -->
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
         <!-- Package version is injected by the publish workflow (-p:Version=<tag version>);
              no Version property here so the file never drifts from the released version.
              A local `dotnet pack` therefore defaults to 1.0.0 - only for local experiments. -->
@@ -22,6 +30,12 @@
 
     <ItemGroup>
         <ProjectReference Include="../ZmqSharp/ZmqSharp.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- SourceLink: embeds GitHub URLs into the PDB so debuggers fetch the
+             exact source of the published commit. -->
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="all"/>
     </ItemGroup>
 
     <ItemGroup>
