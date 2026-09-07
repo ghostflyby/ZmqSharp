@@ -202,12 +202,16 @@ jobs:
 
       - name: Publish to nuget.org
         run: |
-          # Symbol packages push to nuget.org with the same key (no extra auth);
-          # a snupkg must be pushed after its nupkg is validated on the gallery.
+          # Symbol packages push to nuget.org with the same key (no extra auth).
+          # The snupkg pushes carry --skip-duplicate: dotnet push retries a fresh
+          # snupkg PUT after nuget.org already accepted it (Created), and the retry
+          # gets 409 "another copy pending validation" — the race that failed the
+          # v0.5.1 publish although all four artifacts landed. The nupkg pushes
+          # stay without it: the exists-check above is their republish gate.
           dotnet nuget push "pkgs/ZmqSharp.$env:VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
-          dotnet nuget push "pkgs/ZmqSharp.$env:VERSION.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          dotnet nuget push "pkgs/ZmqSharp.$env:VERSION.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --skip-duplicate
           dotnet nuget push "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
-          dotnet nuget push "pkgs/ZmqSharp.Security.Curve.$env:VERSION.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
+          dotnet nuget push "pkgs/ZmqSharp.Security.Curve.$env:VERSION.snupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --skip-duplicate
 
       - name: Create GitHub release
         run: |
