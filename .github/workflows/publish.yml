@@ -53,10 +53,11 @@ jobs:
       # matches the package pushed in this same run.
       - name: Pack
         run: |
-          # --symbols produces the .snupkg symbol packages (csproj: snupkg format,
-          # deterministic build, SourceLink) so consumers can debug into sources.
-          dotnet pack ZmqSharp/ZmqSharp.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION --symbols
-          dotnet pack ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION --symbols
+          # The csproj enables IncludeSymbols/snupkg; pass them explicitly anyway so
+          # the pack intent is visible here (--symbols as a CLI switch is parsed by
+          # pwsh into MSBuild as an unknown switch and fails).
+          dotnet pack ZmqSharp/ZmqSharp.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
+          dotnet pack ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj -c Release --nologo -o pkg -p:Version=$env:VERSION -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
