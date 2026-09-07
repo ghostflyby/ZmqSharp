@@ -1,0 +1,64 @@
+name: CodeQL
+
+# Security scanning with results uploaded to the repository's Security tab (code
+# scanning). ZmqSharp is pure managed code (no P/Invoke, no per-OS file splits),
+# so a single-OS analysis sees the whole surface - unlike Pty.Net, whose csproj
+# compiles a per-OS half and needs the two-OS matrix. CodeQL is free on public
+# repositories.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly sweep even without code motion: newly published queries and
+    # security-extended findings surface without waiting for the next commit.
+    - cron: '23 4 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (csharp)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Required to upload the SARIF results to the Security tab.
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+          # security-extended adds the broader security query suite on top of the
+          # default set - the right default for a networking library that parses
+          # untrusted wire input.
+          queries: security-extended
+
+      - name: Build
+        # A real build instead of autobuild so the source-generated serializer
+        # and AOT-annotated surface end up in the analyzed database.
+        run: dotnet build ZmqSharp.slnx -c Release --nologo
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:csharp"
+
+  # PR gate for vulnerable dependency changes (GitHub Advisory Database diff between
+  # base and head). Requires the repository's Dependency graph to be enabled — the
+  # toggle lives only in the repo settings UI (Settings → Code security); the API
+  # silently ignores dependency_graph_enabled for user-owned repositories.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/dependency-review-action@v5
