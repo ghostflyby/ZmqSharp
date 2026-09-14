@@ -35,6 +35,21 @@ public class ReceiveAllocationTests
     private const int MessageCount = 2000;
     private const int WarmupCount = 64;
 
+    /// <summary>Steady per-message ceiling on the pump thread; one pooled rent measures ~216 B.</summary>
+    private const long PerMessageCeiling = 2048;
+
+    /// <summary>
+    /// How many one-off runtime allocations may land in a single window. See
+    /// <see cref="AssertPerMessageCostBounded"/> for the measured evidence.
+    /// </summary>
+    private const int RuntimeEventAllowance = 2;
+
+    /// <summary>
+    /// Above this a single delta is a real regression rather than a runtime
+    /// event: the one-off events measured here are ~16 KiB.
+    /// </summary>
+    private const long RuntimeEventCeiling = 1 << 16;
+
     [Fact(Timeout = 15_000)]
     public async Task Receive_SteadyState_PerMessageCostIsBoundedOnPumpThread()
     {
@@ -82,17 +97,8 @@ public class ReceiveAllocationTests
 
         // The counter on one thread is monotonic while this test owns it.
         deltas.Min().Should().BeGreaterThanOrEqualTo(0);
-#if !DEBUG
-        // Bounded per-message cost: ~216 B for one pooled rent. A leak would
-        // grow without bound; a regression to a large per-message allocation
-        // blows this ceiling. Debug boxes async state machines per delivery,
-        // so the absolute gates only hold in Release (0006 3.6); CI is Release.
-        deltas.Max().Should().BeLessThanOrEqualTo(2048);
-        // Median reflects the steady per-message pool cost, not a heavy tail.
-        Median(deltas).Should().BeLessThanOrEqualTo(512);
-#else
-        _ = deltas;
-#endif
+
+        AssertPerMessageCostBounded(deltas, medianCeiling: 512);
     }
 
     [Fact(Timeout = 15_000)]
@@ -188,14 +194,10 @@ public class ReceiveAllocationTests
 
         var deltas = WindowDeltas(sink);
         deltas.Min().Should().BeGreaterThanOrEqualTo(0);
-#if !DEBUG
-        // ~2 pooled rents per two-frame message; absolute gates are Release
-        // only (see the steady-state test).
-        deltas.Max().Should().BeLessThanOrEqualTo(2048);
-        Median(deltas).Should().BeLessThanOrEqualTo(1024);
-#else
-        _ = deltas;
-#endif
+
+        // ~2 pooled rents per two-frame message; the absolute gates are Release
+        // only (see AssertPerMessageCostBounded).
+        AssertPerMessageCostBounded(deltas, medianCeiling: 1024);
     }
 
     /// <summary>
@@ -222,6 +224,55 @@ public class ReceiveAllocationTests
             deltas[i - WarmupCount - 2] = sink.Samples[i] - sink.Samples[i - 1];
 
         return deltas;
+    }
+
+    /// <summary>
+    /// Bounds the steady per-message cost, tolerating a small number of one-off
+    /// runtime allocations.
+    /// <para>
+    /// The maximum is deliberately not asserted. Tiered JIT/OSR can allocate
+    /// inside an otherwise single-threaded window: measured at 16464 B, once per
+    /// process, in the tenth measured window of such a sequence (~20000
+    /// cumulative deliveries), and never when tiered compilation is disabled
+    /// (0 events across 36 windows). A max gate would therefore fail a healthy
+    /// build as soon as the measured delivery count reaches that point; this
+    /// class currently performs ~5000, so it clears the event only by margin
+    /// rather than by design.
+    /// </para>
+    /// <para>
+    /// A real regression is unaffected by this tolerance: a leak or a larger
+    /// per-message allocation moves every delta, so it trips the excursion count
+    /// by orders of magnitude, while the median catches an across-the-board
+    /// increase.
+    /// </para>
+    /// </summary>
+    private static void AssertPerMessageCostBounded(long[] deltas, long medianCeiling)
+    {
+#if !DEBUG
+        var excursions = deltas.Where(d => d > PerMessageCeiling).ToArray();
+        excursions.Length.Should().BeLessThanOrEqualTo(
+            RuntimeEventAllowance,
+            "one-off JIT/OSR allocations are tolerated, but a per-message regression moves every "
+            + "delta past the {0} B ceiling and overshoots this count by orders of magnitude",
+            PerMessageCeiling);
+
+        // Asserted as a maximum rather than per-element so a failure names the
+        // worst delivery instead of an opaque loop variable.
+        var worstExcursion = excursions.Length == 0 ? 0 : excursions.Max();
+        worstExcursion.Should().BeLessThanOrEqualTo(
+            RuntimeEventCeiling,
+            "a single delivery allocating more than {0} B is a regression, not a runtime event",
+            RuntimeEventCeiling);
+
+        // The median reflects the steady per-message pool cost, not a heavy tail.
+        Median(deltas).Should().BeLessThanOrEqualTo(medianCeiling);
+#else
+        // Debug boxes async state machines per delivery (measured: ~552 B per
+        // send), so the absolute per-message gates only hold in Release
+        // (0006 3.6); CI and the allocation gate are Release.
+        _ = deltas;
+        _ = medianCeiling;
+#endif
     }
 
     private static long Median(long[] values)

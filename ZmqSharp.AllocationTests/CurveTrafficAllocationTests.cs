@@ -12,8 +12,15 @@ namespace ZmqSharp.AllocationTests;
 /// so steady-state frames allocate nothing. The fake connection's reads and
 /// writes complete synchronously, so each operation runs its whole chain on
 /// the calling thread and GC.GetAllocatedBytesForCurrentThread deltas are
-/// valid - the same single-thread window the clear send and receive gates
-/// rely on (0008).
+/// valid.
+/// <para>
+/// That synchronous-completion property is what makes each reading valid, so
+/// both windows assert the thread they depend on rather than assuming it: a
+/// window that migrated across thread-pool threads compares two threads'
+/// counters, and a cross-thread subtraction can be negative - which would
+/// satisfy an allocation ceiling and report "allocation-free" for a path that
+/// regressed to asynchronous.
+/// </para>
 /// </summary>
 [Collection("allocation-measurement")]
 public class CurveTrafficAllocationTests
@@ -38,8 +45,14 @@ public class CurveTrafficAllocationTests
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
+        var sealThread = Environment.CurrentManagedThreadId;
+        var sealThreadStable = true;
         var beforeSeal = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < count; i++) await sealer.SendFrameAsync(payload, false);
+        for (var i = 0; i < count; i++)
+        {
+            await sealer.SendFrameAsync(payload, false);
+            if (Environment.CurrentManagedThreadId != sealThread) sealThreadStable = false;
+        }
         var sealAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeSeal;
 
         // Replay the recorded wire frames through an opener. The sealer's
@@ -57,17 +70,31 @@ public class CurveTrafficAllocationTests
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
+        var openThread = Environment.CurrentManagedThreadId;
+        var openThreadStable = true;
         var beforeOpen = GC.GetAllocatedBytesForCurrentThread();
         var totalRead = 0;
         for (var i = 0; i < count; i++)
+        {
             totalRead += await opener.ReadAsync(buffer);
+            if (Environment.CurrentManagedThreadId != openThread) openThreadStable = false;
+        }
         var openAllocated = GC.GetAllocatedBytesForCurrentThread() - beforeOpen;
         totalRead.Should().BeGreaterThan(0);
+
+        sealThreadStable.Should().BeTrue(
+            "the thread-local seal delta is only valid while the whole measured window runs on one thread");
+        openThreadStable.Should().BeTrue(
+            "the thread-local open delta is only valid while the whole measured window runs on one thread");
 
         // A per-frame allocation would be a few hundred bytes minimum (a
         // rented buffer or an array); both loops completing under the gate
         // proves the CURVE traffic path is steady-state allocation-free (0023).
 #if !DEBUG
+        sealAllocated.Should().BeGreaterThanOrEqualTo(0,
+            "a negative seal delta means the window spanned two threads, not that the path allocated nothing");
+        openAllocated.Should().BeGreaterThanOrEqualTo(0,
+            "a negative open delta means the window spanned two threads, not that the path allocated nothing");
         sealAllocated.Should().BeLessThan(1024);
         openAllocated.Should().BeLessThan(1024);
 #else
