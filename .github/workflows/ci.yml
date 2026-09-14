@@ -48,7 +48,16 @@ jobs:
         run: dotnet format ZmqSharp.slnx --verify-no-changes --no-restore
 
       - name: Test
-        run: dotnet test ZmqSharp.slnx --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+        # MTP mode: the xunit v3 test assemblies are self-executing
+        # Microsoft.Testing.Platform apps, so the VSTest-era --logger option no
+        # longer exists. --report-trx (provided by
+        # Microsoft.Testing.Extensions.TrxReport, referenced by each test
+        # project) writes one .trx per project into TestResults.
+        # --max-parallel-test-modules 1 keeps the projects serial, as they were
+        # under VSTest: the allocation suite samples a thread-local GC counter
+        # and is the suite most sensitive to a noisy, shared thread pool, and
+        # hosted runners have few cores. Costs ~6s per matrix job.
+        run: dotnet test ZmqSharp.slnx --no-build --configuration Release --report-trx --results-directory TestResults --max-parallel-test-modules 1
 
       - name: Upload test results
         uses: actions/upload-artifact@v7

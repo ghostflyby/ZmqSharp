@@ -10,3 +10,10 @@ indent_size = 4
 tab_width = 4
 dotnet_sort_system_directives_first = true
 csharp_style_namespace_declarations = file_scoped:suggestion
+# xUnit.net v3 ships analyzers that ask async tests to thread
+# TestContext.Current.CancellationToken through every awaited call (xUnit1051) and
+# to reference it in tests carrying a Timeout (xUnit1069). Adopting that guidance is
+# worthwhile but is a separate, test-wide change; kept at suggestion level so the
+# migration itself stays reviewable and `dotnet format --verify-no-changes` stays green.
+dotnet_diagnostic.xUnit1051.severity = suggestion
+dotnet_diagnostic.xUnit1069.severity = suggestion

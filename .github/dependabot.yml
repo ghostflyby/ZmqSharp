@@ -10,9 +10,8 @@ updates:
       test-packages:
         patterns:
           - "FluentAssertions"
-          - "Microsoft.NET.Test.Sdk"
-          - "xunit"
-          - "xunit.runner.visualstudio"
+          - "Microsoft.Testing.Extensions.*"
+          - "xunit.v3"
 
   - package-ecosystem: github-actions
     directory: /
