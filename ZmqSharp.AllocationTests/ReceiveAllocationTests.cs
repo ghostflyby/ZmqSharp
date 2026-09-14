@@ -127,10 +127,20 @@ public class ReceiveAllocationTests
         peer.Enqueue(AllocationFrameData.Frame([.. "first"u8]));
         await sink.WaitForAsync(1);
 
-        // The very first delivery allocates (scratch rent + pool warm-up); the
-        // ceiling is only a sanity bound. Steady-state cost is asserted above.
+        // The first delivery reaches the sink and allocates on the pump thread.
+        //
+        // Deliberately not asserting a ceiling here. Samples holds
+        // GC.GetAllocatedBytesForCurrentThread, which is per-thread and
+        // monotonic only within one thread, so the only sound bounds are
+        // increments between two samples taken on the same thread - and the
+        // steady-state test above establishes those inside a window it pins to
+        // a single thread. This test takes a single sample after an await, so
+        // the pump may resume on a different pool thread: subtracting across
+        // that boundary can even go negative, and an absolute value measures
+        // whatever the host already allocated on that thread (under
+        // Microsoft.Testing.Platform, discovery and other tests share the same
+        // pool) rather than anything about this delivery.
         sink.Samples[0].Should().BeGreaterThan(0);
-        sink.Samples[0].Should().BeLessThan(1 << 20);
     }
 
     [Fact(Timeout = 15_000)]

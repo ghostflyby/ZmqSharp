@@ -45,8 +45,11 @@ jobs:
           "VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
 
       # A release candidate must pass the full suite before anything ships.
+      # No --nologo here: in Microsoft.Testing.Platform mode dotnet test forwards
+      # unrecognized options to the test app, and the xunit v3 runner spells it
+      # -noLogo, so --nologo aborts the run with exit code 5.
       - name: Test
-        run: dotnet test ZmqSharp.slnx -c Release --nologo
+        run: dotnet test ZmqSharp.slnx -c Release
 
       # Both packable projects get the tag version. Packing the Curve project pulls
       # the core project into the same version, so its nuspec dependency on ZmqSharp

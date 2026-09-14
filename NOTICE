@@ -24,8 +24,10 @@ library itself has no runtime dependencies):
   under the MIT License. Portions are derived from the libzmq project
   (https://github.com/zeromq/libzmq), which is licensed under the MPL-2.0 and
   LGPL-3.0 (dual-licensed).
-- xUnit (2.x) - https://github.com/xunit/xunit - MIT License.
-- Microsoft.NET.Test.Sdk and xunit.runner.visualstudio - MIT License.
+- xUnit.net (v3) - https://github.com/xunit/xunit - Apache-2.0 License.
+- Microsoft.Testing.Platform and Microsoft.Testing.Extensions.TrxReport -
+  https://github.com/microsoft/testfx - MIT License. Provides the test host
+  (the xUnit.net v3 runner is built on it) and TRX result reporting.
 - FluentAssertions (8.x) - https://fluentassertions.com - used under the
   Fluent Assertions Community License for non-commercial use; an active
   subscription is required for commercial use. See

@@ -5,12 +5,18 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+        <!-- xUnit.net v3 projects are self-executing Microsoft.Testing.Platform
+             applications: the framework generates the entry point, so the test
+             assembly is an Exe and no VSTest host or adapter is involved. -->
+        <OutputType>Exe</OutputType>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0"/>
-        <PackageReference Include="xunit" Version="2.9.3"/>
-        <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0"/>
+        <PackageReference Include="xunit.v3" Version="4.0.1"/>
+        <!-- Registers the TRX reporter with Microsoft.Testing.Platform, which the
+             CI `dotnet test` invocation selects. -->
+        <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.0"/>
         <PackageReference Include="FluentAssertions" Version="8.10.0"/>
     </ItemGroup>
 
