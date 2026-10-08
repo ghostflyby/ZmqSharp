@@ -63,6 +63,7 @@ public sealed class ReceiveComponentsTests
             held.Dispose();
             record.Queue = null;
         }
+
         pool.Outstanding.Should().Be(0);
         await registration.FinishAsync();
     }
@@ -93,6 +94,7 @@ public sealed class ReceiveComponentsTests
                 record.Phase = PeerPhase.Stopping;
                 surface.Remove(record);
             }
+
             surface.Reclaim(record, null);
         });
         start.TrySetResult();
@@ -106,6 +108,7 @@ public sealed class ReceiveComponentsTests
     {
         public Memory<byte> Memory { get; } = new byte[8];
         public int Disposals;
+
         public void Dispose()
         {
             if (Interlocked.Increment(ref Disposals) != 1) throw new InvalidOperationException("owner released twice");
@@ -126,6 +129,7 @@ public sealed class ReceiveComponentsTests
     private sealed class HeaderThenFailure : IZByteReader
     {
         private int position;
+
         public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
             if (position >= 2) throw new IOException("read failed in body");

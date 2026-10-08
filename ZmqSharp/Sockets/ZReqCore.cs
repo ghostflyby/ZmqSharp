@@ -44,6 +44,7 @@ internal sealed class ZReqCore : IZInboundPolicy
             request = new Request(target[0], token);
             pending = request;
         }
+
         _ = RunAsync(request, message);
         return request.Completion.Task;
     }
@@ -77,7 +78,10 @@ internal sealed class ZReqCore : IZInboundPolicy
             reply = await request.Outcome.Task;
             ownsReply = true;
         }
-        catch (Exception ex) { failure = ex; }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
 
         await registration.DisposeAsync();
 
@@ -86,6 +90,7 @@ internal sealed class ZReqCore : IZInboundPolicy
         {
             if (ReferenceEquals(pending, request)) pending = null;
         }
+
         if (ownsReply) request.Completion.TrySetResult(reply);
         else if (failure is OperationCanceledException) request.Completion.TrySetCanceled(request.Token);
         else if (failure is { } error) request.Completion.TrySetException(error);
@@ -117,12 +122,16 @@ internal sealed class ZReqCore : IZInboundPolicy
         }
 
         ZMessage reply;
-        try { reply = ZDelimiterFraming.Decode(message, "reply"); }
+        try
+        {
+            reply = ZDelimiterFraming.Decode(message, "reply");
+        }
         catch (Exception ex)
         {
             Fail(request, ex, true);
             throw;
         }
+
         if (request.TryFinish()) request.Outcome.TrySetResult(reply);
         else reply.Dispose();
         return ValueTask.FromResult(ZInboundDecision.Consumed());

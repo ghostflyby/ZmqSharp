@@ -48,9 +48,7 @@ public sealed class ZSocketTests
         {
             await echoTask;
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
     }
 
     [Theory]
@@ -106,9 +104,7 @@ public sealed class ZSocketTests
         {
             await Task.WhenAll(drainA, drainB);
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
     }
 
     [Theory]
@@ -846,9 +842,7 @@ public sealed class ZSocketTests
                 if (received.ToArray().AsSpan().IndexOf("ERROR"u8) >= 0) break;
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
 
         received.ToArray().AsSpan().IndexOf("ERROR"u8).Should().BeGreaterThanOrEqualTo(0);
     }
@@ -1267,9 +1261,7 @@ public sealed class ZSocketTests
         {
             await drainB;
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
     }
 
     [Theory]
@@ -1592,8 +1584,7 @@ public sealed class ZSocketTests
         var connectFailure = await Record.ExceptionAsync(() => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
         connectFailure.Should().BeOfType<ZeroMqProtocolException>();
 
-        var waitFailure = await Record.ExceptionAsync(
-            () => outbound.WaitToWriteAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        var waitFailure = await Record.ExceptionAsync(() => outbound.WaitToWriteAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
         waitFailure.Should().BeOfType<ZeroMqProtocolException>();
 
         // The completion is a terminal state, so a single write now fails
@@ -1723,9 +1714,7 @@ public sealed class ZSocketTests
             {
                 for (var i = 0; i < 300; i++) await server.SendAsync(ZMessage.FromOwned([1]), cts.Token);
             }
-            catch (OperationCanceledException)
-            {
-            }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 failures.Enqueue(ex);
@@ -1739,9 +1728,7 @@ public sealed class ZSocketTests
                 var messages = server.Messages;
                 await foreach (var message in messages.ReadAllAsync(cts.Token)) message.Dispose();
             }
-            catch (OperationCanceledException)
-            {
-            }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 failures.Enqueue(ex);
@@ -1764,9 +1751,7 @@ public sealed class ZSocketTests
         {
             await drainer;
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
 
         failures.Should().BeEmpty();
 
@@ -2040,9 +2025,7 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() { }
 }
 
 internal sealed class SynchronousEofConnection : IZConnection
@@ -2064,6 +2047,7 @@ internal sealed class SynchronousEofConnection : IZConnection
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
+
     public void Abort() => Dispose();
 
     public void Dispose()

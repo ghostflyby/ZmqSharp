@@ -266,8 +266,6 @@ public sealed class ZmtpParserTests
             return onFrameAsync(frame, token);
         }
 
-        public void OnConnectionEnded()
-        {
-        }
+        public void OnConnectionEnded() { }
     }
 }

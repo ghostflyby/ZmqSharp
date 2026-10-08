@@ -172,8 +172,6 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
             index = -1;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }

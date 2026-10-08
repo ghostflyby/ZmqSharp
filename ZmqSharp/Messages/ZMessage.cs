@@ -11,7 +11,7 @@ namespace ZmqSharp;
 public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 {
     private readonly ZSingleMessage? single; // Single case
-    private readonly ZMultiMessage? multi; // Multi case
+    private readonly ZMultiMessage? multi;   // Multi case
 
     public ZMessage(ZSingleMessage single)
     {
@@ -170,8 +170,6 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
             index = -1;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }

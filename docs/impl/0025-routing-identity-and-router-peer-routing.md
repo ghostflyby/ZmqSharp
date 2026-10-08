@@ -32,14 +32,12 @@ Four concrete gaps, each verified in the current code:
 
 The Jupyter failure this causes is precise. The Maieutics Jupyter client opens
 shell and stdin DEALER sockets with one shared identity (a fresh Guid) and the
-control DEALER with another
-(`NetMqJupyterTransport.cs`: `shell`/`stdin` share `serialization.ClientIdentity`,
+control DEALER with another (`NetMqJupyterTransport.cs`: `shell`/`stdin` share `serialization.ClientIdentity`,
 `control` uses `Guid.NewGuid()`). The kernel routes shell replies, stdin
 requests, and control replies back to the **same client socket instance** by
 that identity. With ZmqSharp:
 
-- A ZmqSharp client cannot set the identity at all, so a real Jupyter kernel
-  (libzmq / Deno / Python) cannot route stdin back to the requesting client -
+- A ZmqSharp client cannot set the identity at all, so a real Jupyter kernel (libzmq / Deno / Python) cannot route stdin back to the requesting client -
   stdin dies, which is a protocol-correctness break, not a cosmetic one.
 - A ZmqSharp ROUTER kernel assigns each peer an independent counter id **per
   ROUTER socket**. Shell, control, and stdin are three separate ROUTER
@@ -193,8 +191,7 @@ strategy-function or callback hook anywhere in the option system:
 - The router's `identify_peer` (src/router.cpp) uses the peer's advertised
   identity when the peer sends one (READY's Identity, surfaced to the pipe as
   a routing-id message); peers that send none fall back to an auto-generated
-  5-byte `[0x00, uint32 counter]` with a random start
-  (`_next_integral_routing_id` from `generate_random()`), incremented **per
+  5-byte `[0x00, uint32 counter]` with a random start (`_next_integral_routing_id` from `generate_random()`), incremented **per
   router socket**. That fallback is order-dependent and router-local by
   design - the connection-order problem is inherent to ZMTP peers that do not
   advertise an identity, in libzmq exactly as in ZmqSharp; the fix is that
@@ -253,8 +250,7 @@ is the normal establishment-failure path.
 
 ## 5. Tests
 
-- Codec: `ParseReadyIdentity` returns raw bytes for a Guid-shaped identity
-  (including a leading `0x00` byte), null for absent/empty, and throws on the
+- Codec: `ParseReadyIdentity` returns raw bytes for a Guid-shaped identity (including a leading `0x00` byte), null for absent/empty, and throws on the
   same malformed-property cases as `ParseMetadata`.
 - READY build: `BuildReady(type, identity)` round-trips through
   `ParseReadyIdentity`; default build is byte-identical to today.

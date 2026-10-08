@@ -20,8 +20,7 @@ implemented yet.
   `ZReceiveRejectionReason` (0005 pattern), `IZReceivePolicy.Decide` returning
   a `ZReceiveAllocation` (allocation only, no rejection case), `MaxFrameLength` / `MaxMessageLength` /
   `MaxFramesPerMessage` on `ZSocketOptions` (one-time socket
-  configuration, 0023) enforced by a connection-level guard in the materializer
-  (fixed-order evaluation; a custom policy cannot bypass them), checked
+  configuration, 0023) enforced by a connection-level guard in the materializer (fixed-order evaluation; a custom policy cannot bypass them), checked
   accumulation via `ZReceiveGuard`, terminal teardown through the existing
   failure-safe path, and a `ReceiveRejections` diagnostic counter on the
   queue surface (`ZQueueSocketBase`, 0023) (decision on open question 3:
@@ -149,8 +148,7 @@ only limit that is not opt-out.
   the checked accumulation, still before that frame's body is read or any
   storage is rented.
 - An over-limit frame must never reach `Pool.Rent`,
-  `GC.AllocateUninitializedArray`, scratch growth, or segment-table creation
-  (0006 §3.2 gate).
+  `GC.AllocateUninitializedArray`, scratch growth, or segment-table creation (0006 §3.2 gate).
 - The connection does not continue after a rejection (see D6).
 
 ### D4. The accumulated total is enforced by the pipeline, not the pool
@@ -171,15 +169,14 @@ Consequences:
 - The pool remains injectable (`ZSocketOptions.Pool`), so a custom pool may
   add global accounting, but that is a separate local-resource concern and
   never the mechanism for a protocol limit.
-- A protocol-limit violation must never escape as an OOM or pool exception
-  (0006 §3.2 gate).
+- A protocol-limit violation must never escape as an OOM or pool exception (0006 §3.2 gate).
 
 ### D5. Two failure classes, one visibility rule
 
-| Failure class | Cause | Peer-visible behavior | Local behavior |
-| --- | --- | --- | --- |
-| Protocol rejection | peer exceeds a configured or mandatory limit; handshake violation | handshake phase: ERROR command then close (existing path); traffic phase: close without ERROR, because ZMTP has no traffic-phase ERROR | `PeerEnded` with a rejection failure; diagnostic counter/event; never silent |
-| Local allocation failure | pool exception, OOM, or custom pool refusal | plain close; the peer did nothing wrong, so no ERROR is sent | `PeerEnded` with the allocation failure; diagnostic counter; never converted into a protocol rejection |
+| Failure class            | Cause                                                             | Peer-visible behavior                                                                                                                  | Local behavior                                                                                         |
+|--------------------------|-------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| Protocol rejection       | peer exceeds a configured or mandatory limit; handshake violation | handshake phase: ERROR command then close (existing path); traffic phase: close without ERROR, because ZMTP has no traffic-phase ERROR | `PeerEnded` with a rejection failure; diagnostic counter/event; never silent                           |
+| Local allocation failure | pool exception, OOM, or custom pool refusal                       | plain close; the peer did nothing wrong, so no ERROR is sent                                                                           | `PeerEnded` with the allocation failure; diagnostic counter; never converted into a protocol rejection |
 
 Both classes are terminal for the connection. Neither drops frames
 silently: the local side always surfaces the failure through `PeerEnded` and
@@ -188,13 +185,11 @@ message API, not by rejecting in the allocator.
 
 ### D6. Rejection and failure are terminal for the connection
 
-`PeerState.FrameIndex` and `AccumulatedLength` advance before allocation
-(`ZQueueSocketBase`, 0023).
+`PeerState.FrameIndex` and `AccumulatedLength` advance before allocation (`ZQueueSocketBase`, 0023).
 Continuing a connection after a rejection would desynchronize that accounting,
 so rejection always tears the connection down: the peer is removed, its
 accumulated owning frames are reclaimed (0006 §3.2 gate), and the parser and
-connection are disposed through the existing failure-safe `finally` path
-(0006 §3.3).
+connection are disposed through the existing failure-safe `finally` path (0006 §3.3).
 
 ## 3. Enforcement Points and Invariants
 
@@ -213,8 +208,7 @@ read frame header
 ```
 
 Command frames keep their existing hard limit path: `MaxCommandSize`
-(1 MiB) is checked before the command body is read into scratch
-([ZmtpParser.cs](/Users/ghostflyby/repos/tests/ZmqSharp/ZmqSharp/Zmtp/ZmtpParser.cs:494)).
+(1 MiB) is checked before the command body is read into scratch ([ZmtpParser.cs](/Users/ghostflyby/repos/tests/ZmqSharp/ZmqSharp/Zmtp/ZmtpParser.cs:494)).
 
 Invariants:
 
@@ -225,7 +219,7 @@ Invariants:
 3. A rejected or failed connection never remains routable and never resumes
    parsing.
 4. Default behavior is unchanged: the default options mean
-   Accept(Pooled, contiguous) for every frame, and the default limits are
+   Accept (Pooled, contiguous) for every frame, and the default limits are
    effectively unlimited.
 
 ## 4. Options Surface
@@ -259,8 +253,7 @@ filtering is a message-API concern, not a policy concern (D5).
 ## 5. Slices
 
 Each slice is pull-request-sized and includes focused tests plus the
-documentation updates for affected statements in 0003 and this document
-(0006 §8 step 1).
+documentation updates for affected statements in 0003 and this document (0006 §8 step 1).
 
 ### Slice A - Decision result and rejection plumbing
 
@@ -291,8 +284,7 @@ Required work:
 Completion gate:
 
 - Boundary and one-past-boundary tests for all three numeric limits.
-- A probing pool whose `Rent` throws proves zero allocation on rejection
-  (no `Rent` call for an over-limit frame) and normal `Rent` usage below the
+- A probing pool whose `Rent` throws proves zero allocation on rejection (no `Rent` call for an over-limit frame) and normal `Rent` usage below the
   limit.
 - Overflow test: two frames whose lengths overflow `long` produce
   `MessageTooLarge`, not an arithmetic exception.

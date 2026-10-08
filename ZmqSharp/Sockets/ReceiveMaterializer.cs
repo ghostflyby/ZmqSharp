@@ -4,12 +4,12 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Sockets;
 
 internal sealed class ReceiveMaterializer(
-        MemoryPool<byte> pool,
-        IZReceivePolicy policy,
-        long maxFrameLength,
-        long maxMessageLength,
-        int maxFramesPerMessage,
-        Action onRejected)
+    MemoryPool<byte> pool,
+    IZReceivePolicy policy,
+    long maxFrameLength,
+    long maxMessageLength,
+    int maxFramesPerMessage,
+    Action onRejected)
 {
     private const int SegmentBlockSize = 8192;
 
@@ -115,4 +115,3 @@ internal sealed class ReceiveMaterializer(
         return new ZFrame(new ZSegment(singleOwner, 0, length), more);
     }
 }
-

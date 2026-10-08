@@ -48,7 +48,10 @@ public sealed class ZPlainMechanism : IZSecurityMechanism
         return new PlainSession(Role, username, password, authenticator);
     }
 
-    private sealed class PlainSession(ZMechanismRole role, string? username, ReadOnlyMemory<byte> password,
+    private sealed class PlainSession(
+        ZMechanismRole role,
+        string? username,
+        ReadOnlyMemory<byte> password,
         ZPlainAuthenticator? authenticator) : IZMechanismSession
     {
         private const string RejectionReason = "Invalid username or password";
@@ -147,7 +150,8 @@ public sealed class ZPlainMechanism : IZSecurityMechanism
         private byte[] BuildHello()
         {
             var user = Encoding.UTF8.GetBytes(username is { } name
-                ? name : throw new InvalidOperationException("a PLAIN client requires fixed credentials"));
+                ? name
+                : throw new InvalidOperationException("a PLAIN client requires fixed credentials"));
             var body = new byte[8 + user.Length + password.Length];
             body[0] = 5;
             "HELLO"u8.CopyTo(body.AsSpan(1));

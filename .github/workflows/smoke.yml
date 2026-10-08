@@ -40,6 +40,6 @@ jobs:
       # is stripped to the bare version nuget restore expects).
       - name: Smoke test the published packages
         shell: pwsh
-        run: dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=$("$env:VERSION" -replace '^v', '')
+        run: dotnet run --project ZmqSharp.Smoke -c Release -p:ZmqSharpVersion=$( "$env:VERSION" -replace '^v', '' )
         env:
           VERSION: ${{ inputs.version }}

@@ -27,6 +27,7 @@ public sealed class CoordinatorTests
                 entered.TrySetResult();
                 await release.Task;
             }
+
             if (coordinator is { } replyCore)
                 await replyCore.SendReplyAsync(context, ZMessage.Copy("reply"u8.ToArray()), token);
         }, (peer, message, _) =>

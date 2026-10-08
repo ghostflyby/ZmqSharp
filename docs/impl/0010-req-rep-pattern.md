@@ -27,8 +27,7 @@ REQ recv:   wire [empty, reply...]    -> interpret -> [reply...] reply
   the semantic value into the wire message).
 - `InterpretInbound(ZMessage)` removes the leading empty frame; a missing or
   non-empty first frame is a `ZeroMqProtocolException`.
-- Frames move, never copy; the consumed semantic value is inert afterwards
-  (0007 M3). The message passed to `RequestAsync` / `SendReplyAsync` is owned
+- Frames move, never copy; the consumed semantic value is inert afterwards (0007 M3). The message passed to `RequestAsync` / `SendReplyAsync` is owned
   by the pattern once called.
 
 ## 2. REQ pattern core
@@ -47,8 +46,7 @@ in-flight peer), and the pending reply task.
   the event loop: a new request is only routed after the previous reply
   arrives, because `current` is cleared on completion).
 - **Seam**: a message from `current` is interpreted (delimiter stripped) and
-  completes the pending task; a message from any other peer is discarded
-  (0007 open question: out-of-order replies are not correlated).
+  completes the pending task; a message from any other peer is discarded (0007 open question: out-of-order replies are not correlated).
 - **Peer end**: when `current`'s connection ends, the pending task faults and
   `current` is cleared; the next `RequestAsync` round-robins on. A live-but-
   silent peer blocks the socket by design (no timeout, libzmq semantics).
@@ -105,8 +103,7 @@ Socket-Type compatibility is extended: `REQ <-> REP`.
 ## 5. Ownership and lifecycle
 
 - `RequestAsync`: the caller's message is consumed (framed and sent); the
-  returned reply is owned by the caller and disposed once. A rejected call
-  (in-flight, no peer) leaves the message with the caller.
+  returned reply is owned by the caller and disposed once. A rejected call (in-flight, no peer) leaves the message with the caller.
 - `ZRequestContext`: owned by the REP core; valid during the handler call;
   disposed by the core after the handler returns. `SendReplyAsync` consumes
   the reply; the context itself is disposed by the core.

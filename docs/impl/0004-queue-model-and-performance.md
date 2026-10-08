@@ -24,17 +24,17 @@ Each peer connection owns two bounded queues:
 
 The socket type is a pure selection layer over these queues, matching libzmq:
 
-| Type | Outbound selection | Inbound aggregation |
-|---|---|---|
-| PAIR | direct to the single peer | direct from the single peer |
-| PUB | broadcast to all send queues | none (send-only) |
-| SUB | none (receive-only) | fair-queue + subscription filter |
-| REQ | round-robin; strict send/recv alternation | reply of the last request |
-| REP | direct to the requesting peer; strict alternation | fair-queue |
-| DEALER | round-robin (load balance) | fair-queue |
-| ROUTER | routing-id -> specific send queue | fair-queue, sender id prefixed |
-| PUSH | round-robin | none (send-only) |
-| PULL | none (receive-only) | fair-queue |
+| Type   | Outbound selection                                | Inbound aggregation              |
+|--------|---------------------------------------------------|----------------------------------|
+| PAIR   | direct to the single peer                         | direct from the single peer      |
+| PUB    | broadcast to all send queues                      | none (send-only)                 |
+| SUB    | none (receive-only)                               | fair-queue + subscription filter |
+| REQ    | round-robin; strict send/recv alternation         | reply of the last request        |
+| REP    | direct to the requesting peer; strict alternation | fair-queue                       |
+| DEALER | round-robin (load balance)                        | fair-queue                       |
+| ROUTER | routing-id -> specific send queue                 | fair-queue, sender id prefixed   |
+| PUSH   | round-robin                                       | none (send-only)                 |
+| PULL   | none (receive-only)                               | fair-queue                       |
 
 Direct write (no send queue) remains an optimization for single-peer sockets
 such as PAIR, where the queue adds a hop without buying isolation.
@@ -54,8 +54,7 @@ design review first.
    queue is a BCL bounded channel configured with the socket's full mode;
    drop modes dispose the dropped message through the channel's
    `itemDropped` callback, and explicit drains reuse the same disposal path.
-3. Queue capacity equals the per-peer HWM; queues are bounded by default
-   (0009). Peak memory is controlled by the queue limits, never by arrival
+3. Queue capacity equals the per-peer HWM; queues are bounded by default (0009). Peak memory is controlled by the queue limits, never by arrival
    rate alone. Drop modes keep peak memory bounded at the capacity instead
    of blocking the pump. An explicit unbounded factory configuration (0009)
    opts
@@ -95,8 +94,7 @@ With the per-peer model, ZmqSharp is expected to sit between the two:
   thousands to ~1M msg/s on loopback; comparable to libzmq once the parser
   materializes in place.
 - Average memory: bounded per-peer queues plus ArrayPool with immediate
-  return; scales linearly with load. Expected to beat NetMQ's default path
-  (transient `byte[]` under GC) and libzmq's large-message mmap latency.
+  return; scales linearly with load. Expected to beat NetMQ's default path (transient `byte[]` under GC) and libzmq's large-message mmap latency.
 - Peak memory: bounded by queue capacities (HWM); the constraints above make
   peak a configuration, not a load artifact.
 

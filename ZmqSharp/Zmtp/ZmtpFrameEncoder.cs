@@ -61,6 +61,7 @@ public sealed class ZmtpFrameEncoder
     {
         public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
             => stream.WriteAsync(bytes, token);
+
         public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
         {
             foreach (var segment in bytes) await stream.WriteAsync(segment, token);

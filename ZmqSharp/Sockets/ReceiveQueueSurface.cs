@@ -31,6 +31,7 @@ internal sealed class ReceiveQueueSurface
         record.Queue = receiveFactory.Create(static message => message.Dispose());
         snapshot = [.. snapshot, record];
     }
+
     public void Remove(PeerRecord record)
     {
         var current = snapshot;
@@ -42,6 +43,7 @@ internal sealed class ReceiveQueueSurface
         snapshot = updated;
         wake.Wake();
     }
+
     public async ValueTask DeliverAsync(PeerRecord record, ZMessage message, CancellationToken token)
     {
         if (record.Queue is not { } queue || record.Phase >= PeerPhase.Stopping)
@@ -49,10 +51,20 @@ internal sealed class ReceiveQueueSurface
             message.Dispose();
             return;
         }
-        try { await queue.Writer.WriteAsync(message, token); }
-        catch { message.Dispose(); throw; }
+
+        try
+        {
+            await queue.Writer.WriteAsync(message, token);
+        }
+        catch
+        {
+            message.Dispose();
+            throw;
+        }
+
         if (queue.Reader.Count == 1) wake.Wake();
     }
+
     public void Reclaim(PeerRecord record, Exception? failure)
     {
         lock (record.ReadLock)
@@ -64,15 +76,20 @@ internal sealed class ReceiveQueueSurface
                 record.Queue = null;
             }
         }
+
         if (failure is not null && snapshot.Length == 0) outbound?.Writer.TryComplete(failure);
     }
+
     public void Stop() => outbound?.Writer.TryComplete();
+
     public void Complete()
     {
         if (outbound is { } queue)
-            while (queue.Reader.TryRead(out var message)) message.Dispose();
+            while (queue.Reader.TryRead(out var message))
+                message.Dispose();
         completion.TrySetResult();
     }
+
     private async Task SendPumpAsync(CancellationToken token)
     {
         if (outbound is not { } channel) return;
@@ -82,6 +99,9 @@ internal sealed class ReceiveQueueSurface
                 await runtime.SendAsyncCore(message, token);
         }
         catch (Exception failure) when (failure is OperationCanceledException or ChannelClosedException) { }
-        catch (Exception failure) { channel.Writer.TryComplete(failure); }
+        catch (Exception failure)
+        {
+            channel.Writer.TryComplete(failure);
+        }
     }
 }

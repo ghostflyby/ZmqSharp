@@ -36,11 +36,11 @@ internal matrix fully constructible without exposing segment semantics.
 Users bring bytes in exactly three shapes; each maps onto a distinct message
 form, and each form already exists internally:
 
-| Input | Message form | Internal case |
-|---|---|---|
-| `ReadOnlyMemory<byte>` | single-frame message | `ZSingleMessage` + contiguous `ZSegment` |
-| `IEnumerable<ReadOnlyMemory<byte>>` | multipart message, one frame per element | `ZMultiMessage` of contiguous frames |
-| `ReadOnlySequence<byte>` | single frame with non-contiguous content | `ZSingleMessage` + `ZSegments` (one segment per memory in the sequence) |
+| Input                               | Message form                             | Internal case                                                           |
+|-------------------------------------|------------------------------------------|-------------------------------------------------------------------------|
+| `ReadOnlyMemory<byte>`              | single-frame message                     | `ZSingleMessage` + contiguous `ZSegment`                                |
+| `IEnumerable<ReadOnlyMemory<byte>>` | multipart message, one frame per element | `ZMultiMessage` of contiguous frames                                    |
+| `ReadOnlySequence<byte>`            | single frame with non-contiguous content | `ZSingleMessage` + `ZSegments` (one segment per memory in the sequence) |
 
 The mapping is by *logical frame count*, not by input type: an
 `IEnumerable` with one element is a single-frame message, `ReadOnlySequence`
@@ -62,12 +62,12 @@ The copy is the same `Pool.Rent` + copy path the send-side
 Zero copy requires transferring ownership, so the surface is split by what
 the caller can hand over:
 
-| Input | Face | Copy? |
-|---|---|---|
-| `byte[]` (single frame) | `FromOwned(byte[])` | zero copy |
-| `byte[][]` (multipart, one array per frame) | `FromOwned(byte[][])` | zero copy |
-| `IMemoryOwner<byte>` (single frame) | `FromPooled(IMemoryOwner<byte>)` | zero copy (pool-to-pool handoff) |
-| `ReadOnlyMemory<byte>` / `ReadOnlySequence<byte>` / `IEnumerable<ROM>` | `Copy(...)` | copies (borrowed views: ownership cannot transfer) |
+| Input                                                                  | Face                             | Copy?                                              |
+|------------------------------------------------------------------------|----------------------------------|----------------------------------------------------|
+| `byte[]` (single frame)                                                | `FromOwned(byte[])`              | zero copy                                          |
+| `byte[][]` (multipart, one array per frame)                            | `FromOwned(byte[][])`            | zero copy                                          |
+| `IMemoryOwner<byte>` (single frame)                                    | `FromPooled(IMemoryOwner<byte>)` | zero copy (pool-to-pool handoff)                   |
+| `ReadOnlyMemory<byte>` / `ReadOnlySequence<byte>` / `IEnumerable<ROM>` | `Copy(...)`                      | copies (borrowed views: ownership cannot transfer) |
 
 `ReadOnlyMemory<byte>` and `ReadOnlySequence<byte>` are views, not
 ownable buffers - a span slice or a string segment has nothing to hand over -
@@ -153,8 +153,7 @@ reference lives on the stack, unwinds with the call, and the memory returns
 to the caller naturally. The caller is the sole owner throughout, lending
 the buffer out, and `await` returning means the borrow is over.
 
-A message is the opposite: it is **storage**. `ZMessage` can be queued
-(`SendQueueFactory`'s `Outbound` channel), held, or handed across threads;
+A message is the opposite: it is **storage**. `ZMessage` can be queued (`SendQueueFactory`'s `Outbound` channel), held, or handed across threads;
 once inside a queue, cancellation cannot pop and reclaim one arbitrary
 member, and the socket's `Outbound` write (which returns as soon as the item
 is dequeued by the send pump) gives no "my buffer is free again" point. A
@@ -176,8 +175,7 @@ impossible.
 
 Borrowing therefore never appears on `ZMessage`. Its three construction
 faces are all **storage shapes** - the message owns its memory (copy) or
-takes ownership (transfer). A borrow is not a storage shape; it is a
-**send-time lifetime contract** that only a socket API can hold: the awaited
+takes ownership (transfer). A borrow is not a storage shape; it is a **send-time lifetime contract** that only a socket API can hold: the awaited
 send's completion guarantees the buffer is no longer in use, and the API
 pins/holds the buffer until then. So even if a future socket surface gains a
 borrowed overload (3.6), the borrow lives in that API's parameter contract -
@@ -198,13 +196,13 @@ is what the returned `Task`/`ValueTask` means. This design keeps a uniform
 differs per surface and is recorded here as the baseline for any future
 borrowed overloads:
 
-| Surface | Await completes when | Borrowing a caller buffer at this surface is |
-|---|---|---|
-| PAIR / DEALER / PUSH / PUB `SendAsync(message)` | message written & released (serial per-target await, then dispose) | **feasible** - contract equals the awaited send |
-| ROUTER `SendAsync(identity, message)` | same, after identity resolution (unknown identity disposes, still awaited) | **feasible** |
-| REQ `RequestAsync` | reply arrives, or request send faults (fire-and-forget send, reply-by-causality) | **feasible by causality** - reply only after the request left the socket |
-| REP `SendReplyAsync` | directed reply written & released (explicit) | **feasible** - the strongest case |
-| `SendQueueFactory.Outbound.WriteAsync` | item dequeued by the send pump (the send itself runs in the background) | **not feasible** - the buffer lives on after `WriteAsync` returns |
+| Surface                                         | Await completes when                                                             | Borrowing a caller buffer at this surface is                             |
+|-------------------------------------------------|----------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| PAIR / DEALER / PUSH / PUB `SendAsync(message)` | message written & released (serial per-target await, then dispose)               | **feasible** - contract equals the awaited send                          |
+| ROUTER `SendAsync(identity, message)`           | same, after identity resolution (unknown identity disposes, still awaited)       | **feasible**                                                             |
+| REQ `RequestAsync`                              | reply arrives, or request send faults (fire-and-forget send, reply-by-causality) | **feasible by causality** - reply only after the request left the socket |
+| REP `SendReplyAsync`                            | directed reply written & released (explicit)                                     | **feasible** - the strongest case                                        |
+| `SendQueueFactory.Outbound.WriteAsync`          | item dequeued by the send pump (the send itself runs in the background)          | **not feasible** - the buffer lives on after `WriteAsync` returns        |
 
 The one infeasible row is the outbound channel: it is a pure producer
 surface whose await means "accepted into the queue", with no completion
@@ -212,18 +210,15 @@ signal tied to the send. Everything else on the public send surface waits
 for the write, and the feasible rows are **implemented** (Revision 2):
 `SendAsync(ReadOnlyMemory<byte>)` on PAIR/DEALER/PUSH/PUB,
 `SendAsync(identity, ReadOnlyMemory<byte>)` on ROUTER, `RequestAsync(ROM)`
-on REQ, and `SendReplyAsync(ROM)` on REP now **borrow** the caller's buffer
-(zero copy, zero pool rent for `byte[]`-backed memory; a non-array backing
+on REQ, and `SendReplyAsync(ROM)` on REP now **borrow** the caller's buffer (zero copy, zero pool rent for `byte[]`-backed memory; a non-array backing
 such as a custom `MemoryManager` falls back to a pooled copy inside the
 awaited write on the socket transport, so the borrow window still holds but
 is not zero-copy there). The borrow lives in each surface's parameter
 contract - the caller must not modify the buffer until the awaited send
 completes, after which it is free again. `ZSegment` gained the borrowed-view
-owner case for this; `ZMessage` construction faces stay storage-only
-(3.5), and the outbound channel row remains unimplemented and infeasible.
+owner case for this; `ZMessage` construction faces stay storage-only (3.5), and the outbound channel row remains unimplemented and infeasible.
 The matrix above remains the record of which surfaces carry the contract;
-a feasible row's borrow belongs to that socket API's parameter contract
-(3.5) - it never becomes a `ZMessage` construction face.
+a feasible row's borrow belongs to that socket API's parameter contract (3.5) - it never becomes a `ZMessage` construction face.
 
 ### 3.7 No segment types leak
 
@@ -324,14 +319,14 @@ flight), so the copy's rented buffers never leak.
 
 ## 6. Ownership and allocation contract
 
-| Input | Face | Copy? | Result |
-|---|---|---|---|
-| `FromOwned(byte[])` | transfer | no (zero copy) | owned single frame |
-| `FromOwned(byte[][])` | transfer | no (zero copy) | owned multipart, contiguous frames |
-| `FromPooled(IMemoryOwner<byte>)` | transfer | no (pool handoff) | owned single frame, pooled buffer |
-| `Copy(ReadOnlyMemory<byte>)` | borrowed view | one pool rent + copy | owned single frame |
-| `Copy(IEnumerable<ROM>)` | borrowed views | frame table + one rent per frame | owned multipart, each frame contiguous |
-| `Copy(ReadOnlySequence<byte>)` | borrowed view | segment table + one rent per memory | owned single frame, non-contiguous |
+| Input                            | Face           | Copy?                               | Result                                 |
+|----------------------------------|----------------|-------------------------------------|----------------------------------------|
+| `FromOwned(byte[])`              | transfer       | no (zero copy)                      | owned single frame                     |
+| `FromOwned(byte[][])`            | transfer       | no (zero copy)                      | owned multipart, contiguous frames     |
+| `FromPooled(IMemoryOwner<byte>)` | transfer       | no (pool handoff)                   | owned single frame, pooled buffer      |
+| `Copy(ReadOnlyMemory<byte>)`     | borrowed view  | one pool rent + copy                | owned single frame                     |
+| `Copy(IEnumerable<ROM>)`         | borrowed views | frame table + one rent per frame    | owned multipart, each frame contiguous |
+| `Copy(ReadOnlySequence<byte>)`   | borrowed view  | segment table + one rent per memory | owned single frame, non-contiguous     |
 
 The receive hot path's zero-allocation guarantee (0006) is untouched: all of
 this is on the send side, which already allocates (the existing bytes
@@ -343,8 +338,7 @@ dynamic generation; the enumerable is consumed with a plain foreach.
 
 - **Construction**: each `Copy`/`FromOwned`/`FromPooled` factory produces
   the expected case (`TryGetValue(out ZSingleMessage)` /
-  `TryGetValue(out ZMultiMessage)`), the expected contiguity
-  (single-segment sequence collapses to contiguous; multi-segment sequence
+  `TryGetValue(out ZMultiMessage)`), the expected contiguity (single-segment sequence collapses to contiguous; multi-segment sequence
   yields `ZSegments` with per-memory segments), and owned buffers
   throughout. Empty `IEnumerable` (both overloads) throws; an empty
   `ReadOnlySequence` builds a single zero-length frame (not rejected).
@@ -365,8 +359,7 @@ dynamic generation; the enumerable is consumed with a plain foreach.
   returns the owner once and is idempotent on double-dispose; `Copy` is
   isolated from the caller's buffer (mutation after construction does not
   affect the message). The single-segment `ReadOnlySequence` send path avoids
-  the encoder's node-chain branch; multi-segment accepts the transient chain
-  (outside measured gates).
+  the encoder's node-chain branch; multi-segment accepts the transient chain (outside measured gates).
 - **Closed-socket leak**: `SendAsyncCore` disposes the message when the
   socket is already closed (`ThrowIfClosed` inside the try), so the
   byte-input overloads never leak their freshly rented buffers.

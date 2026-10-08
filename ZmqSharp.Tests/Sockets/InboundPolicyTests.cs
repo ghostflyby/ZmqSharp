@@ -198,7 +198,6 @@ public sealed class InboundPolicyTests
     }
 
 
-
     private static async Task WaitUntilAsync<T>(Func<T> getValue, Func<T, bool> condition, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);

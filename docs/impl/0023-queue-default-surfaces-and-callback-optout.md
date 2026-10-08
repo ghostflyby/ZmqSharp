@@ -15,8 +15,7 @@ now the default shape, not an explicit two-object composition).
 
 ## 1. Problem
 
-0022 left the queue surface as an explicit two-object composition
-(`new ZQueueSocket<T>(new T(), options)`), faithfully reflecting the two-tier
+0022 left the queue surface as an explicit two-object composition (`new ZQueueSocket<T>(new T(), options)`), faithfully reflecting the two-tier
 abstraction but not the expected usage: the queue surface is the primary
 surface, the callback surface the minority, and the wrapper made the main path
 the most verbose. The deeper issue was the generic wrapper itself - it had to
@@ -61,8 +60,7 @@ the rest were `ZSocketBase`-facing): per-peer `PeerState` queues, the
 aggregate reader over the copy-on-write peer snapshot, edge-wake gating,
 reclaim on peer end and disposal, the optional outbound channel and its send
 pump, and the internal `QueueSurface` sink. The protected constructor has the
-same shape as `ZSocketBase`'s composition face
-(`(ZSocketOptions, IZDispatchPolicy, ZSocketType, IZInboundPolicy?)`), so
+same shape as `ZSocketBase`'s composition face (`(ZSocketOptions, IZDispatchPolicy, ZSocketType, IZInboundPolicy?)`), so
 custom socket types choose their surface by base class: `ZSocketBase` for a
 callback socket, `ZQueueSocketBase` for a queue socket.
 
@@ -70,8 +68,7 @@ At construction the queue surface wires `SetReceiveMaterialization` (the
 allocation policy and the 0008 connection-level limits), binds its internal
 sink, registers the per-peer connected handler, and starts the send pump. A
 callback-surface socket wires none of these - it keeps the null policy, so
-pass-through sockets run the borrowed frame tier and policy-composing sockets
-(SUB, ROUTER, XPUB, XSUB) run the aggregated tier without a materializer,
+pass-through sockets run the borrowed frame tier and policy-composing sockets (SUB, ROUTER, XPUB, XSUB) run the aggregated tier without a materializer,
 preserving the pre-flip behavior exactly (this is why the materialization
 config is composed by the queue base, not by `ZSocketBase`'s constructor).
 
@@ -84,8 +81,7 @@ semantics and composes no queue (no materialization, no per-peer queues);
 post-construction set-once seam - set-once is now entirely `init` properties
 and constructors (0022's rule, fully realized).
 
-`SetPeerConnectedHandler` became multicast: SUB's subscription propagation
-(`SendSubscriptionsTo`) and the queue surface's per-peer state both register,
+`SetPeerConnectedHandler` became multicast: SUB's subscription propagation (`SendSubscriptionsTo`) and the queue surface's per-peer state both register,
 and both run on every new peer. The single-slot version could never have
 hosted a queue-wrapped SUB; the flip makes the combination the default.
 
@@ -112,8 +108,7 @@ REQ/REP, or a custom `ZSocketBase` subclass - throws at construction when any
 was set, so silently-ignored configuration fails loudly. The guard lives in
 `ZSocketBase`'s constructor behind the protected `ComposesQueueSurface`
 virtual (overridden to true by `ZQueueSocketBase`), so every no-queue socket
-is covered. The public getters keep their non-null, declarative defaults
-(0008 D2); the explicit-set tracking is internal backing state.
+is covered. The public getters keep their non-null, declarative defaults (0008 D2); the explicit-set tracking is internal backing state.
 
 ## 5. Migration
 
@@ -132,8 +127,7 @@ constructor-configured sink.
   the wrapper and its duplicated type parameter are gone.
 - SUB, ROUTER, and XPUB gain the queue surface (subscriptions and per-peer
   queues coexist through the multicast handler).
-- The 0022 rule stands: set-once is `init` / constructor; endpoints
-  (`BindAsync` / `ConnectAsync`) are the only repeatable surface.
+- The 0022 rule stands: set-once is `init` / constructor; endpoints (`BindAsync` / `ConnectAsync`) are the only repeatable surface.
 - There is no receive interface: `IZSocket` is endpoints only (0024), and the
   callback surface is the borrowed `OnFrame` member of `ZSocketBase` itself.
   The retired `IZCallbackSocket` promised callback capability on the default

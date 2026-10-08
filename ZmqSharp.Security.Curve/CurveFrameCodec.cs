@@ -68,6 +68,7 @@ public sealed class CurveFrameCodec : IZFrameCodec
             wireFrame.Body.CopyTo(buffer);
             memory = buffer.AsMemory(0, length);
         }
+
         var body = memory.Span;
         if (body.Length < 33 || !body[..8].SequenceEqual(CurveConstants.MessageLiteral))
             throw new ZeroMqProtocolException("CURVE traffic frame is missing the MESSAGE literal");

@@ -34,8 +34,16 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
                         Body = sequence.FromFrame(message[i])
                     }), token);
         }
-        catch (Exception failure) { if (retire is { } stop) stop(failure); else connection.Abort(); throw; }
-        finally { sendGate.Release(); }
+        catch (Exception failure)
+        {
+            if (retire is { } stop) stop(failure);
+            else connection.Abort();
+            throw;
+        }
+        finally
+        {
+            sendGate.Release();
+        }
     }
 
     public async ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
@@ -46,8 +54,16 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
             var frame = new ZmtpFrameData { Flags = ZmtpFrameFlags.Command, Body = new(body) };
             await encoder.WriteFrameAsync(codec?.Encode(frame) ?? frame, token);
         }
-        catch (Exception failure) { if (retire is { } stop) stop(failure); else connection.Abort(); throw; }
-        finally { sendGate.Release(); }
+        catch (Exception failure)
+        {
+            if (retire is { } stop) stop(failure);
+            else connection.Abort();
+            throw;
+        }
+        finally
+        {
+            sendGate.Release();
+        }
     }
 
     public async ValueTask SendFrameAsync(ReadOnlyMemory<byte> body, bool more, CancellationToken token = default)
@@ -58,17 +74,34 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
             var frame = new ZmtpFrameData { Flags = more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None, Body = new(body) };
             await encoder.WriteFrameAsync(codec?.Encode(frame) ?? frame, token);
         }
-        catch (Exception failure) { if (retire is { } stop) stop(failure); else connection.Abort(); throw; }
-        finally { sendGate.Release(); }
+        catch (Exception failure)
+        {
+            if (retire is { } stop) stop(failure);
+            else connection.Abort();
+            throw;
+        }
+        finally
+        {
+            sendGate.Release();
+        }
     }
 
     public void Dispose()
     {
-        try { parser?.Dispose(); }
+        try
+        {
+            parser?.Dispose();
+        }
         finally
         {
-            try { codec?.Dispose(); }
-            finally { sendGate.Dispose(); }
+            try
+            {
+                codec?.Dispose();
+            }
+            finally
+            {
+                sendGate.Dispose();
+            }
         }
     }
 }

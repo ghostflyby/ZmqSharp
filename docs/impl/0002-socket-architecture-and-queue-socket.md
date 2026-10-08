@@ -4,8 +4,7 @@ Status: draft
 Date: 2026-08-07
 
 Extends 0001 into the socket layer: a low-level callback surface (the
-borrowed `OnFrame` member of `ZSocketBase`) and the queue surface
-(`ZQueueSocketBase`) that every deliverable socket composes by default (0023),
+borrowed `OnFrame` member of `ZSocketBase`) and the queue surface (`ZQueueSocketBase`) that every deliverable socket composes by default (0023),
 following the per-peer queue model of 0004. The transport/connection
 separation matches the current implementation.
 
@@ -64,12 +63,10 @@ methods initiate shutdown; async methods wait for cleanup.
   Returning false pauses the receive pump; `PeerEnded` reports connection
   teardown; `ResumePaused` resumes paused pumps.
 - Send is asynchronous with ownership: the socket's
-  dispatch policy selects the target connection(s) and the message is disposed
-  after the last peer send. The public send surface is decided per type
-  (0024): send-capable types expose `SendAsync`, protocol types expose their
+  dispatch policy selects the target connection (s) and the message is disposed
+  after the last peer send. The public send surface is decided per type (0024): send-capable types expose `SendAsync`, protocol types expose their
   operation surfaces, receive-only types expose none.
-- No queues on this interface; queue semantics live on the socket itself
-  (`ZQueueSocketBase`, 0023).
+- No queues on this interface; queue semantics live on the socket itself (`ZQueueSocketBase`, 0023).
 
 ## 3. Queue Surface (Default, 0023)
 
@@ -94,8 +91,7 @@ public sealed class ZSocketOptions
 - Every concrete socket that can deliver messages derives from
   `ZQueueSocketBase` and composes the queue surface by default (0023): the
   retired `ZQueueSocket<TSocket>` wrapper's machinery moved into the base.
-  Construction binds the channel surface to the transport core's semantic seam
-  (`IPatternSink`, 0007 section 2.3): the core aggregates complete messages
+  Construction binds the channel surface to the transport core's semantic seam (`IPatternSink`, 0007 section 2.3): the core aggregates complete messages
   and the surface writes them to the peer queues, so the two tiers are
   mutually exclusive by construction (a bound seam also rejects raw `OnFrame`
   subscription). `ZReceiveSurface.Callback` opts out: no queue is composed and
@@ -144,8 +140,7 @@ As implemented:
   (per peer, serialized); the queue surface is one such sink (0007 section
   2.3/6 step 1+4).
 - Queue tier: the surface materializes each message into its peer's receive
-  queue (zero extra copy, 0004 constraint 1), applying the receive policy
-  (0003). The socket type aggregates the peer queues (fair-queue, direct, ...)
+  queue (zero extra copy, 0004 constraint 1), applying the receive policy (0003). The socket type aggregates the peer queues (fair-queue, direct, ...)
   onto `Messages`.
 - Full mode: each peer's queue is built by `ReceiveQueueFactory` (0009); a
   bounded factory's full mode is `Wait`, `DropWrite`, `DropNewest`, or
@@ -158,13 +153,12 @@ As implemented:
 ## 7. Send Path
 
 - Direct send (per-type public surface, 0024): the socket type's
-  `RouteOutbound` selects the connection(s), writes each selected connection,
+  `RouteOutbound` selects the connection (s), writes each selected connection,
   disposes the message after the last peer send.
 - Queue tier: `Outbound` is bounded when `SendQueueFactory` builds a bounded
   channel; the socket routes each message to the
   selected peers (direct write today; per-peer send queues with one pump per
-  peer are 0004/D2). The outbound channel's full mode comes from the factory
-  (0009); a drop mode never blocks a producer and the dropped message is
+  peer are 0004/D2). The outbound channel's full mode comes from the factory (0009); a drop mode never blocks a producer and the dropped message is
   disposed by the library. When the send pump fails, the channel completes
   with that failure so producers discover it through a failing `WriteAsync`
   immediately rather than at socket disposal (0006 section 3.5).
@@ -189,23 +183,21 @@ Internally every type is a subtype of `ZSocketBase` overriding
 `Push`, `Pull`, each adding its own outbound selection and inbound
 aggregation (0004 section 1 table).
 
-The queue surface is the default receive surface of the socket itself
-(`ZQueueSocketBase`, 0023); the callback surface is an explicit opt-out on
+The queue surface is the default receive surface of the socket itself (`ZQueueSocketBase`, 0023); the callback surface is an explicit opt-out on
 the same composition root. Construction is direct (0022, 0023): set-once
 configuration lives in `ZSocketOptions` as `init` properties, and endpoint
-binding/connection is the only repeatable surface
-(`BindAsync` / `ConnectAsync`, repeatable).
+binding/connection is the only repeatable surface (`BindAsync` / `ConnectAsync`, repeatable).
 
 ## 9. Decisions
 
-| # | Decision | Rationale |
-|---|----------|-----------|
-| D9 | `IZSocket` is the small common contract (endpoints only, 0024); socket types are subtypes of `ZSocketBase` | libzmq structure: one subclass per socket type, shared mechanics in the base |
-| D10 | Generic transport factory (`IZTransport<TSelf, TEndpoint>`) is the core | Transports plug in with typed endpoints and compile-time selection |
-| D11 | The queue surface is the default receive surface, owned by `ZQueueSocketBase` (0023); the callback surface is an explicit opt-out | Matches 0001 D7/D8; the two tiers are mutually exclusive by construction |
-| D12 | Queue capacity is per peer (HWM per peer) | Matches libzmq; per-peer backpressure isolation (0004) |
-| D13 | Connection sessions are internal; direct send is the low-level send path | Keeps the primitive small; queue semantics live in the base |
-| D14 | String endpoints are a facade over the generic core | User-facing convenience without replacing the generic factory |
+| #   | Decision                                                                                                                          | Rationale                                                                    |
+|-----|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| D9  | `IZSocket` is the small common contract (endpoints only, 0024); socket types are subtypes of `ZSocketBase`                        | libzmq structure: one subclass per socket type, shared mechanics in the base |
+| D10 | Generic transport factory (`IZTransport<TSelf, TEndpoint>`) is the core                                                           | Transports plug in with typed endpoints and compile-time selection           |
+| D11 | The queue surface is the default receive surface, owned by `ZQueueSocketBase` (0023); the callback surface is an explicit opt-out | Matches 0001 D7/D8; the two tiers are mutually exclusive by construction     |
+| D12 | Queue capacity is per peer (HWM per peer)                                                                                         | Matches libzmq; per-peer backpressure isolation (0004)                       |
+| D13 | Connection sessions are internal; direct send is the low-level send path                                                          | Keeps the primitive small; queue semantics live in the base                  |
+| D14 | String endpoints are a facade over the generic core                                                                               | User-facing convenience without replacing the generic factory                |
 
 ## 10. Test Plan
 

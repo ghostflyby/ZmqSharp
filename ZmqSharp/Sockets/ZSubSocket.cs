@@ -19,14 +19,10 @@ public class ZSubSocket : ZQueueSocketBase
     private readonly ZTopicFilter filter;
 
     public ZSubSocket(ZSocketOptions? options = null)
-        : this(options ?? new ZSocketOptions(), ZSocketTypes.Sub, new ZTopicFilter(), true)
-    {
-    }
+        : this(options ?? new ZSocketOptions(), ZSocketTypes.Sub, new ZTopicFilter(), true) { }
 
     internal ZSubSocket(ZSocketOptions options, ZSocketType type)
-        : this(options, type, new ZTopicFilter(), false)
-    {
-    }
+        : this(options, type, new ZTopicFilter(), false) { }
 
     private ZSubSocket(ZSocketOptions options, ZSocketType type, ZTopicFilter filter, bool filterInbound)
         : base(options, new ZNoDispatch("SUB is receive-only"), type,

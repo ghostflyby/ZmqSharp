@@ -82,7 +82,9 @@ public sealed class ZQueueFactoryTests
     public void Factory_WiresItemDropped()
     {
         var factory = new ZBoundedQueueFactory(new BoundedChannelOptions(1)
-        { FullMode = BoundedChannelFullMode.DropWrite });
+        {
+            FullMode = BoundedChannelFullMode.DropWrite
+        });
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);
 

@@ -31,6 +31,7 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
             await WriteAsync(bytes.First, token);
             return;
         }
+
         segments.Clear();
         foreach (var memory in bytes)
         {
@@ -40,15 +41,21 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
                 segments.Add(segment);
                 continue;
             }
+
             var buffer = ArrayPool<byte>.Shared.Rent(checked((int)bytes.Length));
             try
             {
                 bytes.CopyTo(buffer);
                 await WriteAsync(buffer.AsMemory(0, (int)bytes.Length), token);
             }
-            finally { ArrayPool<byte>.Shared.Return(buffer); }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+
             return;
         }
+
         // The scatter overload has no token. Aborting the socket cancels the
         // actual operation, so borrowed buffers remain live until it returns.
         using var registration = token.UnsafeRegister(static state =>

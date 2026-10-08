@@ -26,8 +26,7 @@ Revision 2 changes:
 
 Defines the shared architecture for pattern-specific public APIs: a
 pattern-agnostic transport core, a per-pattern semantic core that owns wire
-semantics, a single semantic delivery seam, and orthogonal delivery surfaces
-(typed callback, channel, operation). It implements the API-shape direction of
+semantics, a single semantic delivery seam, and orthogonal delivery surfaces (typed callback, channel, operation). It implements the API-shape direction of
 0006 (section 2.4 and section 6) and generalizes the layering of 0001 and 0002
 together with the per-peer queue model of 0004.
 
@@ -161,8 +160,7 @@ Rules of the seam:
 - Backpressure is unified here: the returned `ValueTask`; surfaces decide
   their own policy (await user delegate, bounded-queue `WriteAsync`, pending
   operation matching).
-- Ownership transfers to the surface: the surface disposes the message
-  (mirrors the current channel path).
+- Ownership transfers to the surface: the surface disposes the message (mirrors the current channel path).
 
 ### 2.4 Surfaces
 
@@ -194,8 +192,7 @@ Three independent axes compose:
   pattern core nor surface.
 
 Public types are thin composition roots that bind exactly one core and one
-surface (section 5). There is no general `IZSocket.SendAsync` surface contract
-(0024) and no `ZQueueSocket<TSocket>` generic wrapper (0023): an instance of a
+surface (section 5). There is no general `IZSocket.SendAsync` surface contract (0024) and no `ZQueueSocket<TSocket>` generic wrapper (0023): an instance of a
 concrete type has exactly one set of members - including its own public send
 surface - so raw and pattern-wrapped modes are mutually exclusive by type, not
 by convention.
@@ -272,19 +269,19 @@ boundaries and by M3 at internal seams - never by wrapper indirection.
 All shapes are implemented with their NetMQ interop suites (0006 section 5);
 design docs 0010-0014 fix the exact signatures.
 
-| Type | Operation model (0004) | Public surface (implemented) |
-|---|---|---|
-| PAIR | symmetric, single peer | `new ZPairSocket()` → queue surface (`Messages`) by default |
-| PUSH | send-only, round-robin | `new ZPushSocket()` → `SendAsync` only |
-| PULL | receive-only, fair-queue | `new ZPullSocket()` → queue surface (`Messages`) |
-| PUB | send-only, broadcast, topic prefix | `new ZPubSocket()` → `SendAsync(message)` broadcast |
-| SUB | receive-only, topic filter | `new ZSubSocket()` → `Subscribe`/`Unsubscribe` + queue surface |
-| REQ | strict alternation, single in-flight | `new ZReqSocket()` → `Task<ZMessage> RequestAsync(ZMessage)` (no queue surface) |
-| REP | directed reply, strict alternation | `new ZRepSocket()` → `BindRequestHandler` + `SendReplyAsync(context, reply)` (no queue surface) |
-| DEALER | asynchronous round-robin / fair-queue | `new ZDealerSocket()` → queue surface (`Messages`) |
-| ROUTER | identity-aware | `new ZRouterSocket()` → queue surface + `SendAsync(identity, message)` |
-| XPUB | broadcast + subscription observation | `new ZXPubSocket()` → queue surface |
-| XSUB | manual subscription control | `new ZXSubSocket()` → queue surface |
+| Type   | Operation model (0004)                | Public surface (implemented)                                                                    |
+|--------|---------------------------------------|-------------------------------------------------------------------------------------------------|
+| PAIR   | symmetric, single peer                | `new ZPairSocket()` → queue surface (`Messages`) by default                                     |
+| PUSH   | send-only, round-robin                | `new ZPushSocket()` → `SendAsync` only                                                          |
+| PULL   | receive-only, fair-queue              | `new ZPullSocket()` → queue surface (`Messages`)                                                |
+| PUB    | send-only, broadcast, topic prefix    | `new ZPubSocket()` → `SendAsync(message)` broadcast                                             |
+| SUB    | receive-only, topic filter            | `new ZSubSocket()` → `Subscribe`/`Unsubscribe` + queue surface                                  |
+| REQ    | strict alternation, single in-flight  | `new ZReqSocket()` → `Task<ZMessage> RequestAsync(ZMessage)` (no queue surface)                 |
+| REP    | directed reply, strict alternation    | `new ZRepSocket()` → `BindRequestHandler` + `SendReplyAsync(context, reply)` (no queue surface) |
+| DEALER | asynchronous round-robin / fair-queue | `new ZDealerSocket()` → queue surface (`Messages`)                                              |
+| ROUTER | identity-aware                        | `new ZRouterSocket()` → queue surface + `SendAsync(identity, message)`                          |
+| XPUB   | broadcast + subscription observation  | `new ZXPubSocket()` → queue surface                                                             |
+| XSUB   | manual subscription control           | `new ZXSubSocket()` → queue surface                                                             |
 
 Construction is direct (0022, 0023): each composition root takes
 `ZSocketOptions?` (defaults to a fresh options bag) and composes the queue
@@ -347,18 +344,15 @@ invalid after the reply is sent or the peer ends.
    order (PAIR, PUSH/PULL, PUB/SUB, REQ/REP, DEALER/ROUTER).
    REQ/REP implemented (0010): `ZReqSocket.RequestAsync` (operation surface),
    `ZRepSocket` with `BindRequestHandler` + `SendReplyAsync` (typed callback
-   surface), `ZRequestContext`, and the directed-send primitive
-   (`ZSocketBase.SendToAsync`).
+   surface), `ZRequestContext`, and the directed-send primitive (`ZSocketBase.SendToAsync`).
 6. Directed send lands with REP; the REQ operation surface lands with REQ;
    surface entry points are added alongside each pattern.
    Implemented with 0010: `ZSocketBase.SendToAsync` (directed send), REQ
-   operation surface (`ZReqSocket.RequestAsync`), REP typed callback
-   (`ZRepSocket.BindRequestHandler` / `SendReplyAsync`). The static factory
+   operation surface (`ZReqSocket.RequestAsync`), REP typed callback (`ZRepSocket.BindRequestHandler` / `SendReplyAsync`). The static factory
    is retired with 0022: sockets are constructed directly, so each pattern
    adds a composition root rather than a factory method.
 
-Each pattern receives its own numbered design document before implementation
-(0006 section 6). This document fixes the shared architecture; pattern
+Each pattern receives its own numbered design document before implementation (0006 section 6). This document fixes the shared architecture; pattern
 documents fix exact signatures.
 
 ## 7. Open questions
@@ -368,8 +362,7 @@ documents fix exact signatures.
   Note: the seam landed as `IPatternSink` in `ZmqSharp.Sockets`; renaming is
   still possible before the surface set stabilizes.
 - Typed callback semantics: handler exceptions, serialization guarantees, and
-  whether awaiting the handler pauses the peer pump for the whole pattern
-  (natural for strict-alternation REP, unnecessary for flow surfaces).
+  whether awaiting the handler pauses the peer pump for the whole pattern (natural for strict-alternation REP, unnecessary for flow surfaces).
 - Whether the raw `OnFrame` surface remains a public entry point or moves to
   an explicitly advanced one.
 - REQ multi-peer semantics: round-robin outbound plus strict alternation

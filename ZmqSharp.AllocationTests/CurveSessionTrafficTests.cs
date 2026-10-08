@@ -129,6 +129,7 @@ public sealed class CurveSessionTrafficTests
             using var message = ZMessage.FromOwned(new byte[9]);
             await session.SendAsync(message);
         }
+
         using var input = new RecordingByteConnection(recording.Recorded);
         using var codec = NewCodec();
         using var pool = new CountingRentPool();
@@ -151,6 +152,7 @@ public sealed class CurveSessionTrafficTests
             await session.SendAsync(first);
             await session.SendAsync(second);
         }
+
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var raw = new RecordingByteConnection(recording.Recorded);
@@ -165,6 +167,7 @@ public sealed class CurveSessionTrafficTests
                 frame[0].Memory.Span[0].Should().Be(17);
             }
             else frame[0].Memory.Span[0].Should().Be(23);
+
             return true;
         }, codec);
         var parsing = parser.ParseAsync().AsTask();
@@ -174,7 +177,11 @@ public sealed class CurveSessionTrafficTests
             count.Should().Be(1);
             parsing.IsCompleted.Should().BeFalse();
         }
-        finally { release.TrySetResult(); }
+        finally
+        {
+            release.TrySetResult();
+        }
+
         await parsing.WaitAsync(TimeSpan.FromSeconds(5));
         count.Should().Be(2);
     }

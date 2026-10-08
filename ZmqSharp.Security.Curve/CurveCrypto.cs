@@ -21,15 +21,15 @@ namespace ZmqSharp.Security.Curve;
 [InlineArray(32)]
 public struct Key32 : IEquatable<Key32>
 {
-    private byte _element0;
+    private byte element0;
 
     /// <summary>The 32 key bytes as a read-only span, without a copy.</summary>
     public readonly ReadOnlySpan<byte> Span =>
-        MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in _element0), 32);
+        MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in element0), 32);
 
     /// <summary>Writable view for construction; never exposed publicly.</summary>
     private readonly Span<byte> WritableSpan =>
-        MemoryMarshal.CreateSpan(ref Unsafe.AsRef(in _element0), 32);
+        MemoryMarshal.CreateSpan(ref Unsafe.AsRef(in element0), 32);
 
     public static Key32 From(ReadOnlySpan<byte> source)
     {

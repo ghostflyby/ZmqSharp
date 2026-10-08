@@ -141,8 +141,6 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
             state = 0;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }

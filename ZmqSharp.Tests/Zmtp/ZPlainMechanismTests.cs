@@ -255,6 +255,7 @@ public sealed class ZPlainMechanismTests
             body.Add((byte)bytes.Length);
             body.AddRange(bytes);
         }
+
         return ZmtpTestData.Frame([.. body], command: true);
     }
 

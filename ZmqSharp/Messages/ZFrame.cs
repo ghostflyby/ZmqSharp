@@ -10,7 +10,7 @@ namespace ZmqSharp;
 /// </summary>
 public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 {
-    private readonly ZSegment? contiguous; // Contiguous case
+    private readonly ZSegment? contiguous;     // Contiguous case
     private readonly ZSegments? nonContiguous; // NonContiguous case
 
     public ZFrame(ZSegment segment)
@@ -154,9 +154,7 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
             index = -1;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }
 

@@ -46,8 +46,7 @@ Originally `ZSocketExtensions.ParseEndpointAsync`, it now resides in the interna
 
 - `tcp://host:port` - unchanged behavior (DNS resolution, literal addresses).
 - `ipc://path` - a `UnixDomainSocketEndPoint`. An absolute path keeps its
-  leading slash (`ipc:///tmp/foo` -> `/tmp/foo`); a relative path
-  (`ipc://my.sock`) resolves against `Path.GetTempPath()`, mirroring libzmq's
+  leading slash (`ipc:///tmp/foo` -> `/tmp/foo`); a relative path (`ipc://my.sock`) resolves against `Path.GetTempPath()`, mirroring libzmq's
   default IPC directory. The URI parser splits the two forms: an absolute
   form lands in `AbsolutePath` (query excluded), while a relative form places
   the path in `Host` with `AbsolutePath` at `/` - the parser falls back to
@@ -114,8 +113,7 @@ fake-transport allocation measurements, and the NetMQ interop suite.
 0015 section 5.4 assumed the NetMQ interop suite could run over `ipc://` on
 Unix. Investigation during implementation shows that assumption is wrong for
 the pinned NetMQ version: `NetMQ.Core.Transports.Ipc.IpcAddress` resolves an
-ipc address by hashing the name to a loopback TCP port
-(`IPEndPoint(IPAddress.Loopback, stableHash % 55536 + 10000)`), so NetMQ's
+ipc address by hashing the name to a loopback TCP port (`IPEndPoint(IPAddress.Loopback, stableHash % 55536 + 10000)`), so NetMQ's
 `ipc://` is a TCP transport that never touches a Unix domain socket. An
 in-library smoke test confirmed it binds no filesystem entry and connects over
 TCP. Consequently a NetMQ `ipc://` endpoint can never connect to a real

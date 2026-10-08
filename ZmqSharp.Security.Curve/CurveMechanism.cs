@@ -66,7 +66,10 @@ public sealed class CurveMechanism : IZSecurityMechanism
         return new ServerSession(crypto, serverSecretKey);
     }
 
-    private sealed class ClientSession(ICurveCryptoBackend crypto, Key32 longTerm, Key32 longTermPublic,
+    private sealed class ClientSession(
+        ICurveCryptoBackend crypto,
+        Key32 longTerm,
+        Key32 longTermPublic,
         Key32 serverKey)
         : IZMechanismSession
     {

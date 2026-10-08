@@ -37,16 +37,16 @@ The message surface spans two layers:
 
 ## 3. Key Decisions
 
-| # | Decision | Rationale |
-|---|----------|-----------|
-| D1 | No `System.IO.Pipelines` | A message protocol is inherently streaming and frame lengths are known up front, so renting buffers on demand is sufficient; Pipe's retain/Advance semantics create a borrowed-vs-contiguous conflict, and its model is a poor fit for non-pure-streaming applications |
-| D2 | Low-layer struct view + high-layer class wrapper, single move | Zero-allocation, inlinable hot path; ownership transfers once at the boundary, no reference counting needed |
-| D3 | Multipart preserved, frames are first-class | Routing envelopes, topics, and REQ/REP delimiter frames depend on frame boundaries (RFC 23) |
-| D4 | Contiguity is per-frame and consumer-driven | Frame structure (protocol semantics) is orthogonal to memory layout (performance); contiguity implies materialization |
-| D5 | Atomic send/receive | RFC 23: all frames of a message or none |
-| D6 | Pooled/owned per segment; no Detach | The standard pool abstractions expose no escape hatch; permanent ownership must be decided before allocation |
-| D7 | Backpressure belongs to the Channel | `capacity` = HWM; pause with hysteresis resume when full; drop configurable |
-| D8 | Receive policy is extensible | Fixed options by default; a v2 application-level Decide hook |
+| #  | Decision                                                      | Rationale                                                                                                                                                                                                                                                              |
+|----|---------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| D1 | No `System.IO.Pipelines`                                      | A message protocol is inherently streaming and frame lengths are known up front, so renting buffers on demand is sufficient; Pipe's retain/Advance semantics create a borrowed-vs-contiguous conflict, and its model is a poor fit for non-pure-streaming applications |
+| D2 | Low-layer struct view + high-layer class wrapper, single move | Zero-allocation, inlinable hot path; ownership transfers once at the boundary, no reference counting needed                                                                                                                                                            |
+| D3 | Multipart preserved, frames are first-class                   | Routing envelopes, topics, and REQ/REP delimiter frames depend on frame boundaries (RFC 23)                                                                                                                                                                            |
+| D4 | Contiguity is per-frame and consumer-driven                   | Frame structure (protocol semantics) is orthogonal to memory layout (performance); contiguity implies materialization                                                                                                                                                  |
+| D5 | Atomic send/receive                                           | RFC 23: all frames of a message or none                                                                                                                                                                                                                                |
+| D6 | Pooled/owned per segment; no Detach                           | The standard pool abstractions expose no escape hatch; permanent ownership must be decided before allocation                                                                                                                                                           |
+| D7 | Backpressure belongs to the Channel                           | `capacity` = HWM; pause with hysteresis resume when full; drop configurable                                                                                                                                                                                            |
+| D8 | Receive policy is extensible                                  | Fixed options by default; a v2 application-level Decide hook                                                                                                                                                                                                           |
 
 ## 4. Low-Level Callback Contract
 
@@ -84,8 +84,7 @@ public abstract class ZQueueSocketBase : ZSocketBase   // default surface, defin
 ```
 
 - Subscribes to the low-level frame callback at construction; per peer, the
-  parser materializes each frame directly into its final pooled/owned buffer
-  (0004 constraint 1), assembles `ZMessage` / `ZMultiMessage` at the last
+  parser materializes each frame directly into its final pooled/owned buffer (0004 constraint 1), assembles `ZMessage` / `ZMultiMessage` at the last
   frame, and writes the per-peer queue (0004).
 - Full: `TryWrite` fails -> callback returns false (pause); a background resumer waits on `writer.WaitToWriteAsync()` and resumes with a low-watermark hysteresis at `Count <= capacity / 2` to avoid thrashing at the boundary.
 - Drop mode (for PUB-like lossy semantics) is an explicit option, off by default.

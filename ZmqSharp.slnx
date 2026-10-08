@@ -1,7 +1,7 @@
 <Solution>
-    <Project Path="ZmqSharp/ZmqSharp.csproj"/>
-    <Project Path="ZmqSharp.Tests/ZmqSharp.Tests.csproj"/>
-    <Project Path="ZmqSharp.AllocationTests/ZmqSharp.AllocationTests.csproj"/>
-    <Project Path="ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj"/>
-    <Project Path="ZmqSharp.Security.Curve.Tests/ZmqSharp.Security.Curve.Tests.csproj"/>
+  <Project Path="ZmqSharp/ZmqSharp.csproj"/>
+  <Project Path="ZmqSharp.Tests/ZmqSharp.Tests.csproj"/>
+  <Project Path="ZmqSharp.AllocationTests/ZmqSharp.AllocationTests.csproj"/>
+  <Project Path="ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj"/>
+  <Project Path="ZmqSharp.Security.Curve.Tests/ZmqSharp.Security.Curve.Tests.csproj"/>
 </Solution>

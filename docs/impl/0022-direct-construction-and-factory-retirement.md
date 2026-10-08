@@ -15,8 +15,7 @@ two-object composition (`new ZQueueSocket<T>(new T(...), options)`) - the
 wrapper is retired and the queue surface is the default surface of the socket
 itself (`ZQueueSocketBase`). The factory-retirement rule (set-once is `init`
 / constructor; endpoints are the repeatable surface) stands unchanged; with
-`ZSocketOptions.MessageSink`, the last post-construction set-once seam
-(`BindMessageSink`) is gone, so the rule is fully realized.
+`ZSocketOptions.MessageSink`, the last post-construction set-once seam (`BindMessageSink`) is gone, so the rule is fully realized.
 
 ## 1. Problem
 
