@@ -1,7 +1,6 @@
 using System.Buffers;
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp;
 
@@ -18,35 +17,20 @@ public sealed class ZReqSocket : ZSocketBase
 {
     private readonly ZReqCore core;
 
-    public ZReqSocket(ZSocketOptions? options = null)
-        : this(options ?? new ZSocketOptions(), new RequestCapabilities())
+    public ZReqSocket(ZSocketOptions? options = null) : this(Create(options ?? new ZSocketOptions())) { }
+
+    private ZReqSocket((SocketRuntime Runtime, ZReqCore Core) components) : base(components.Runtime)
     {
+        core = components.Core;
     }
 
-    private ZReqSocket(ZSocketOptions options, RequestCapabilities capabilities)
-        : this(options, capabilities, new ZReqCore(capabilities.Peers, capabilities.SendAsync, capabilities.Retire))
+    private static (SocketRuntime, ZReqCore) Create(ZSocketOptions options)
     {
-    }
-
-    private ZReqSocket(ZSocketOptions options, RequestCapabilities capabilities, ZReqCore core)
-        : base(options, new ZNoDispatch("REQ sends through RequestAsync"), ZSocketTypes.Req, core)
-    {
-        this.core = core;
-        capabilities.ReadPeers = () => PeerSnapshot;
-        capabilities.Send = SendRequestToAsync;
-        capabilities.Stop = RetirePeer;
-        PeerEnded += (peer, _) => core.OnPeerEnded(peer);
-    }
-
-    private sealed class RequestCapabilities
-    {
-        public Func<IZConnection[]> ReadPeers { get; set; } = () => [];
-        public Func<IZConnection, ZMessage, CancellationToken, ValueTask>? Send { get; set; }
-        public Action<IZConnection>? Stop { get; set; }
-        public IZConnection[] Peers() => ReadPeers();
-        public ValueTask SendAsync(IZConnection peer, ZMessage message, CancellationToken token)
-            => Send is { } sender ? sender(peer, message, token) : throw new InvalidOperationException("REQ is not initialized");
-        public void Retire(IZConnection peer) => Stop?.Invoke(peer);
+        var runtime = new SocketRuntime(options, new ZNoDispatch("REQ sends through RequestAsync"), ZSocketTypes.Req);
+        var core = new ZReqCore(() => runtime.PeerSnapshot, runtime.SendRequestToAsync, runtime.RetirePeer);
+        runtime.ConfigureInbound(core);
+        runtime.PeerRemoved += (peer, _) => core.OnPeerEnded(peer);
+        return (runtime, core);
     }
 
     /// <summary>

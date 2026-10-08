@@ -7,7 +7,7 @@ namespace ZmqSharp.Security;
 /// driver compares its <see cref="Name"/> against the peer's greeting
 /// mechanism field - no reflection, no registry, so the seam is safe under
 /// Native AOT. The mechanism runs its own command sequence and returns a
-/// session connection for the traffic parser.
+/// optional frame codec for established traffic.
 /// </summary>
 public interface IZSecurityMechanism
 {
@@ -17,6 +17,9 @@ public interface IZSecurityMechanism
     /// </summary>
     string Name { get; }
 
+    /// <summary>Socket-level security role, independent of bind or connect.</summary>
+    ZMechanismRole Role { get; }
+
     /// <summary>Creates the handshake state machine for one connection.</summary>
-    IZMechanismSession CreateSession(ZMechanismRole role);
+    IZMechanismSession CreateSession();
 }

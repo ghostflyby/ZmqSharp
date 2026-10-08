@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Text;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Patterns;
 
@@ -13,7 +12,7 @@ namespace ZmqSharp.Patterns;
 public sealed class ZBroadcastDispatch : IZDispatchPolicy
 {
     /// <inheritdoc/>
-    public int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets)
+    public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
         peers.CopyTo(targets);
         return peers.Length;
@@ -36,12 +35,12 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     // Identities are matched by content, so a consumer's copy of the identity
     // bytes addresses the peer. Latin1 maps bytes 1:1 to chars (no collisions).
     private readonly Lock identityLock = new();
-    private readonly Dictionary<string, IZConnection> identities = [];
-    private readonly Dictionary<IZConnection, byte[]> peerIdentities = [];
+    private readonly Dictionary<string, ZPeer> identities = [];
+    private readonly Dictionary<ZPeer, byte[]> peerIdentities = [];
     private int nextIdentity;
 
     /// <inheritdoc/>
-    public int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets)
+    public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
         throw new InvalidOperationException("ROUTER sends through SendAsync(identity, message)");
     }
@@ -50,7 +49,7 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     /// Returns the peer's routing identity: the identity it advertised in
     /// READY when one was registered, otherwise a locally assigned id (0025).
     /// </summary>
-    internal byte[] AssignIdentity(IZConnection peer)
+    internal byte[] AssignIdentity(ZPeer peer)
     {
         lock (identityLock)
         {
@@ -75,7 +74,7 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     /// peer. A peer registered with an advertised identity is not re-assigned
     /// a local id.
     /// </summary>
-    internal bool TryRegisterIdentity(IZConnection peer, ReadOnlyMemory<byte> advertisedIdentity)
+    internal bool TryRegisterIdentity(ZPeer peer, ReadOnlyMemory<byte> advertisedIdentity)
     {
         lock (identityLock)
         {
@@ -93,7 +92,7 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     }
 
     /// <summary>Resolves the peer that advertises the given routing identity.</summary>
-    internal bool TryResolve(ReadOnlySpan<byte> identity, out IZConnection? peer)
+    internal bool TryResolve(ReadOnlySpan<byte> identity, out ZPeer? peer)
     {
         lock (identityLock)
         {
@@ -102,7 +101,7 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     }
 
     /// <summary>Releases a peer's identity mapping on teardown.</summary>
-    internal void RemovePeer(IZConnection peer)
+    internal void RemovePeer(ZPeer peer)
     {
         lock (identityLock)
         {
@@ -124,10 +123,10 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
 public sealed class ZCurrentPeerDispatch : IZDispatchPolicy
 {
     private readonly Lock gateLock = new();
-    private IZConnection? current;
+    private ZPeer? current;
 
     /// <inheritdoc/>
-    public int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets)
+    public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
         lock (gateLock)
         {
@@ -140,13 +139,13 @@ public sealed class ZCurrentPeerDispatch : IZDispatchPolicy
     }
 
     /// <summary>True when <paramref name="peer"/> is the in-flight request's target.</summary>
-    internal bool IsCurrent(IZConnection peer)
+    internal bool IsCurrent(ZPeer peer)
     {
         lock (gateLock) return current == peer;
     }
 
     /// <summary>Records the in-flight request's target (the fair-queue selection).</summary>
-    internal void SetCurrent(IZConnection peer)
+    internal void SetCurrent(ZPeer peer)
     {
         lock (gateLock) current = peer;
     }
@@ -165,7 +164,7 @@ public sealed class ZCurrentPeerDispatch : IZDispatchPolicy
 /// </summary>
 internal sealed class ZNoDispatch(string reason) : IZDispatchPolicy
 {
-    public int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets)
+    public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
         throw new InvalidOperationException(reason);
     }

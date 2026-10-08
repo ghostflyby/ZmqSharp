@@ -1,5 +1,4 @@
 using ZmqSharp.Patterns;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
@@ -11,19 +10,12 @@ namespace ZmqSharp.Sockets;
 /// <see cref="IZInboundPolicy"/>, waiting on the request slot and raising the
 /// request handler. Delimiter framing is <see cref="ZDelimiterFraming"/>.
 /// </summary>
-internal sealed class ZRepCore : IZInboundPolicy
+internal sealed class ZRepCore(
+    Func<ZRequestContext, CancellationToken, ValueTask> handle,
+    Func<ZPeer, ZMessage, CancellationToken, ValueTask> send) : IZInboundPolicy
 {
     private readonly SemaphoreSlim slot = new(1, 1);
-    private ZRepSocket? socket;
-
-    /// <summary>Binds the owning socket (after the base constructor completes) so
-    /// the consume path can raise its request handler.</summary>
-    internal void Attach(ZRepSocket socket)
-    {
-        this.socket = socket;
-    }
-
-    public async ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    public async ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         // Strict alternation across all peers: one request is handled at a
         // time; the per-peer pumps stay alive (no starvation, 0010 section 3).
@@ -41,9 +33,8 @@ internal sealed class ZRepCore : IZInboundPolicy
         ZRequestContext? context = null;
         try
         {
-            context = new ZRequestContext(peer, ZDelimiterFraming.Decode(message, "reply"));
-            if (socket is { } target)
-                await target.RaiseRequestAsync(context.Value, token);
+            context = new ZRequestContext(peer, ZDelimiterFraming.Decode(message, "request"));
+            await handle(context.Value, token);
         }
         finally
         {
@@ -54,9 +45,9 @@ internal sealed class ZRepCore : IZInboundPolicy
         return ZInboundDecision.Consumed();
     }
 
-    public ValueTask SendReplyAsync(ZRepSocket socket, ZRequestContext context, ZMessage reply, CancellationToken token)
+    public ValueTask SendReplyAsync(ZRequestContext context, ZMessage reply, CancellationToken token)
     {
         var framed = ZDelimiterFraming.Encode(reply);
-        return socket.SendToAsync(context.Peer, framed, token);
+        return send(context.Peer, framed, token);
     }
 }

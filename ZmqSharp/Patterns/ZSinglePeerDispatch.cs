@@ -1,5 +1,3 @@
-using ZmqSharp.Transports;
-
 namespace ZmqSharp.Patterns;
 
 /// <summary>
@@ -10,7 +8,7 @@ namespace ZmqSharp.Patterns;
 public sealed class ZSinglePeerDispatch : IZDispatchPolicy
 {
     /// <inheritdoc/>
-    public int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets)
+    public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
         if (peers.IsEmpty) return 0;
 

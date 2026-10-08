@@ -11,5 +11,5 @@ namespace ZmqSharp;
 public interface IPatternSink
 {
     /// <summary>Delivers one complete message from <paramref name="peer"/>.</summary>
-    ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default);
+    ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default);
 }

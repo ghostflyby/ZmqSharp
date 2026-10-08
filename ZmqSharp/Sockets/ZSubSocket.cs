@@ -60,11 +60,11 @@ public class ZSubSocket : ZQueueSocketBase
             topic.CopyTo(payload.AsSpan(1));
             var message = new ZMessage(new ZSingleMessage(
                 new ZFrame(new ZSegment(payload, 0, payload.Length))));
-            _ = SendToAsync(peer, message, CancellationToken.None);
+            Runtime.SendTracked(peer, message);
         }
     }
 
-    private void SendSubscriptionsTo(IZConnection peer)
+    private void SendSubscriptionsTo(ZPeer peer)
     {
         foreach (var topic in filter.Snapshot())
         {
@@ -73,7 +73,7 @@ public class ZSubSocket : ZQueueSocketBase
             topic.CopyTo(payload.AsSpan(1));
             var message = new ZMessage(new ZSingleMessage(
                 new ZFrame(new ZSegment(payload, 0, payload.Length))));
-            _ = SendToAsync(peer, message, CancellationToken.None);
+            Runtime.SendTracked(peer, message);
         }
     }
 }

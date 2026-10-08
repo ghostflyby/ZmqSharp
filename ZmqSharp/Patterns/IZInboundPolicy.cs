@@ -1,5 +1,3 @@
-using ZmqSharp.Transports;
-
 namespace ZmqSharp.Patterns;
 
 /// <summary>
@@ -59,13 +57,13 @@ public interface IZInboundPolicy
 {
     /// <summary>Decides the fate of <paramref name="message"/>; ownership follows the action
     /// (see <see cref="ZInboundDecision"/>).</summary>
-    ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token);
+    ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token);
 }
 
 /// <summary>Wraps a decide delegate as an inbound policy.</summary>
 public sealed class ZDelegateInboundPolicy(ZInboundDecide decide) : IZInboundPolicy
 {
-    public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         return decide(peer, message, token);
     }
@@ -73,7 +71,7 @@ public sealed class ZDelegateInboundPolicy(ZInboundDecide decide) : IZInboundPol
 
 /// <summary>Decides the fate of a received message, with the originating peer.</summary>
 public delegate ValueTask<ZInboundDecision> ZInboundDecide(
-    IZConnection peer, ZMessage message, CancellationToken token);
+    ZPeer peer, ZMessage message, CancellationToken token);
 
 /// <summary>Ready-made inbound policies.</summary>
 public static class ZInboundPolicy

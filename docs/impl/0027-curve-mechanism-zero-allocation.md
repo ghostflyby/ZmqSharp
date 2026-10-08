@@ -4,6 +4,11 @@ Status: accepted
 Date: 2026-08-14
 Revision: 2
 
+Follow-up (0030): CurveFrameCodec replaces the traffic connection wrapper. It
+returns logical flags/payload without reconstructing headers or parsing twice;
+reusable sequence nodes retain allocation-free frame sends. The historical
+wrapper sketches below describe the original implementation, not the current API.
+
 Eliminates the per-frame byte[] allocations on the CURVE traffic path and the
 per-connection allocations on the CURVE handshake path. The crypto backend
 moves from allocate-and-return to destination-span signatures; the session

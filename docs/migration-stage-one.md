@@ -36,7 +36,8 @@ prefer direct `await` for normal usage.
 Custom `IZSocket` implementations implement generic synchronous teardown and all
 four string operations in addition to the existing generic methods. Lifecycle
 fields/helpers previously inherited through `ZAsyncState` now belong to
-`ZSocketBase`; there is no replacement standalone lifecycle base.
+the internal SocketRuntime behind ZSocketBase (0030); there is no replacement
+standalone lifecycle base. See migration-frame-sessions.md for custom subclasses.
 
 String endpoint operations are now instance methods. `ZSocketExtensions` is
 removed; ordinary `socket.BindAsync(...)` calls keep the same syntax. Replace

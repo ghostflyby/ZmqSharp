@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections;
+using System.Runtime.InteropServices;
 
 namespace ZmqSharp;
 
@@ -54,6 +55,11 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     /// </summary>
     internal static ZSegment Borrowed(ReadOnlyMemory<byte> memory)
     {
+        if (MemoryMarshal.TryGetArray(memory, out var segment) && segment.Array is { } array)
+            return new ZSegment(array, segment.Offset, segment.Count, true);
+        if (MemoryMarshal.TryGetMemoryManager<byte, MemoryManager<byte>>(memory, out var manager, out var start, out var length)
+            && manager is { } source)
+            return new ZSegment(source, start, length, true);
         return new ZSegment(new BorrowedMemory(memory), 0, memory.Length, true);
     }
 
@@ -81,7 +87,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     }
 
     /// <summary>True when the segment is owned (backed by a caller byte[]).</summary>
-    public bool IsOwned => owner is byte[];
+    public bool IsOwned => !isBorrowed && owner is byte[];
 
     /// <summary>True when the segment is a borrowed view (parser scratch source).</summary>
     internal bool IsBorrowed => isBorrowed;
@@ -89,7 +95,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     /// <summary>Returns the backing array when owned; false otherwise.</summary>
     public bool GetOwnedArray(out byte[] array)
     {
-        if (owner is byte[] owned)
+        if (!isBorrowed && owner is byte[] owned)
         {
             array = owned;
             return true;
@@ -186,8 +192,8 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
 /// <summary>
 /// The owner of a borrowed-view segment (0026 3.6): holds the caller's
 /// <see cref="ReadOnlyMemory{T}"/> of any backing without taking ownership.
-/// One small allocation per borrowed send; the receive hot path never builds
-/// one of these.
+/// Used only when memory cannot expose its array or memory-manager backing.
+/// Array and memory-manager borrowing stores the backing owner directly.
 /// </summary>
 internal sealed class BorrowedMemory(ReadOnlyMemory<byte> memory)
 {

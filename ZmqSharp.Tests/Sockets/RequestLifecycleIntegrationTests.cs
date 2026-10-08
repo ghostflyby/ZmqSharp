@@ -67,7 +67,7 @@ public sealed class RequestLifecycleIntegrationTests
 
     private sealed class RequestCaptureSink(TaskCompletionSource<ZMessage> received) : IPatternSink
     {
-        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token)
+        public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token)
         {
             if (!received.TrySetResult(message)) message.Dispose();
             return ValueTask.CompletedTask;

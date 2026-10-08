@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Channels;
 using Xunit;
 using ZmqSharp.Security;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -391,7 +392,12 @@ internal static class MessageFactory
 }
 
 /// <summary>Captures streamed frames (copied, since frames are borrowed).</summary>
-internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFrame = null) : IZMessageSink
+internal interface ITestFrameSink
+{
+    ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token);
+}
+
+internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFrame = null) : ITestFrameSink
 {
     private readonly TaskCompletionSource firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -422,7 +428,7 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
 /// per-write segment structure (0015 section 6.1). Used to assert that a frame
 /// is written as one logical write of header + all segments.
 /// </summary>
-internal sealed class CaptureSink : IZWriteSink
+internal sealed class CaptureSink : IZByteWriter
 {
     public List<ReadOnlyMemory<byte>[]> Writes { get; } = [];
 
@@ -454,18 +460,17 @@ internal static class ZmtpTestRunner
             ZNullMechanism.Instance,
             ZmtpCommands.BuildReady(socketType),
             ZmtpParser.DefaultMaxCommandSize);
-        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
-        return result is { } r ? r.SessionConnection : null;
+        var result = await handshake.EstablishAsync();
+        return result is not null ? connection : null;
     }
 
-    public static ZmtpParser CreateParser(IZConnection connection, IZMessageSink sink)
+    public static ZmtpParser CreateParser(IZConnection connection, ITestFrameSink sink)
     {
-        connection.SetFrameHandler(sink.OnFrameAsync);
-        return new ZmtpParser(connection);
+        return new ZmtpParser(connection, sink.OnFrameAsync);
     }
 
     /// <summary>Completes the NULL handshake on the connection, then streams its traffic frames to the sink.</summary>
-    public static async Task RunParserAsync(IZConnection connection, IZMessageSink sink)
+    public static async Task RunParserAsync(IZConnection connection, ITestFrameSink sink)
     {
         var session = await EstablishAsync(connection);
         if (session is null) return;
@@ -611,7 +616,6 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
     public static ValueTask<IZConnection> ConnectAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         return ValueTask.FromResult<IZConnection>(new EstablishedFakeConnection());
@@ -619,7 +623,6 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
     public static ValueTask<EstablishedFakeTransport> BindAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new EstablishedFakeTransport());
@@ -665,37 +668,11 @@ internal sealed class EstablishedFakeConnection : IZConnection
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
+    public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
-        return WriteAsync(frame, token);
+        foreach (var segment in bytes) await WriteAsync(segment, token);
     }
-
-    public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-    {
-        return WriteAsync(body, token);
-    }
-
-    public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-    {
-        return WriteAsync(ReadOnlyMemory<byte>.Empty, token);
-    }
-
-    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-    {
-        return ValueTask.FromResult(true);
-    }
-
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
-    {
-    }
-
-    public void SetConnectionEndedHandler(Action onConnectionEnded)
-    {
-    }
-
-    public void OnConnectionEnded()
-    {
-    }
+    public void Abort() => Dispose();
 
     public void Dispose()
     {

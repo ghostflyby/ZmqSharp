@@ -1,6 +1,5 @@
 using System.Buffers;
 using ZmqSharp.Patterns;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
@@ -59,7 +58,7 @@ internal sealed class ZTopicFilter
 /// </summary>
 internal sealed class ZTopicFilterPolicy(ZTopicFilter filter) : IZInboundPolicy
 {
-    public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         if (!filter.Matches(message[0].ToSequence()))
         {

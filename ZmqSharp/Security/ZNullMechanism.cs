@@ -7,8 +7,8 @@ namespace ZmqSharp.Security;
 /// The NULL mechanism (0016 section 5): no authentication. The session writes
 /// the local READY immediately and reads the peer's READY - the exact wire
 /// behavior of the previous hard-coded handshake, now behind the mechanism
-/// boundary. Both roles are identical; the role only affects the greeting's
-/// as-server bit, written by the handshake driver.
+/// boundary. Its security role is None and its greeting always advertises
+/// as-server = 0, independently of the connection origin.
 /// </summary>
 public sealed class ZNullMechanism : IZSecurityMechanism
 {
@@ -17,7 +17,9 @@ public sealed class ZNullMechanism : IZSecurityMechanism
 
     public string Name => "NULL";
 
-    public IZMechanismSession CreateSession(ZMechanismRole role)
+    public ZMechanismRole Role => ZMechanismRole.None;
+
+    public IZMechanismSession CreateSession()
     {
         return new NullSession();
     }
@@ -35,7 +37,7 @@ public sealed class ZNullMechanism : IZSecurityMechanism
             while ((command = await context.ReadCommandAsync(token)) is not null)
             {
                 if (command.Value.Name.Span.SequenceEqual("READY"u8))
-                    return new ZMechanismResult(context.Connection, command.Value.Arguments.ToArray());
+                    return new ZMechanismResult(null, command.Value.Arguments.ToArray());
 
                 if (command.Value.Name.Span.SequenceEqual("ERROR"u8))
                 {

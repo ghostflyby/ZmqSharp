@@ -2004,7 +2004,7 @@ public sealed class ZSocketTests
 
     private sealed class TestMessageSink(Action<ZMessage> onMessage) : IPatternSink
     {
-        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         {
             onMessage(message);
             return ValueTask.CompletedTask;
@@ -2023,7 +2023,6 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
 
     public static ValueTask<IZConnection> ConnectAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         return ValueTask.FromResult<IZConnection>(new SynchronousEofConnection());
@@ -2031,7 +2030,6 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
 
     public static ValueTask<SynchronousEofTransport> BindAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new SynchronousEofTransport());
@@ -2062,37 +2060,11 @@ internal sealed class SynchronousEofConnection : IZConnection
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
+    public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
-        return WriteAsync(frame, token);
+        foreach (var segment in bytes) await WriteAsync(segment, token);
     }
-
-    public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-    {
-        return WriteAsync(body, token);
-    }
-
-    public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-    {
-        return WriteAsync(ReadOnlyMemory<byte>.Empty, token);
-    }
-
-    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-    {
-        return ValueTask.FromResult(true);
-    }
-
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
-    {
-    }
-
-    public void SetConnectionEndedHandler(Action onConnectionEnded)
-    {
-    }
-
-    public void OnConnectionEnded()
-    {
-    }
+    public void Abort() => Dispose();
 
     public void Dispose()
     {
@@ -2109,7 +2081,9 @@ internal sealed class TestPingPongMechanism : IZSecurityMechanism
 {
     public string Name => "TEST";
 
-    public IZMechanismSession CreateSession(ZMechanismRole role)
+    public ZMechanismRole Role => ZMechanismRole.Client;
+
+    public IZMechanismSession CreateSession()
     {
         return new PingPongSession();
     }
@@ -2131,7 +2105,7 @@ internal sealed class TestPingPongMechanism : IZSecurityMechanism
             if (!ready.Value.Name.Span.SequenceEqual("READY"u8))
                 throw new ZMechanismException("expected READY");
 
-            return new ZMechanismResult(context.Connection, ready.Value.Arguments.ToArray());
+            return new ZMechanismResult(null, ready.Value.Arguments.ToArray());
         }
     }
 }

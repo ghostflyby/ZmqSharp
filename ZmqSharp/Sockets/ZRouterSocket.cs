@@ -31,7 +31,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
         // The identity mapping lives in the routing policy; release it on
         // teardown so a long-lived ROUTER never retains disposed connections
         // or stale ids (subagent review finding).
-        PeerEnded += (peer, _) => dispatch.RemovePeer(peer);
+        Runtime.PeerRemoved += (peer, _) => dispatch.RemovePeer(peer);
     }
 
     /// <summary>
@@ -90,7 +90,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     /// second peer claiming an in-use identity is refused at establishment -
     /// the libzmq ROUTER duplicate-id behavior (mechanism/router sources).
     /// </summary>
-    protected override void OnPeerEstablished(IZConnection peer, ReadOnlyMemory<byte>? advertisedIdentity)
+    protected override void OnPeerEstablished(ZPeer peer, ReadOnlyMemory<byte>? advertisedIdentity)
     {
         if (advertisedIdentity is not { Length: > 0 } identity) return;
 
@@ -104,7 +104,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     /// </summary>
     private sealed class RouterInboundPolicy(ZIdentityDispatch dispatch) : IZInboundPolicy
     {
-        public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+        public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
         {
             var identity = dispatch.AssignIdentity(peer);
             var frames = new List<ZFrame>(message.Count + 1)

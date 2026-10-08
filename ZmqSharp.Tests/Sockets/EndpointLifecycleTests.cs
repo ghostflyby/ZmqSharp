@@ -232,13 +232,13 @@ public sealed class EndpointLifecycleTests
         : IZTransport<ControlledTransport<T>, ControlledEndpoint>
     {
         public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept { add { } remove { } }
-        public static async ValueTask<IZConnection> ConnectAsync(ControlledEndpoint endpoint, ZTransportOptions options,
+        public static async ValueTask<IZConnection> ConnectAsync(ControlledEndpoint endpoint,
             CancellationToken token = default)
         {
             await endpoint.WaitForFactoryAsync();
             return new ControlledConnection(endpoint);
         }
-        public static async ValueTask<ControlledTransport<T>> BindAsync(ControlledEndpoint endpoint, ZTransportOptions options,
+        public static async ValueTask<ControlledTransport<T>> BindAsync(ControlledEndpoint endpoint,
             CancellationToken token = default)
         {
             await endpoint.WaitForFactoryAsync();
@@ -265,13 +265,12 @@ public sealed class EndpointLifecycleTests
             return 0;
         }
         public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
-        public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default) => ValueTask.CompletedTask;
-        public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default) => ValueTask.CompletedTask;
-        public ValueTask SendAsync(ZMessage message, CancellationToken token = default) => ValueTask.CompletedTask;
-        public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame) { }
-        public void SetConnectionEndedHandler(Action onConnectionEnded) { }
-        public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token) => ValueTask.FromResult(true);
-        public void OnConnectionEnded() { }
+        public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        {
+            foreach (var segment in bytes) await WriteAsync(segment, token);
+        }
+        public void Abort() { }
+
         public void Dispose() => Interlocked.Increment(ref endpoint.Disposals);
     }
 }

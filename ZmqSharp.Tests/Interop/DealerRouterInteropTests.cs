@@ -125,7 +125,7 @@ public sealed class DealerRouterInteropTests
 
     private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink
     {
-        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         {
             onMessage(message);
             return ValueTask.CompletedTask;

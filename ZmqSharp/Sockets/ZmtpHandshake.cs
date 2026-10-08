@@ -1,13 +1,15 @@
 using System.Buffers;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
-namespace ZmqSharp.Zmtp;
+using ZmqSharp.Zmtp;
+
+namespace ZmqSharp.Sockets;
 
 /// <summary>
 /// The ZMTP establishment path (0016 section 4): writes the local greeting,
 /// reads and validates the peer greeting, matches the configured mechanism by
 /// name, runs the mechanism's handshake session, and yields the session
-/// connection plus the peer READY metadata for the socket layer. Runs once per
+/// optional frame codec plus the peer READY metadata for the socket layer. Runs once per
 /// connection; the mechanism session drives the command sequence between the
 /// greeting and the established state. A mechanism mismatch sends an ERROR
 /// command before faulting (the RFC 23 pattern the socket-type check also
@@ -41,28 +43,23 @@ internal sealed class ZmtpHandshake : IDisposable
     /// Completes the greeting exchange and the mechanism handshake. Returns
     /// null when the peer closed during establishment.
     /// </summary>
-    public async ValueTask<ZMechanismResult?> EstablishAsync(ZMechanismRole role, CancellationToken token = default)
+    public async ValueTask<ZMechanismResult?> EstablishAsync(CancellationToken token = default)
     {
-        // Greeting and commands are separate gated writes; the write gate
-        // serializes them and nothing else writes before establishment, so
-        // no coalescing is needed (0016 D5).
-        await connection.WriteAsync(ZmtpGreeting.Build(mechanism.Name, role), token);
+        // Traffic waits on establishment, so this handshake is the only writer.
+        await connection.WriteAsync(ZmtpGreeting.Build(mechanism.Name, mechanism.Role), token);
 
         var peerMechanism = await ReadPeerMechanismAsync(token);
         if (peerMechanism is null) return null;
 
         if (!string.Equals(peerMechanism, mechanism.Name, StringComparison.Ordinal))
         {
-            await connection.SendCommandAsync(ZmtpCommands.BuildError("Invalid mechanism"), token);
+            await new ZmtpFrameEncoder(connection).WriteCommandAsync(ZmtpCommands.BuildError("Invalid mechanism"), token);
             throw new ZeroMqProtocolException(
                 $"peer mechanism '{peerMechanism}' does not match the configured mechanism '{mechanism.Name}'");
         }
 
         using var context = new ZMechanismContext(connection, localReadyBody, maxCommandSize, pool);
-        var result = await mechanism.CreateSession(role).RunAsync(context, token);
-        if (result is not null && result.Value.SessionConnection is null)
-            throw new InvalidOperationException("mechanism session returned a null session connection");
-
+        var result = await mechanism.CreateSession().RunAsync(context, token);
         return result;
     }
 

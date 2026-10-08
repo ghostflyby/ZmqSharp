@@ -6,8 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A new push to the same ref supersedes the in-flight CI run: the 3-job matrix
-# is expensive, and only the latest commit's result matters for the merge gate.
+# A new push to the same ref supersedes the in-flight CI run: the build/test
+# matrix and consumer validation only need to check the latest commit.
 # Tag-only pushes do not match the branches filter, so publish runs
 # (tag-triggered) are never cancelled by this.
 concurrency:
@@ -22,6 +22,9 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  consumer-validation:
+    uses: ./.github/workflows/consumer-validation.yml
+
   build-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

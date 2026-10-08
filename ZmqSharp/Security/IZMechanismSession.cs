@@ -2,7 +2,7 @@ namespace ZmqSharp.Security;
 
 /// <summary>
 /// Per-connection mechanism handshake: runs the mechanism's command sequence
-/// on the <see cref="ZMechanismContext"/> and returns the session connection
+/// on the <see cref="ZMechanismContext"/> and returns peer metadata and an optional frame codec
 /// plus the peer's READY metadata. The session must exchange READY - the local
 /// one (from <see cref="ZMechanismContext.LocalReadyBody"/>) at the
 /// protocol-correct point of its sequence - and return the peer's READY

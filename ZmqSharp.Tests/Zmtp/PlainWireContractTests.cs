@@ -14,7 +14,7 @@ namespace ZmqSharp.Tests.Zmtp;
 
 /// <summary>
 /// PLAIN wire-contract tests (0016 milestone 3): a scripted raw-TCP peer
-/// speaks RFC 27 exactly as libzmq would, so the PLAIN bytes our library
+/// speaks RFC 24 exactly as libzmq would, so the PLAIN bytes our library
 /// sends and accepts are verified byte-for-byte against the specification.
 /// NetMQ implements no PLAIN mechanism - 4.0.4.3 and master both error at the
 /// greeting ("Not yet supported"), with no PlainServer/PlainUsername options -
@@ -27,7 +27,7 @@ namespace ZmqSharp.Tests.Zmtp;
 public sealed class PlainWireContractTests
 {
     [Fact]
-    public async Task ClientHello_WireBytes_MatchRfc27()
+    public async Task ClientHello_WireBytes_MatchRfc24()
     {
         // Our PLAIN client vs. a scripted libzmq-style PLAIN server.
         await using var client = new ZPairSocket(new ZSocketOptions
@@ -51,19 +51,19 @@ public sealed class PlainWireContractTests
         // The scripted PLAIN server greets back with as-server = 1.
         await stream.WriteAsync(BuildGreeting("PLAIN", true), cts.Token);
 
-        // The client's HELLO must be byte-exact RFC 27: the short-string name
-        // plus Username and Password metadata properties.
+        // The client's HELLO must be byte-exact RFC 24: the short-string name
+        // plus two octet-length credential fields.
         var hello = await ReadFrameAsync(stream, cts.Token);
         hello.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
         hello.Body.Should().Equal(ExpectedHelloBody("alice", "s3cret"));
 
-        // WELCOME, then the client's READY carrying Socket-Type. The frame
-        // body is [name-len]["READY"][metadata]; the metadata parser takes
+        // WELCOME, then the client's INITIATE carrying Socket-Type. The frame
+        // body is [name-len]["INITIATE"][metadata]; the metadata parser takes
         // only the property part, so strip the command name first.
         await stream.WriteAsync(BuildFrame(ExpectedWelcomeBody(), true), cts.Token);
         var ready = await ReadFrameAsync(stream, cts.Token);
         ready.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
-        ParseReadySocketType(ready.Body).Should().Be("PAIR");
+        ParseReadySocketType(ready.Body, "INITIATE").Should().Be("PAIR");
 
         // Complete the handshake, then exchange a data frame.
         await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), true), cts.Token);
@@ -76,7 +76,7 @@ public sealed class PlainWireContractTests
     }
 
     [Fact]
-    public async Task ServerWelcomeAndReady_WireBytes_MatchRfc27()
+    public async Task ServerWelcomeAndReady_WireBytes_MatchRfc24()
     {
         // Our PLAIN server vs. a scripted libzmq-style PLAIN client.
         await using var server = new ZPairSocket(new ZSocketOptions
@@ -100,22 +100,23 @@ public sealed class PlainWireContractTests
         AssertGreeting(await ReadExactlyAsync(stream, 64, cts.Token), "PLAIN", true);
 
         // The scripted PLAIN client greets back (as-server = 0) and sends
-        // HELLO with the exact RFC 27 bytes.
+        // HELLO with the exact RFC 24 bytes.
         await stream.WriteAsync(BuildGreeting("PLAIN", false), cts.Token);
         await stream.WriteAsync(BuildFrame(ExpectedHelloBody("alice", "s3cret"), true), cts.Token);
 
-        // The server's WELCOME must be byte-exact RFC 27.
+        // The server's WELCOME must be byte-exact RFC 24.
         var welcome = await ReadFrameAsync(stream, cts.Token);
         welcome.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
         welcome.Body.Should().Equal(ExpectedWelcomeBody());
 
+        // INITIATE must precede server READY.
+        await stream.WriteAsync(BuildFrame(ExpectedInitiateBody(), true), cts.Token);
         // The server's READY carries Socket-Type.
         var ready = await ReadFrameAsync(stream, cts.Token);
         ready.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
         ParseReadySocketType(ready.Body).Should().Be("PAIR");
 
         // Complete the handshake, then exchange a data frame.
-        await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), true), cts.Token);
         await stream.WriteAsync(BuildFrame([.. "yo"u8], false), cts.Token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
@@ -125,7 +126,7 @@ public sealed class PlainWireContractTests
     }
 
     [Fact]
-    public async Task ServerRejection_ErrorBytes_MatchRfc27()
+    public async Task ServerRejection_ErrorBytes_MatchRfc24()
     {
         // Rejected credentials: the server answers with libzmq's exact ERROR
         // bytes and tears the connection down - no WELCOME follows.
@@ -159,14 +160,14 @@ public sealed class PlainWireContractTests
         (await stream.ReadAsync(buffer, cts.Token)).Should().Be(0);
     }
 
-    // ---- Independent RFC 27 fixtures (built from the spec, not the library) ----
+    // ---- Independent RFC 24 fixtures (built from the spec, not the library) ----
 
     /// <summary>Reads Socket-Type from a full READY frame body (name prefix + metadata).</summary>
-    private static string ParseReadySocketType(byte[] body)
+    private static string ParseReadySocketType(byte[] body, string expectedCommand = "READY")
     {
         var span = body.AsSpan();
         ZmtpCommandCodec.TryReadCommandName(span, out var name).Should().BeTrue();
-        name.SequenceEqual("READY"u8).Should().BeTrue();
+        Encoding.ASCII.GetString(name).Should().Be(expectedCommand);
         return ZmtpCommandCodec.ParseReadySocketType(span[(1 + name.Length)..]);
     }
 
@@ -190,17 +191,23 @@ public sealed class PlainWireContractTests
         return greeting;
     }
 
-    /// <summary>HELLO body per RFC 27: name, Username property, Password property.</summary>
+    /// <summary>HELLO body per RFC 24: name and two one-byte-length fields.</summary>
     private static byte[] ExpectedHelloBody(string username, string password)
     {
-        var body = new List<byte> { 5 };
-        body.AddRange("HELLO"u8);
-        AppendMetadataProperty(body, "Username", username);
-        AppendMetadataProperty(body, "Password", password);
+        var user = Encoding.UTF8.GetBytes(username);
+        var pass = Encoding.UTF8.GetBytes(password);
+        return [5, .. "HELLO"u8, (byte)user.Length, .. user, (byte)pass.Length, .. pass];
+    }
+
+    private static byte[] ExpectedInitiateBody()
+    {
+        var body = new List<byte> { 8 };
+        body.AddRange("INITIATE"u8);
+        AppendMetadataProperty(body, "Socket-Type", "PAIR");
         return [.. body];
     }
 
-    /// <summary>WELCOME body per RFC 27: name only.</summary>
+    /// <summary>WELCOME body per RFC 24: name only.</summary>
     private static byte[] ExpectedWelcomeBody()
     {
         var body = new byte[8];

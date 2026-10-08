@@ -1,5 +1,6 @@
 using System.Buffers;
 using ZmqSharp.Patterns;
+using ZmqSharp.Sockets;
 
 namespace ZmqSharp;
 
@@ -21,6 +22,8 @@ public class ZPubSocket : ZQueueSocketBase
         : base(options, new ZBroadcastDispatch(), type, inbound)
     {
     }
+
+    private protected ZPubSocket(SocketRuntime runtime) : base(runtime) { }
 
     /// <summary>
     /// Direct send, broadcast to every peer (0024; ZXPubSocket inherits this

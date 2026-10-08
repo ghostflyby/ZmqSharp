@@ -23,7 +23,6 @@ internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransp
 
     public static ValueTask<IZConnection> ConnectAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         var connection = new AllocationFakeConnection();
@@ -33,7 +32,6 @@ internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransp
 
     public static ValueTask<AllocationFakeTransport> BindAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new AllocationFakeTransport());
@@ -68,7 +66,6 @@ internal sealed class AllocationFakeConnection : IZConnection
     private int currentPosition;
     private int handshakePosition;
     private int disposed;
-    private Func<ZFrame, CancellationToken, ValueTask<bool>>? onFrame;
 
     /// <summary>Feeds one scripted inbound chunk (a complete frame) to the receive pump.</summary>
     public void Enqueue(byte[] chunk)
@@ -169,38 +166,11 @@ internal sealed class AllocationFakeConnection : IZConnection
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
+    public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
-        return WriteAsync(frame, token);
+        foreach (var segment in bytes) await WriteAsync(segment, token);
     }
-
-    public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-    {
-        return WriteAsync(body, token);
-    }
-
-    public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-    {
-        return WriteAsync(ReadOnlyMemory<byte>.Empty, token);
-    }
-
-    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-    {
-        return onFrame?.Invoke(frame, token) ?? ValueTask.FromResult(true);
-    }
-
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
-    {
-        this.onFrame = onFrame;
-    }
-
-    public void SetConnectionEndedHandler(Action onConnectionEnded)
-    {
-    }
-
-    public void OnConnectionEnded()
-    {
-    }
+    public void Abort() => Dispose();
 
     public void Dispose()
     {

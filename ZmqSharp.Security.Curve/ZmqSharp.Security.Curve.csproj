@@ -20,7 +20,7 @@
              no Version property here so the file never drifts from the released version.
              A local `dotnet pack` therefore defaults to 1.0.0 - only for local experiments. -->
         <Authors>ZmqSharp contributors</Authors>
-        <Description>Optional CURVE security mechanism (RFC 24 / CurveZMQ) for ZmqSharp, built on the public mechanism seam with a pluggable crypto backend (BouncyCastle).</Description>
+        <Description>Optional CURVE security mechanism (RFC 25 / CurveZMQ) for ZmqSharp, built on the public mechanism seam with a pluggable crypto backend (BouncyCastle).</Description>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <RepositoryType>git</RepositoryType>

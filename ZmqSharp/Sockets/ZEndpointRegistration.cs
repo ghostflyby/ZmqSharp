@@ -3,7 +3,7 @@ namespace ZmqSharp.Sockets;
 /// <summary>Owns endpoint shutdown and its completion independently of routing membership.</summary>
 internal sealed class ZEndpointRegistration(
     IDisposable resource, object? endpoint, Type? transport, string? address,
-    CancellationToken lifetime, CancellationToken attempt = default)
+    CancellationToken lifetime, CancellationToken attempt = default, Action? abort = null)
 {
     private readonly Lock gate = new();
     private readonly CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime, attempt);
@@ -22,14 +22,13 @@ internal sealed class ZEndpointRegistration(
 
     private async Task StopAsync()
     {
+        var canceled = cancellation.CancelAsync();
         try
         {
-            await cancellation.CancelAsync();
+            if (abort is { } stopIo) stopIo();
+            else resource.Dispose();
         }
-        finally
-        {
-            resource.Dispose();
-        }
+        finally { await canceled; }
     }
 
     public async Task FinishAsync()

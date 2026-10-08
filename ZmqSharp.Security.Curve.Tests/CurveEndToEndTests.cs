@@ -16,8 +16,12 @@ namespace ZmqSharp.Security.Curve.Tests;
 /// </summary>
 public sealed class CurveEndToEndTests
 {
-    [Fact]
-    public async Task CurveClient_AndServer_AuthenticateAndExchangeMessages()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task CurveClient_AndServer_AuthenticateAndExchangeMessages(bool reversed, bool ipc)
     {
         var crypto = new BouncyCastleCurveCrypto();
         crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
@@ -41,9 +45,10 @@ public sealed class CurveEndToEndTests
         });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var path = Path.Combine(Path.GetTempPath(), $"zmq-curve-{Guid.NewGuid().ToString("N")[..12]}.sock");
+        var address = ipc ? $"ipc://{path}" : $"tcp://127.0.0.1:{GetFreePort()}";
+        await (reversed ? client : server).BindAsync(address, cts.Token);
+        await (reversed ? server : client).ConnectAsync(address, cts.Token);
 
         // Client -> server.
         await client.SendAsync(ZMessage.FromOwned([.. "hello-secret"u8]), cts.Token);

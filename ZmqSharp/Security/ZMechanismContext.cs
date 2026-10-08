@@ -16,6 +16,8 @@ namespace ZmqSharp.Security;
 /// </summary>
 public sealed class ZMechanismContext : IDisposable
 {
+    private readonly IZByteReader reader;
+    private readonly ZmtpFrameEncoder encoder;
     private readonly int maxCommandSize;
     private readonly MemoryPool<byte> pool;
     private readonly byte[] headerBuffer = new byte[9];
@@ -28,14 +30,12 @@ public sealed class ZMechanismContext : IDisposable
         int maxCommandSize,
         MemoryPool<byte>? pool = null)
     {
-        Connection = connection;
+        reader = connection;
+        encoder = new ZmtpFrameEncoder(connection);
         LocalReadyBody = localReadyBody;
         this.maxCommandSize = maxCommandSize;
         this.pool = pool ?? MemoryPool<byte>.Shared;
     }
-
-    /// <summary>The raw connection; also the session connection for cleartext mechanisms.</summary>
-    public IZConnection Connection { get; }
 
     /// <summary>
     /// Local READY body built by the socket layer; the session sends it at the
@@ -47,10 +47,10 @@ public sealed class ZMechanismContext : IDisposable
     /// <summary>Command-frame size limit shared with the traffic parser (0008 Slice B).</summary>
     public int MaxCommandSize => maxCommandSize;
 
-    /// <summary>Writes one command frame (header + body) under the connection write gate.</summary>
+    /// <summary>Writes one command frame (header + body) during the exclusive handshake phase.</summary>
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
     {
-        return Connection.SendCommandAsync(body, token);
+        return encoder.WriteCommandAsync(body, token);
     }
 
     /// <summary>
@@ -109,7 +109,7 @@ public sealed class ZMechanismContext : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await Connection.ReadAsync(target[filled..], token);
+            var count = await reader.ReadAsync(target[filled..], token);
             if (count == 0) return false;
 
             filled += count;
