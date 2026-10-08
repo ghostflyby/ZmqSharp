@@ -407,7 +407,13 @@ internal sealed class SocketRuntime : IZSocket
         record.Phase = PeerPhase.Stopping;
         PublishRemove(record.Peer);
         QueueSurface?.Remove(record);
-        record.Established.TrySetCanceled();
+        // A recorded failure is the establishment's outcome and must reach the
+        // awaiting caller (a peer that closed mid-handshake closes the ERROR
+        // write too, and "nobody canceled anything" must not surface as a
+        // cancellation). A stop without one is an external shutdown request,
+        // whose awaited connect reports cancellation (0029 section 3).
+        if (record.Failure is { } failure) record.Established.TrySetException(failure);
+        else record.Established.TrySetCanceled();
     }
 
     /// <summary>

@@ -94,6 +94,22 @@ public sealed class RuntimeLifecycleTests
     }
 
     [Fact]
+    public async Task RejectedPeerType_WithFailedErrorWrite_SurfacesTheFailureNotCancellation()
+    {
+        // The peer advertises a socket type the local type rejects, and the peer
+        // has already closed, so the local ERROR write faults. The awaiting
+        // connect must report that write failure; the peer's side of the race
+        // ends establishment, but nobody canceled the connect (0030 section 6).
+        var endpoint = new ClosingEndpoint();
+        await using var runtime = new SocketRuntime(new ZSocketOptions(), new ZSinglePeerDispatch(),
+            ZSocketType.ForCustom("FOO"));
+
+        await FluentActions.Awaiting(() => runtime.ConnectAsync<ClosingEndpoint, ClosingTransport>(endpoint))
+            .Should().ThrowAsync<IOException>().WithMessage("peer closed before the ERROR write");
+        runtime.PeerSnapshot.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task DisconnectDuringHandshake_WaitsForActualMechanismTaskBeforeReleasingContext()
     {
         using var pool = new CountingMemoryPool();
@@ -139,6 +155,59 @@ public sealed class RuntimeLifecycleTests
     }
 
     private static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private sealed class ClosingEndpoint
+    {
+        public ClosingBytes Connection { get; } = new();
+    }
+
+    /// <summary>
+    /// Serves a greeting and a READY advertising PAIR, then fails the second
+    /// sequence write: the mechanism's READY succeeds, and the ERROR command
+    /// that follows the local socket-type rejection finds the peer gone.
+    /// </summary>
+    private sealed class ClosingBytes : IZConnection
+    {
+        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+        private int position;
+        private int sequenceWrites;
+        public TaskCompletionSource Aborted { get; } = Gate();
+        public int Disposals;
+
+        public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        {
+            if (position < handshake.Length)
+            {
+                var count = Math.Min(destination.Length, handshake.Length - position);
+                handshake.AsMemory(position, count).CopyTo(destination);
+                position += count;
+                return count;
+            }
+            await Aborted.Task;
+            return 0;
+        }
+
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+            => ValueTask.CompletedTask;
+
+        public ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+            => Interlocked.Increment(ref sequenceWrites) > 1
+                ? throw new IOException("peer closed before the ERROR write")
+                : ValueTask.CompletedTask;
+        public void Abort() => Aborted.TrySetResult();
+        public void Dispose() { Abort(); Interlocked.Increment(ref Disposals); }
+    }
+
+    private sealed class ClosingTransport : IZTransport<ClosingTransport, ClosingEndpoint>
+    {
+        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept { add { } remove { } }
+        public static ValueTask<IZConnection> ConnectAsync(ClosingEndpoint endpoint, CancellationToken token = default)
+            => ValueTask.FromResult<IZConnection>(endpoint.Connection);
+        public static ValueTask<ClosingTransport> BindAsync(ClosingEndpoint endpoint, CancellationToken token = default)
+            => throw new NotSupportedException();
+        public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();
+        public void Dispose() { }
+    }
 
     private sealed class ByteEndpoint
     {
