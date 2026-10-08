@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Xunit;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -258,7 +259,7 @@ public sealed class ZmtpParserTests
     }
 
     /// <summary>Sink with an async frame handler, for pending-ValueTask backpressure tests.</summary>
-    private sealed class AsyncSink(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrameAsync) : IZMessageSink
+    private sealed class AsyncSink(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrameAsync) : ITestFrameSink
     {
         public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
         {

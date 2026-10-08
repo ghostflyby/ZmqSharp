@@ -10,8 +10,8 @@ internal delegate ZFrame ZFrameAllocator(int frameLength, bool more);
 /// <summary>
 /// Pipe-free ZMTP 3.0 traffic parser: frame-header length lookahead and
 /// streaming frame delivery. The greeting and mechanism handshake run on
-/// <see cref="ZmtpHandshake"/> first; the caller passes the handshake's
-/// session connection here and calls <see cref="ParseAsync"/> once. A reusable
+/// socket runtime first; the caller supplies a byte reader, callback and
+/// optional frame codec here and calls <see cref="ParseAsync"/> once. A reusable
 /// scratch buffer keeps the steady state allocation-free. EOF is treated as
 /// connection close (partial data is discarded and never delivered); protocol
 /// violations throw ZeroMqProtocolException.
@@ -24,7 +24,10 @@ public sealed class ZmtpParser : IDisposable
     /// <summary>Default command-size limit (0008 Slice B).</summary>
     public const int DefaultMaxCommandSize = 1 << 20;
 
-    private readonly IZConnection connection;
+    private readonly IZByteReader reader;
+    private readonly ZFrameHandlerAsync onFrame;
+    private readonly IZFrameCodec? codec;
+    private readonly long maxEncodedLength;
     private readonly MemoryPool<byte> pool;
     private readonly ZFrameAllocator? allocator;
     private readonly int maxCommandSize;
@@ -42,23 +45,26 @@ public sealed class ZmtpParser : IDisposable
         return new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    public ZmtpParser(IZConnection connection, MemoryPool<byte>? pool = null)
-        : this(connection, null, pool ?? MemoryPool<byte>.Shared)
+    public ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
+        IZFrameCodec? codec = null, MemoryPool<byte>? pool = null)
+        : this(reader, onFrame, null, pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec)
     {
     }
 
-
-    internal ZmtpParser(
-        IZConnection connection,
-        ZFrameAllocator? allocator,
-        MemoryPool<byte> pool,
-        int maxCommandSize = DefaultMaxCommandSize)
+    internal ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
+        ZFrameAllocator? allocator, MemoryPool<byte> pool,
+        int maxCommandSize = DefaultMaxCommandSize, IZFrameCodec? codec = null,
+        long maxFrameLength = int.MaxValue)
     {
-        ArgumentNullException.ThrowIfNull(connection);
-        this.connection = connection;
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(onFrame);
+        this.reader = reader;
+        this.onFrame = onFrame;
         this.allocator = allocator;
         this.pool = pool;
         this.maxCommandSize = maxCommandSize;
+        this.codec = codec;
+        maxEncodedLength = codec?.GetMaximumEncodedLength(Math.Max(maxFrameLength, maxCommandSize)) ?? long.MaxValue;
     }
 
     /// <summary>Call after a streaming callback returns false to resume the receive loop.</summary>
@@ -72,7 +78,7 @@ public sealed class ZmtpParser : IDisposable
     }
 
     /// <summary>
-    /// Streams message frames to the connection's receive callbacks. The
+    /// Streams logical frames to the explicit receive callback. The
     /// caller is responsible for completing the handshake first: the
     /// connection must already be established, and traffic frames must not
     /// precede the mechanism's READY, or the READY is delivered as a
@@ -100,17 +106,62 @@ public sealed class ZmtpParser : IDisposable
             var nullableHeader = await TryReadFrameHeaderAsync(token);
             if (nullableHeader is not { } header) return;
 
-            if (header.Flags.HasFlag(ZmtpFrameFlags.Command))
+            if (codec is { } transform)
+            {
+                if (header.Size > maxEncodedLength || header.Size > int.MaxValue)
+                    throw new ZeroMqProtocolException("encoded frame exceeds maximum supported length");
+                var encodedLength = (int)header.Size;
+                EnsureScratchCapacity(encodedLength);
+                if (!await TryReadExactlyAsync(scratch[..encodedLength], token)) return;
+                var decoded = transform.Decode(new ZmtpFrameData
+                {
+                    Flags = header.Flags & ~ZmtpFrameFlags.LongSize,
+                    Body = new ReadOnlySequence<byte>(scratch[..encodedLength])
+                });
+                ZmtpFrameEncoder.ValidateFlags(decoded.Flags);
+                if ((decoded.Flags & ZmtpFrameFlags.Command) != 0)
+                {
+                    if (decoded.Body.Length > maxCommandSize)
+                        throw new ZeroMqProtocolException($"command frame exceeds maximum size of {maxCommandSize} bytes");
+                    if (!decoded.Body.IsSingleSegment)
+                        throw new ZeroMqProtocolException("decoded command must be contiguous");
+                    CheckCommand(decoded.Body.First.Span);
+                    continue;
+                }
+                var decodedLength = checked((int)decoded.Body.Length);
+                var decodedMore = (decoded.Flags & ZmtpFrameFlags.More) != 0;
+                ZFrame decodedFrame;
+                if (allocator is { } allocate)
+                {
+                    decodedFrame = allocate(decodedLength, decodedMore);
+                    var remaining = decoded.Body;
+                    for (var i = 0; i < decodedFrame.Count; i++)
+                    {
+                        var segment = decodedFrame[i];
+                        remaining.Slice(0, segment.Memory.Length).CopyTo(segment.Writable.Span);
+                        remaining = remaining.Slice(segment.Memory.Length);
+                    }
+                }
+                else
+                {
+                    if (!decoded.Body.IsSingleSegment)
+                    {
+                        EnsureScratchCapacity(decodedLength);
+                        decoded.Body.CopyTo(scratch.Span);
+                        decodedFrame = new ZFrame(ZSegment.Borrowed(scratch[..decodedLength]), decodedMore);
+                    }
+                    else decodedFrame = new ZFrame(ZSegment.Borrowed(decoded.Body.First), decodedMore);
+                }
+                if (!await onFrame(decodedFrame, token)) await WaitForResumeAsync(token);
+                continue;
+            }
+
+            if ((header.Flags & ZmtpFrameFlags.Command) != 0)
             {
                 var commandBody = await ReadBodyIntoScratchAsync(header, token);
                 if (commandBody is null) return;
 
-                if (!ZmtpCommandCodec.TryReadCommandName(commandBody.Value.Span, out var commandName))
-                    throw new ZeroMqProtocolException("malformed command name");
-
-                if (commandName.SequenceEqual("ERROR"u8))
-                    throw new ZeroMqProtocolException(
-                        $"peer sent ERROR: {ZmtpCommandCodec.ParseErrorReason(commandBody.Value.Span[(1 + commandName.Length)..])}");
+                CheckCommand(commandBody.Value.Span);
 
                 scratchUsed = 0;
                 MaybeShrinkScratch();
@@ -120,40 +171,33 @@ public sealed class ZmtpParser : IDisposable
             if (header.Size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
             var length = (int)header.Size;
-            var more = header.Flags.HasFlag(ZmtpFrameFlags.More);
+            var more = (header.Flags & ZmtpFrameFlags.More) != 0;
             if (allocator is not null)
             {
                 var materialized = allocator(length, more);
-                if (materialized.TryGetValue(out ZSegment single))
+                bool complete;
+                try
                 {
-                    if (!await TryReadExactlyAsync(single.Writable, token))
-                    {
-                        single.Dispose();
-                        return;
-                    }
-
-                    var materializedKeepGoing = await connection.OnFrameAsync(materialized, token);
-                    if (!materializedKeepGoing) await WaitForResumeAsync(token);
-
-                    continue;
+                    complete = true;
+                    for (var i = 0; i < materialized.Count; i++)
+                        if (!await TryReadExactlyAsync(materialized[i].Writable, token))
+                        {
+                            complete = false;
+                            break;
+                        }
                 }
-
-                if (materialized.TryGetValue(out ZSegments many))
+                catch
                 {
-                    for (var i = 0; i < many.Count; i++)
-                    {
-                        var segment = many[i];
-                        if (await TryReadExactlyAsync(segment.Writable, token)) continue;
-
-                        many.Dispose();
-                        return;
-                    }
-
-                    var multiKeepGoing = await connection.OnFrameAsync(materialized, token);
-                    if (!multiKeepGoing) await WaitForResumeAsync(token);
-
-                    continue;
+                    materialized.Dispose();
+                    throw;
                 }
+                if (!complete)
+                {
+                    materialized.Dispose();
+                    return;
+                }
+                if (!await onFrame(materialized, token)) await WaitForResumeAsync(token);
+                continue;
             }
 
             EnsureScratchCapacity(checked(scratchUsed + length));
@@ -167,7 +211,7 @@ public sealed class ZmtpParser : IDisposable
                 throw new InvalidOperationException("borrowed frame without scratch owner");
 
             var frame = new ZFrame(ZSegment.Borrowed(source, scratchUsed, length), more);
-            var keepGoing = await connection.OnFrameAsync(frame, token);
+            var keepGoing = await onFrame(frame, token);
             if (!keepGoing) await WaitForResumeAsync(token);
 
             // The borrowed frame must outlive the await; the scratch is
@@ -177,6 +221,14 @@ public sealed class ZmtpParser : IDisposable
         }
     }
 
+    private static void CheckCommand(ReadOnlySpan<byte> body)
+    {
+        if (!ZmtpCommandCodec.TryReadCommandName(body, out var name))
+            throw new ZeroMqProtocolException("malformed command name");
+        if (name.SequenceEqual("ERROR"u8))
+            throw new ZeroMqProtocolException($"peer sent ERROR: {ZmtpCommandCodec.ParseErrorReason(body[(1 + name.Length)..])}");
+    }
+
     // ---- Read helpers ----
 
     private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)
@@ -184,7 +236,7 @@ public sealed class ZmtpParser : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await connection.ReadAsync(target[filled..], token);
+            var count = await reader.ReadAsync(target[filled..], token);
             if (count == 0) return false;
 
             filled += count;
@@ -203,10 +255,10 @@ public sealed class ZmtpParser : IDisposable
         if ((flags & (ZmtpFrameFlags)0b1111_1000) != 0)
             throw new ZeroMqProtocolException("reserved ZMTP frame flag bits are set");
 
-        if (flags.HasFlag(ZmtpFrameFlags.Command) && flags.HasFlag(ZmtpFrameFlags.More))
+        if ((flags & ZmtpFrameFlags.Command) != 0 && (flags & ZmtpFrameFlags.More) != 0)
             throw new ZeroMqProtocolException("command frame cannot carry the MORE flag");
 
-        var isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);
+        var isLong = (flags & ZmtpFrameFlags.LongSize) != 0;
         var sizeLength = isLong ? 8 : 1;
         if (!await TryReadExactlyAsync(headerBuffer.AsMemory(1, sizeLength), token)) return null;
 

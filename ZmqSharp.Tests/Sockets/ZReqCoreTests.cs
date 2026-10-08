@@ -13,14 +13,14 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task Cancellation_WaitsForSendAndRetiresBeforeReopeningSlot()
     {
-        using var first = new EstablishedFakeConnection();
-        using var next = new EstablishedFakeConnection();
+        var first = new ZPeer();
+        var next = new ZPeer();
         using var cancellation = new CancellationTokenSource();
         using var pool = new CountingMemoryPool();
         var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var retired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        IZConnection[] peers = [first];
+        ZPeer[] peers = [first];
         var core = new ZReqCore(() => peers, async (_, message, _) =>
         {
             sendStarted.TrySetResult();
@@ -54,7 +54,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task MalformedReply_FaultsOriginalRequestAndReleasesBuffers()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         var core = CreateCore(peer);
         var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), default);
@@ -71,7 +71,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task ReplyBeforeSendFinishes_DoesNotEndBorrowOrAllowAnotherRequest()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var core = new ZReqCore(() => [peer], async (_, message, _) =>
         {
@@ -89,7 +89,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task CancellationAfterSend_CompletesRequestAndDisposesLosingReply()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         using var cancellation = new CancellationTokenSource();
         var retired = false;
@@ -105,7 +105,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task PeerEndsDuringSend_RequestWaitsForBufferRelease()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var core = new ZReqCore(() => [peer], async (_, message, _) =>
         {
@@ -121,7 +121,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task SendFailure_ReclaimsMessageRetiresPeerAndFaultsRequest()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         var retired = false;
         var core = new ZReqCore(() => [peer], (_, _, _) => throw new IOException("write failed"),
@@ -135,7 +135,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public void PreCanceledRequest_DoesNotTakeOwnershipOrSend()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         using var message = ZMessage.FromPooled(pool.Rent(8));
         var core = new ZReqCore(() => [peer], (_, _, _) => throw new InvalidOperationException("unexpected send"),
@@ -148,7 +148,7 @@ public sealed class ZReqCoreTests
     [Fact]
     public async Task ReplyAndCancellationRace_CompleteOnceAndReclaimLosingReply()
     {
-        using var peer = new EstablishedFakeConnection();
+        var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         for (var iteration = 0; iteration < 32; iteration++)
         {
@@ -186,7 +186,7 @@ public sealed class ZReqCoreTests
         }
     }
 
-    private static ZReqCore CreateCore(IZConnection peer, Action? retired = null)
+    private static ZReqCore CreateCore(ZPeer peer, Action? retired = null)
         => new(() => [peer], (_, message, _) =>
         {
             return ValueTask.CompletedTask;

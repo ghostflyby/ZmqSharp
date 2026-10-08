@@ -77,7 +77,7 @@ public struct Key32 : IEquatable<Key32>
 }
 
 /// <summary>
-/// The cryptographic primitives a CURVE (RFC 24 / CurveZMQ) mechanism needs.
+/// The cryptographic primitives a CURVE (RFC 25 / CurveZMQ) mechanism needs.
 /// The protocol skeleton (<see cref="CurveMechanism"/>) composes this; a user
 /// supplies the backend with their library of choice - the BouncyCastle
 /// implementation in this project is one pure-managed, AOT-safe option (0017).

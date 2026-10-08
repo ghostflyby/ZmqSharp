@@ -19,13 +19,13 @@ public sealed class DispatchPolicyTests
     public void RoundRobin_AlternatesAcrossPeers()
     {
         var policy = new ZRoundRobinDispatch();
-        var a = new FakeConnection();
-        var b = new FakeConnection();
-        var c = new FakeConnection();
-        IZConnection[] peers = [a, b, c];
+        var a = new ZPeer();
+        var b = new ZPeer();
+        var c = new ZPeer();
+        ZPeer[] peers = [a, b, c];
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        var selections = new IZConnection?[6];
+        var selections = new ZPeer?[6];
         for (var i = 0; i < selections.Length; i++)
             selections[i] = SelectOnly(policy, message, peers);
 
@@ -39,7 +39,7 @@ public sealed class DispatchPolicyTests
         var policy = new ZRoundRobinDispatch();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        policy.SelectTargets(message, ReadOnlySpan<IZConnection>.Empty, Span<IZConnection>.Empty).Should().Be(0);
+        policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty).Should().Be(0);
 
         message.Dispose();
     }
@@ -48,7 +48,7 @@ public sealed class DispatchPolicyTests
     public void RoundRobin_SinglePeer_AlwaysSelectsIt()
     {
         var policy = new ZRoundRobinDispatch();
-        var peer = new FakeConnection();
+        var peer = new ZPeer();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
         for (var i = 0; i < 3; i++)
@@ -61,8 +61,8 @@ public sealed class DispatchPolicyTests
     public void SinglePeer_ReturnsFirstConnection()
     {
         var policy = new ZSinglePeerDispatch();
-        var first = new FakeConnection();
-        var second = new FakeConnection();
+        var first = new ZPeer();
+        var second = new ZPeer();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
         SelectOnly(policy, message, [first, second]).Should().BeSameAs(first);
@@ -76,7 +76,7 @@ public sealed class DispatchPolicyTests
         var policy = new ZSinglePeerDispatch();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        policy.SelectTargets(message, ReadOnlySpan<IZConnection>.Empty, Span<IZConnection>.Empty).Should().Be(0);
+        policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty).Should().Be(0);
 
         message.Dispose();
     }
@@ -85,11 +85,11 @@ public sealed class DispatchPolicyTests
     public void Broadcast_SelectsEveryPeer()
     {
         var policy = new ZBroadcastDispatch();
-        var a = new FakeConnection();
-        var b = new FakeConnection();
-        IZConnection[] peers = [a, b];
+        var a = new ZPeer();
+        var b = new ZPeer();
+        ZPeer[] peers = [a, b];
         var message = ZMessage.FromOwned([.. "x"u8]);
-        IZConnection[] targets = new IZConnection[peers.Length];
+        ZPeer[] targets = new ZPeer[peers.Length];
 
         var count = policy.SelectTargets(message, peers, targets);
 
@@ -104,7 +104,7 @@ public sealed class DispatchPolicyTests
         var policy = new ZBroadcastDispatch();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        policy.SelectTargets(message, ReadOnlySpan<IZConnection>.Empty, Span<IZConnection>.Empty).Should().Be(0);
+        policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty).Should().Be(0);
 
         message.Dispose();
     }
@@ -113,7 +113,7 @@ public sealed class DispatchPolicyTests
     public void Identity_GenericSendPath_Throws()
     {
         var policy = new ZIdentityDispatch();
-        var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new FakeConnection()]);
+        var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*SendAsync(identity, message)*");
     }
@@ -122,7 +122,7 @@ public sealed class DispatchPolicyTests
     public void CurrentPeer_GenericSendPath_Throws()
     {
         var policy = new ZCurrentPeerDispatch();
-        var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new FakeConnection()]);
+        var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*RequestAsync*");
     }
@@ -133,9 +133,9 @@ public sealed class DispatchPolicyTests
         // REQ's request send routes through the policy: the current connection
         // recorded under the in-flight gate is the target SelectTargets returns.
         var policy = new ZCurrentPeerDispatch();
-        var peer = new FakeConnection();
+        var peer = new ZPeer();
         var message = ZMessage.FromOwned([.. "x"u8]);
-        IZConnection[] targets = new IZConnection[1];
+        ZPeer[] targets = new ZPeer[1];
 
         policy.SetCurrent(peer);
         policy.SelectTargets(message, [peer], targets).Should().Be(1);
@@ -155,7 +155,7 @@ public sealed class DispatchPolicyTests
         // are assigned their routing id here and directed sends resolve
         // through it; teardown releases the mapping.
         var policy = new ZIdentityDispatch();
-        var peer = new FakeConnection();
+        var peer = new ZPeer();
 
         var identity = policy.AssignIdentity(peer);
         identity.Should().NotBeEmpty();
@@ -195,16 +195,16 @@ public sealed class DispatchPolicyTests
         (await receivedB.Task.WaitAsync(cts.Token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
     }
 
-    private static IZConnection? SelectOnly(IZDispatchPolicy policy, ZMessage message, IZConnection[] peers)
+    private static ZPeer? SelectOnly(IZDispatchPolicy policy, ZMessage message, ZPeer[] peers)
     {
-        var targets = new IZConnection[1];
+        var targets = new ZPeer[1];
         return policy.SelectTargets(message, peers, targets) == 0 ? null : targets[0];
     }
 
     /// <summary>A policy that selects every established peer (a custom broadcast).</summary>
     private sealed class SelectAllDispatch : IZDispatchPolicy
     {
-        public int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets)
+        public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
         {
             peers.CopyTo(targets);
             return peers.Length;
@@ -232,45 +232,12 @@ public sealed class DispatchPolicyTests
 
     private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink
     {
-        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         {
             onMessage(message);
             return ValueTask.CompletedTask;
         }
     }
 
-    private sealed class FakeConnection : IZConnection
-    {
-        // Dispatch policies never touch the connection; the contract members
-        // are unreachable from SelectTargets.
-        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
-            => throw new NotSupportedException();
 
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-            => throw new NotSupportedException();
-
-        public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
-            => throw new NotSupportedException();
-
-        public void SetConnectionEndedHandler(Action onConnectionEnded)
-            => throw new NotSupportedException();
-
-        public void OnConnectionEnded()
-            => throw new NotSupportedException();
-
-        public void Dispose()
-            => throw new NotSupportedException();
-    }
 }

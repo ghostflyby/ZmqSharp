@@ -5,13 +5,14 @@ using System.Threading.Channels;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Zmtp;
 
 /// <summary>
-/// PLAIN mechanism tests (0016 milestone 2, RFC 27): wire-fixture handshake
+/// PLAIN mechanism tests (0016 milestone 2, RFC 24): wire-fixture handshake
 /// sequences through <see cref="ZmtpHandshake"/>, plus end-to-end handshakes
 /// over real sockets. The library implementation uses only the public
 /// mechanism surface (0016 section 3.1); an equivalent mechanism was verified
@@ -30,24 +31,24 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
-        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+        var result = await handshake.EstablishAsync();
 
         result.Should().NotBeNull();
-        result.Value.SessionConnection.Should().BeSameAs(connection);
+        result.Value.Codec.Should().BeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
     }
 
     [Fact]
     public async Task Server_CompletesHandshake_WithAuthenticatedHello()
     {
-        // Client side of the wire: greeting + HELLO(alice, secret) + READY.
+        // Client side of the wire: greeting + HELLO(alice, secret) + INITIATE.
         var peerBytes = ZmtpTestData.Concat(
-            ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", "secret"), ZmtpTestData.Ready("PAIR"));
+            ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", "secret"), InitiateFrame());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) =>
             user == "alice" && pass.SequenceEqual("secret"u8)));
 
-        var result = await handshake.EstablishAsync(ZMechanismRole.Server);
+        var result = await handshake.EstablishAsync();
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
@@ -62,7 +63,7 @@ public sealed class ZPlainMechanismTests
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) =>
             user == "alice" && pass.SequenceEqual("secret"u8)));
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Server).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*Invalid username or password*");
     }
 
@@ -74,7 +75,7 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) => true));
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Server).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZMechanismException>()
             .WithMessage("*missing Username or Password*");
     }
@@ -87,7 +88,7 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) => true));
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Server).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*expected HELLO*");
     }
 
@@ -101,7 +102,7 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "wrong"u8));
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Client).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZMechanismException>()
             .WithMessage("*Invalid username or password*");
     }
@@ -114,30 +115,38 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(ZmtpTestData.Greeting()));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Client).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>()
             .WithMessage("*does not match the configured mechanism 'PLAIN'*");
     }
 
     [Fact]
-    public void ClientRole_WithoutCredentials_Throws()
+    public void ServerConfiguration_SelectsServerRole()
     {
         var server = new ZPlainMechanism((user, pass) => true);
-        var act = () => server.CreateSession(ZMechanismRole.Client);
-        act.Should().Throw<InvalidOperationException>();
+        server.Role.Should().Be(ZMechanismRole.Server);
+        server.CreateSession().Should().NotBeNull();
     }
 
     [Fact]
-    public void ServerRole_WithoutAuthenticator_Throws()
+    public void ClientConfiguration_SelectsClientRole()
     {
         var client = new ZPlainMechanism("alice", "secret"u8);
-        var act = () => client.CreateSession(ZMechanismRole.Server);
-        act.Should().Throw<InvalidOperationException>();
+        client.Role.Should().Be(ZMechanismRole.Client);
+        client.CreateSession().Should().NotBeNull();
     }
 
     [Theory]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
-    public async Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes(TransportKind kind)
+    public Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes(TransportKind kind)
+        => RunExchangeAsync(kind, false);
+
+    [Theory]
+    [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
+    public Task PlainMechanism_ClientBinds_ServerConnects(TransportKind kind)
+        => RunExchangeAsync(kind, true);
+
+    private static async Task RunExchangeAsync(TransportKind kind, bool reversed)
     {
         await using var server = new ZPairSocket(new ZSocketOptions
         {
@@ -156,8 +165,8 @@ public sealed class ZPlainMechanismTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await (reversed ? client : server).BindAsync(endpoint, cts.Token);
+        await (reversed ? server : client).ConnectAsync(endpoint, cts.Token);
 
         await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), cts.Token);
         var echo = await TryReadAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
@@ -192,6 +201,35 @@ public sealed class ZPlainMechanismTests
             .WithMessage("*Invalid username or password*");
     }
 
+    [Fact]
+    public async Task Server_PreservesBinaryPasswordBytes()
+    {
+        byte[] helloBody = [5, .. "HELLO"u8, 5, .. "alice"u8, 3, 0, 255, 128];
+        var input = ZmtpTestData.Concat(ZmtpTestData.Greeting("PLAIN"),
+            ZmtpTestData.Frame(helloBody, command: true), InitiateFrame());
+        using var connection = new ZConnection(new ChunkedMemoryStream(input));
+        var authenticated = false;
+        using var handshake = NewHandshake(connection, new ZPlainMechanism((user, password) =>
+        {
+            user.Should().Be("alice");
+            password.ToArray().Should().Equal(0, 255, 128);
+            authenticated = true;
+            return true;
+        }));
+        (await handshake.EstablishAsync()).Should().NotBeNull();
+        authenticated.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Credentials_EnforceWireOctetLengthIncludingUtf8Bytes()
+    {
+        FluentActions.Invoking(() => new ZPlainMechanism(new string('é', 128), "x"u8))
+            .Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => new ZPlainMechanism("alice", new byte[256]))
+            .Should().Throw<ArgumentOutOfRangeException>();
+        new ZPlainMechanism(new string('a', 255), new byte[255]).Role.Should().Be(ZMechanismRole.Client);
+    }
+
     // ---- Fixtures ----
 
     private static ZmtpHandshake NewHandshake(IZConnection connection, ZPlainMechanism mechanism)
@@ -203,28 +241,27 @@ public sealed class ZPlainMechanismTests
             MaxCommandSize);
     }
 
-    /// <summary>HELLO frame with Username/Password metadata; a null password omits the property.</summary>
+    /// <summary>HELLO uses octet-length credentials; null omits the password length.</summary>
     private static byte[] HelloFrame(string username, string? password)
     {
         var user = Encoding.UTF8.GetBytes(username);
-        var properties = new List<byte>();
-        AppendMetadataProperty(properties, "Username"u8, user);
-        if (password is not null) AppendMetadataProperty(properties, "Password"u8, Encoding.UTF8.GetBytes(password));
-
         var body = new List<byte> { 5 };
         body.AddRange("HELLO"u8);
-        body.AddRange(properties);
+        body.Add((byte)user.Length);
+        body.AddRange(user);
+        if (password is { } value)
+        {
+            var bytes = Encoding.UTF8.GetBytes(value);
+            body.Add((byte)bytes.Length);
+            body.AddRange(bytes);
+        }
         return ZmtpTestData.Frame([.. body], command: true);
     }
 
-    private static void AppendMetadataProperty(List<byte> target, ReadOnlySpan<byte> name, ReadOnlySpan<byte> value)
+    private static byte[] InitiateFrame()
     {
-        target.Add((byte)name.Length);
-        target.AddRange(name.ToArray());
-        var length = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(length, value.Length);
-        target.AddRange(length);
-        target.AddRange(value.ToArray());
+        var metadata = ZmtpCommands.BuildReady("PAIR").AsSpan(6);
+        return ZmtpTestData.Frame([8, .. "INITIATE"u8, .. metadata], command: true);
     }
 
     /// <summary>WELCOME frame: short-string name, no properties.</summary>

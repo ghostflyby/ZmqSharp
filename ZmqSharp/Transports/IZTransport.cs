@@ -21,11 +21,9 @@ public interface IZTransport<TSelf, in TEndpoint> : IZTransport
 {
     static abstract ValueTask<IZConnection> ConnectAsync(
         TEndpoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default);
 
     static abstract ValueTask<TSelf> BindAsync(
         TEndpoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default);
 }

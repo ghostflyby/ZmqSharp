@@ -1,4 +1,3 @@
-
 namespace ZmqSharp.Zmtp;
 
 /// <summary>
@@ -17,12 +16,3 @@ public delegate bool ZFrameHandler(ZFrame frame, CancellationToken token);
 /// pauses it until the task completes. true (or a completed task) continues.
 /// </summary>
 public delegate ValueTask<bool> ZFrameHandlerAsync(ZFrame frame, CancellationToken token);
-
-/// <summary>Receiver of parsed frames.</summary>
-public interface IZMessageSink
-{
-    ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token);
-
-    /// <summary>Called when the connection ends; discard any partial message and release buffers.</summary>
-    void OnConnectionEnded();
-}

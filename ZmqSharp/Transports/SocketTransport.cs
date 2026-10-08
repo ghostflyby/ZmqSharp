@@ -33,7 +33,6 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
     public static async ValueTask<IZConnection> ConnectAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         var socket = CreateSocket(endpoint);
@@ -52,7 +51,6 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
     public static ValueTask<SocketTransport> BindAsync(
         EndPoint endpoint,
-        ZTransportOptions options,
         CancellationToken token = default)
     {
         var socket = CreateSocket(endpoint);

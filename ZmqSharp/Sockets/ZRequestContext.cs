@@ -1,5 +1,4 @@
 using System.Collections;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp;
 
@@ -13,14 +12,14 @@ public readonly struct ZRequestContext : IReadOnlyList<ZFrame>, IDisposable
 {
     private readonly ZMessage message;
 
-    internal ZRequestContext(IZConnection peer, ZMessage message)
+    internal ZRequestContext(ZPeer peer, ZMessage message)
     {
         Peer = peer;
         this.message = message;
     }
 
     /// <summary>The peer the request arrived from; replies route back to it.</summary>
-    public IZConnection Peer { get; }
+    public ZPeer Peer { get; }
 
     public int Count => message.Count;
 

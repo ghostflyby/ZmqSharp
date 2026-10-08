@@ -5,8 +5,9 @@ Date: 2026-10-07
 
 Records the follow-up review of the architecture/API assessment and the agreed
 implementation sequence. Stage one is specified in 0029. Stages two and three
-require their own accepted implementation designs before code changes; they
-are deliberately separate from the correctness work.
+are specified by 0030 and implemented after the correctness work, in the
+user-authorized role, frame-boundary and registry change sequence. 0030 remains
+draft pending design review.
 
 ## 1. Review conclusions
 
@@ -49,7 +50,7 @@ no obsolete compatibility layer is required.
   the whole multipart message, not each byte segment.
 - Parser accepts a read capability and `ZFrameHandlerAsync` explicitly. Remove
   receive registration from connections and retire `IZMessageSink`.
-- Security returns a protocol-session capability. CURVE remains a frame-based
+- Security returns an optional frame codec and peer metadata. CURVE remains a frame-based
   authenticated transformation, not an ordinary encrypted byte stream.
 - Introduce a stable root-namespace peer identity without send/read/dispose
   methods for events, request contexts, and selection policies. Internal records
@@ -59,7 +60,7 @@ no obsolete compatibility layer is required.
   capabilities, only tests still reference it, and its target-setting methods
   are internal. Retention would require an explicit public customization use case.
 - Separate handshake orchestration from the wire codec. Document the sole owner
-  of raw connection, session wrapper, parser, and their pooled buffers.
+  of raw connection, session, parser, codec and their pooled buffers.
 
 Gate this stage on NULL/PLAIN/CURVE wire interoperability, multipart atomicity,
 exactly-once disposal, and existing steady-state allocation budgets. Do not move
@@ -81,3 +82,19 @@ public domain types merely to make namespace dependency arrows look acyclic.
 Bulk naming changes, key-format convenience APIs, and a separate crypto backend
 package are outside these stages. Keep public namespaces organized by consumer
 domain and internal namespaces aligned with implementation directories.
+
+## 5. Replacement-model implementation (0030)
+
+The role, byte/frame and single-registry stages are implemented. Peer identity is
+ZPeer; transports expose only byte I/O/Abort; CURVE returns CurveFrameCodec.
+Coordinator Attach/casts and queue peer dictionaries are removed. Readers, wake
+signals and materialization have direct internal tests. Request and endpoint
+correctness guarantees from 0029 remain covered by their regression suites.
+The existing ZCurrentPeerDispatch extension is retained; no additional bulk policy
+retirement or naming migration is needed for the built-in coordinator model.
+
+Reference verification also found that the old PLAIN wire sequence used metadata
+credentials and READY instead of INITIATE. The implementation now uses RFC 24
+length-prefixed credentials and HELLO/WELCOME/INITIATE/READY, with a libzmq
+interop harness in eng/aot-smoke. See 0030 for allocation measurements and final
+build/test/AOT evidence.

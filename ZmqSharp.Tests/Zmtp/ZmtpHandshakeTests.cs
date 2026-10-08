@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -21,15 +22,22 @@ public sealed class ZmtpHandshakeTests
     private static ReadOnlySpan<byte> ReadyName => "READY"u8;
 
     [Fact]
+    public void NullMechanism_IsRoleless_AndAdvertisesZero()
+    {
+        ZNullMechanism.Instance.Role.Should().Be(ZMechanismRole.None);
+        ZmtpGreeting.Build("NULL", ZNullMechanism.Instance.Role)[32].Should().Be(0);
+    }
+
+    [Fact]
     public async Task GreetingWithNullMechanism_Completes_AndYieldsPeerReady()
     {
         using var connection = NewConnection(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+        var result = await handshake.EstablishAsync();
 
         result.Should().NotBeNull();
-        result.Value.SessionConnection.Should().BeSameAs(connection);
+        result.Value.Codec.Should().BeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
     }
 
@@ -40,7 +48,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+        var result = await handshake.EstablishAsync();
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("DEALER");
@@ -57,7 +65,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready("CUSTOM")));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+        var result = await handshake.EstablishAsync();
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("CUSTOM");
@@ -80,7 +88,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Socket-Type", "PAIR"), ("Identity", "abc"))));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync(ZMechanismRole.Client);
+        var result = await handshake.EstablishAsync();
 
         result.Should().NotBeNull();
     }
@@ -130,7 +138,7 @@ public sealed class ZmtpHandshakeTests
     {
         using var connection = NewConnection(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
         using var handshake = NewHandshake(connection);
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Client).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
 
         await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*boom*");
     }
@@ -172,7 +180,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.Frame([.. "data"u8])));
         using var handshake = NewHandshake(connection);
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Client).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
@@ -211,7 +219,7 @@ public sealed class ZmtpHandshakeTests
 
         // No body follows the header, so the handshake ends at EOF; the size
         // check must not reject the boundary value itself.
-        (await handshake.EstablishAsync(ZMechanismRole.Client)).Should().BeNull();
+        (await handshake.EstablishAsync()).Should().BeNull();
     }
 
     [Fact]
@@ -221,7 +229,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), CommandFrameHeader(MaxCommandSize + 1)));
         using var handshake = NewHandshake(connection);
 
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Client).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>().WithMessage("*exceeds maximum size*");
     }
 
@@ -231,7 +239,7 @@ public sealed class ZmtpHandshakeTests
         using var connection = NewConnection(ZmtpTestData.Greeting());
         using var handshake = NewHandshake(connection);
 
-        (await handshake.EstablishAsync(ZMechanismRole.Client)).Should().BeNull();
+        (await handshake.EstablishAsync()).Should().BeNull();
     }
 
     private static ZConnection NewConnection(byte[] peerBytes)
@@ -260,7 +268,7 @@ public sealed class ZmtpHandshakeTests
     {
         using var connection = NewConnection(peerBytes);
         using var handshake = NewHandshake(connection);
-        var act = () => handshake.EstablishAsync(ZMechanismRole.Client).AsTask();
+        var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 

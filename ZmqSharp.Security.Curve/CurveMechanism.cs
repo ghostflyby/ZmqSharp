@@ -5,11 +5,11 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Security.Curve;
 
 /// <summary>
-/// The ZMTP CURVE mechanism (RFC 24 / CurveZMQ), written as an example against
+/// The ZMTP CURVE mechanism (RFC 25 / CurveZMQ), written as an example against
 /// ZmqSharp's public mechanism seam (0017): the handshake commands are sealed
 /// boxes carried inside ordinary ZMTP command frames, driven through
 /// <see cref="ZMechanismContext"/>, and the session returns a
-/// <see cref="CurveSessionConnection"/> that encrypts traffic frames. The
+/// <see cref="CurveFrameCodec"/> that encrypts traffic frames. The
 /// protocol layout follows the maintained libzmq/NetMQ reference; only the
 /// crypto primitives come from the user-supplied <see cref="ICurveCryptoBackend"/>.
 /// The handshake builds every fixed-size stage buffer with stackalloc and the
@@ -42,9 +42,11 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
     public string Name => "CURVE";
 
-    public IZMechanismSession CreateSession(ZMechanismRole role)
+    public ZMechanismRole Role => serverLongTermKey is null ? ZMechanismRole.Client : ZMechanismRole.Server;
+
+    public IZMechanismSession CreateSession()
     {
-        if (role == ZMechanismRole.Client)
+        if (Role == ZMechanismRole.Client)
         {
             if (clientLongTermKey is not { } clientKey || serverPublicKey is not { } serverKey)
                 throw new InvalidOperationException(
@@ -103,8 +105,8 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
             var peerMetadata = OpenReady(ready.Value, sessionKey);
 
-            var session = new CurveSessionConnection(
-                context.Connection, crypto, sessionKey,
+            var session = new CurveFrameCodec(
+                crypto, sessionKey,
                 CurveConstants.MessagePrefixClientToServer, CurveConstants.MessagePrefixServerToClient,
                 nonce, 0);
             return new ZMechanismResult(session, peerMetadata);
@@ -265,8 +267,8 @@ public sealed class CurveMechanism : IZSecurityMechanism
             var ready = BuildReady(context, ephemeralSecret, clientEphemeralKey, sessionKey, ref nonce);
             await context.WriteCommandAsync(ready, token);
 
-            var session = new CurveSessionConnection(
-                context.Connection, crypto, sessionKey,
+            var session = new CurveFrameCodec(
+                crypto, sessionKey,
                 CurveConstants.MessagePrefixServerToClient, CurveConstants.MessagePrefixClientToServer,
                 nonce, peerNonce);
             return new ZMechanismResult(session, peerMetadata);
@@ -442,7 +444,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
     }
 }
 
-/// <summary>Fixed RFC 24 literals and nonce prefixes.</summary>
+/// <summary>Fixed RFC 25 literals and nonce prefixes.</summary>
 internal static class CurveConstants
 {
     public static readonly byte[] HelloLiteral = [0x05, .. "HELLO"u8];

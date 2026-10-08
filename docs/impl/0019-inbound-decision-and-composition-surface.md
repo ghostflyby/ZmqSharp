@@ -2,11 +2,11 @@
 
 Status: accepted
 Date: 2026-08-13
-Revision: 2
+Revision: 3 (2026-10-08)
 
 Completes the pattern-core split begun by 0015 section 2. 0015 split
 `IPatternCore` into an outbound seam (`IZDispatchPolicy`) and an identity
-seam (`ZSocketType`); this document adds the missing inbound seam and turns
+seam (`ZSocketType`); this document adds the inbound decision fragment and turns
 the socket's composition face into a usable third-party surface.
 
 - **Inbound behavior has no seam.** Filtering, framing, forwarding, and
@@ -74,7 +74,9 @@ socket type: **what do I send to (dispatch), what do I do with what arrives
 (inbound), and what do I call myself / who do I accept (type)**. `inbound`
 defaults to pass-through delivery, so sockets that only need outbound routing
 (single-peer, round-robin, broadcast) declare nothing inbound. The base
-executes the seams; the socket type only composes them.
+executes these decisions; the socket type composes them. REQ, REP and XPUB
+also need bidirectional coordinator state and explicit send capabilities; these
+are not three mutually independent strategies (0030).
 
 Caller-addressed sends are deliberately outside the seams: REP replies route
 back to the originating peer and ROUTER sends address a peer by identity.
@@ -106,7 +108,7 @@ public readonly struct ZInboundDecision
 
 public interface IZInboundPolicy
 {
-    ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token);
+    ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token);
 }
 ```
 
@@ -128,11 +130,11 @@ filters need no class:
 
 ```csharp
 public delegate ValueTask<ZInboundDecision> ZInboundDecide(
-    IZConnection peer, ZMessage message, CancellationToken token);
+    ZPeer peer, ZMessage message, CancellationToken token);
 
 public sealed class ZDelegateInboundPolicy(ZInboundDecide decide) : IZInboundPolicy
 {
-    public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
         => decide(peer, message, token);
 }
 ```
@@ -249,7 +251,7 @@ sealed class FilterPubSocket(ZSocketOptions options)
     : ZSocketBase(options, new ZBroadcastDispatch(), ZSocketTypes.Pub,
         new ZDelegateInboundPolicy(FilterByTopic));
 
-static ValueTask<ZInboundDecision> FilterByTopic(IZConnection peer, ZMessage message, CancellationToken token)
+static ValueTask<ZInboundDecision> FilterByTopic(ZPeer peer, ZMessage message, CancellationToken token)
 {
     if (MatchTopic(message)) return ValueTask.FromResult(ZInboundDecision.Deliver());
 
@@ -269,7 +271,7 @@ sealed class MyReqSocket(ZSocketOptions options)
 
 sealed class MyReqInbound : IZInboundPolicy
 {
-    public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         // Consume: complete this socket's pending request, or drop a spurious
         // message (ZInboundAction.Consumed owns the message).
@@ -332,11 +334,12 @@ All three work items landed. Deviations from the draft, recorded honestly:
   and extracting it added no behavior. The subscription set and filter were
   extracted as `ZTopicFilter` + `ZTopicFilterPolicy` (internal).
 - **`IZPeerLifecycle` was deferred.** Peer teardown notifications already
-  exist as the public `PeerEnded` event; ROUTER and REQ subscribe to it.
-  Promoted only if a custom dispatch policy surfaces the need.
-- **XPUB's forwarding policy holds a back-reference.** The `XPubInbound`
-  policy is attached after the base constructor (before any connection); it
-  is an internal implementation detail of the built-in socket.
+  originally used public PeerEnded subscriptions. In 0030, built-in ROUTER/REQ
+  cleanup uses runtime internal notifications before resources are released;
+  public events no longer participate in internal cleanup.
+- **XPUB is a bidirectional coordinator.** The original attached socket
+  back-reference is removed by 0030. Snapshot and tracked-send capabilities
+  are injected before the surface is exposed, as for REQ/REP.
 - **Deliver without a bound sink disposes the message** (documented in the
   aggregated-tier path); the pass-through tier over `OnFrame` is unaffected.
 - **`OnFrame` on protocol sockets now throws** (revision 2, subagent review
@@ -350,11 +353,13 @@ All three work items landed. Deviations from the draft, recorded honestly:
   face; custom types validate with in-library pair tests only (0015
   section 2.3), since libzmq/NetMQ hard-code their socket types.
 
-## 12. Lifecycle follow-up (0029)
+## 12. Lifecycle and coordinator follow-up (0029 / 0030)
 
-`ZSocketBase` owns lifecycle infrastructure directly; `ZAsyncState` is removed.
-REQ now receives peer selection, borrowing send, and retirement capabilities and
-is retained explicitly by its composition root. Cancellation and parsing failures
-have one request outcome and respect send-buffer lifetime. REP and XPUB remain
-stateful coordinators; removing their socket attachments is stage-three work in
-0028, not part of this behavioral change.
+0029 removed ZAsyncState and established request cancellation/buffer-lifetime
+correctness. 0030 moves lifecycle infrastructure into SocketRuntime and a single
+PeerRecord registry. ZSocketBase/ZQueueSocketBase are public surface facades.
+REQ receives snapshot, borrowed-send and retire capabilities; REP receives handler
+and owned-send capabilities; XPUB receives snapshot and tracked forwarding. Their
+composition roots retain concrete coordinators directly, without InboundPolicy
+casts or Attach. The runtime constructs queue projections using the same records
+and resolves receive configuration once without a virtual constructor probe.

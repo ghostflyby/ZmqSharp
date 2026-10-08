@@ -19,7 +19,7 @@ public sealed class InboundPolicyTests
     {
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        var decision = await ZInboundPolicy.PassThrough.DecideAsync(new FakeConnection(), message, CancellationToken.None);
+        var decision = await ZInboundPolicy.PassThrough.DecideAsync(new ZPeer(), message, CancellationToken.None);
 
         decision.Action.Should().Be(ZInboundAction.Deliver);
         decision.Message.Should().BeNull();
@@ -36,7 +36,7 @@ public sealed class InboundPolicyTests
             return ValueTask.FromResult(new ZInboundDecision { Action = ZInboundAction.Drop });
         });
 
-        var decision = await policy.DecideAsync(new FakeConnection(), message, CancellationToken.None);
+        var decision = await policy.DecideAsync(new ZPeer(), message, CancellationToken.None);
 
         decision.Action.Should().Be(ZInboundAction.Drop);
     }
@@ -51,7 +51,7 @@ public sealed class InboundPolicyTests
             return ValueTask.FromResult(new ZInboundDecision { Action = ZInboundAction.Consumed });
         });
 
-        var decision = await policy.DecideAsync(new FakeConnection(), message, CancellationToken.None);
+        var decision = await policy.DecideAsync(new ZPeer(), message, CancellationToken.None);
 
         decision.Action.Should().Be(ZInboundAction.Consumed);
     }
@@ -144,7 +144,7 @@ public sealed class InboundPolicyTests
     /// <summary>Delivers every message prefixed with "!" (frames moved, 0007 M3).</summary>
     private sealed class PrefixInbound : IZInboundPolicy
     {
-        public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+        public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
         {
             var frames = new List<ZFrame>(message.Count + 1)
             {
@@ -172,7 +172,7 @@ public sealed class InboundPolicyTests
         /// this test waits for, exposed instead of polling the counter).</summary>
         public Task ReachedTwoAsync => reachedTwo.Task;
 
-        public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+        public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
         {
             if (Interlocked.Increment(ref count) >= 2) reachedTwo.TrySetResult();
             message.Dispose();
@@ -190,47 +190,14 @@ public sealed class InboundPolicyTests
 
     private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink
     {
-        public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+        public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         {
             onMessage(message);
             return ValueTask.CompletedTask;
         }
     }
 
-    private sealed class FakeConnection : IZConnection
-    {
-        // The inbound policies here never touch the connection; the contract
-        // members are unreachable from DecideAsync.
-        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
-            => throw new NotSupportedException();
 
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-            => throw new NotSupportedException();
-
-        public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> onFrame)
-            => throw new NotSupportedException();
-
-        public void SetConnectionEndedHandler(Action onConnectionEnded)
-            => throw new NotSupportedException();
-
-        public void OnConnectionEnded()
-            => throw new NotSupportedException();
-
-        public void Dispose()
-            => throw new NotSupportedException();
-    }
 
     private static async Task WaitUntilAsync<T>(Func<T> getValue, Func<T, bool> condition, TimeSpan timeout)
     {

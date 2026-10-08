@@ -1,193 +1,86 @@
 using System.Buffers;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Transports;
 
-/// <summary>
-/// Concrete full-duplex connection over a raw socket (0015 section 4): reads
-/// directly with <see cref="Socket.ReceiveAsync"/> and writes frames with
-/// buffer-list scatter sends, removing the <see cref="NetworkStream"/> wrapper
-/// and the Stream virtual-call layer from the hot path. The win is not fewer
-/// reads (the parser's read-exactly loop is unchanged); it is the wrapper
-/// removal plus one system call per frame. The per-connection write gate is
-/// retained: message-level atomic writes still require serialization.
-/// <see cref="ZConnection"/> stays for generic (non-socket) transports.
-/// </summary>
-internal sealed class ZSocketConnection : IZConnection
+/// <summary>Raw socket byte I/O, including complete scatter/gather writes.</summary>
+internal sealed class ZSocketConnection(Socket socket) : IZConnection
 {
-    private readonly Socket socket;
-    private readonly SocketWriteSink sink;
-    private readonly ZmtpFrameEncoder encoder;
-    private readonly SemaphoreSlim writeGate = new(1, 1);
-    private Func<ZFrame, CancellationToken, ValueTask<bool>>? onFrame;
-    private Action? onConnectionEnded;
-    private int disposed;
+    private readonly List<ArraySegment<byte>> segments = [];
+    private int aborted;
 
-    public ZSocketConnection(Socket socket)
-    {
-        ArgumentNullException.ThrowIfNull(socket);
-        this.socket = socket;
-        sink = new SocketWriteSink(socket);
-        encoder = new ZmtpFrameEncoder(sink);
-    }
-
-    public void SetFrameHandler(Func<ZFrame, CancellationToken, ValueTask<bool>> handler)
-    {
-        onFrame = handler;
-    }
-
-    public void SetConnectionEndedHandler(Action handler)
-    {
-        onConnectionEnded = handler;
-    }
-
-    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
-    {
-        return socket.ReceiveAsync(buffer, SocketFlags.None, token);
-    }
+    public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        => socket.ReceiveAsync(destination, SocketFlags.None, token);
 
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        await writeGate.WaitAsync(token);
-        try
+        while (!bytes.IsEmpty)
         {
-            await sink.WriteAsync(bytes, token);
-        }
-        finally
-        {
-            writeGate.Release();
+            var written = await socket.SendAsync(bytes, SocketFlags.None, token);
+            if (written == 0) throw new IOException("socket closed during write");
+            bytes = bytes[written..];
         }
     }
 
-    public async ValueTask SendFrameAsync(ReadOnlyMemory<byte> frame, bool more, CancellationToken token = default)
+    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
-        await writeGate.WaitAsync(token);
-        try
+        token.ThrowIfCancellationRequested();
+        if (bytes.IsSingleSegment)
         {
-            await encoder.WriteFrameAsync(new ReadOnlySequence<byte>(frame), more, token);
+            await WriteAsync(bytes.First, token);
+            return;
         }
-        finally
+        segments.Clear();
+        foreach (var memory in bytes)
         {
-            writeGate.Release();
-        }
-    }
-
-    public async ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-    {
-        await writeGate.WaitAsync(token);
-        try
-        {
-            await encoder.WriteCommandAsync(body, token);
-        }
-        finally
-        {
-            writeGate.Release();
-        }
-    }
-
-    public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
-    {
-        await writeGate.WaitAsync(token);
-        try
-        {
-            await encoder.WriteMessageAsync(message, token);
-        }
-        finally
-        {
-            writeGate.Release();
-        }
-    }
-
-    public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
-    {
-        return onFrame?.Invoke(frame, token) ?? ValueTask.FromResult(true);
-    }
-
-    public void OnConnectionEnded()
-    {
-        onConnectionEnded?.Invoke();
-    }
-
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-
-        // Disposing the socket aborts pending async receives/sends, so a
-        // pump parked on ReadAsync is released (the DisconnectAsync scenario
-        // that a stream dispose could not reliably interrupt, 0006 3.6).
-        // An in-flight async write still releases the managed gate in its finally.
-        // Closing the transport interrupts I/O; leave the gate alive for that release.
-        socket.Dispose();
-    }
-
-    /// <summary>
-    /// Raw transport write side of the connection: single-system-call writes,
-    /// scatter for multi-segment sequences. Ungated by design: the write gate
-    /// lives on the connection and is already held by every caller (the
-    /// encoder always runs under it).
-    /// </summary>
-    private sealed class SocketWriteSink(Socket socket) : IZWriteSink
-    {
-        private readonly List<ArraySegment<byte>> segments = [];
-
-        public async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-        {
-            // ValueTask<int> is not ValueTask; awaiting a synchronously
-            // completing send completes this method synchronously (no box in
-            // Release), so the raw single-buffer path stays allocation-free.
-            await socket.SendAsync(bytes, SocketFlags.None, token);
-        }
-
-        public async ValueTask WriteAsync(ReadOnlySequence<byte> sequence, CancellationToken token = default)
-        {
-            if (sequence.IsSingleSegment)
+            if (memory.IsEmpty) continue;
+            if (MemoryMarshal.TryGetArray(memory, out var segment))
             {
-                await socket.SendAsync(sequence.First, SocketFlags.None, token);
-                return;
+                segments.Add(segment);
+                continue;
             }
-
-            // Scatter write: gather the frame's segments into the reusable
-            // buffer list and send once (0015 section 6.1). Frame segments
-            // are array-backed (header + owned/pooled segment memories), so
-            // this path is the rule; non-array-backed (native) memory falls
-            // back to a single pooled copy.
-            var segments = this.segments;
-            segments.Clear();
-            foreach (var memory in sequence)
+            var buffer = ArrayPool<byte>.Shared.Rent(checked((int)bytes.Length));
+            try
             {
-                if (memory.IsEmpty) continue;
-
-                if (MemoryMarshal.TryGetArray(memory, out var arraySegment))
-                {
-                    segments.Add(arraySegment);
-                    continue;
-                }
-
-                segments.Clear();
-                var owner = ArrayPool<byte>.Shared.Rent((int)sequence.Length);
-                try
-                {
-                    sequence.CopyTo(owner);
-                    await socket.SendAsync(owner.AsMemory(0, (int)sequence.Length), SocketFlags.None, token);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(owner);
-                }
-
-                return;
+                bytes.CopyTo(buffer);
+                await WriteAsync(buffer.AsMemory(0, (int)bytes.Length), token);
             }
-
-            // The scatter overload has no CancellationToken parameter: it is
-            // the .NET 4.5-era SocketTaskExtensions surface over
-            // SocketAsyncEventArgs, which has no cancellation concept - a
-            // submitted SAEA operation can only be aborted by closing the
-            // socket. The write gate serializes sends, which is also what
-            // keeps the socket's cached TaskSocketAsyncEventArgs (one per
-            // socket, exchanged not allocated) reusable. See 0021 section 4.
-            if (segments.Count > 0) await socket.SendAsync(segments, SocketFlags.None);
+            finally { ArrayPool<byte>.Shared.Return(buffer); }
+            return;
+        }
+        // The scatter overload has no token. Aborting the socket cancels the
+        // actual operation, so borrowed buffers remain live until it returns.
+        using var registration = token.UnsafeRegister(static state =>
+        {
+            if (state is ZSocketConnection connection) connection.Abort();
+        }, this);
+        while (segments.Count > 0)
+        {
+            var written = await socket.SendAsync(segments, SocketFlags.None);
+            if (written == 0) throw new IOException("socket closed during scatter write");
+            while (written > 0)
+            {
+                var first = segments[0];
+                if (written >= first.Count)
+                {
+                    written -= first.Count;
+                    segments.RemoveAt(0);
+                }
+                else
+                {
+                    if (first.Array is not { } array) throw new IOException("scatter segment has no backing array");
+                    segments[0] = new ArraySegment<byte>(array, first.Offset + written, first.Count - written);
+                    written = 0;
+                }
+            }
         }
     }
+
+    public void Abort()
+    {
+        if (Interlocked.Exchange(ref aborted, 1) == 0) socket.Dispose();
+    }
+
+    public void Dispose() => Abort();
 }

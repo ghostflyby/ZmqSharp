@@ -21,7 +21,7 @@ public sealed class CurveBackendBoundaryTests
         var backend = new RecordingBackend();
         var secret = Key32.From(new byte[32]);
         var mechanism = new CurveMechanism(backend, secret, secret);
-        mechanism.CreateSession(ZMechanismRole.Client).Should().NotBeNull();
+        mechanism.CreateSession().Should().NotBeNull();
         backend.Derivations.Should().Be(1);
     }
 

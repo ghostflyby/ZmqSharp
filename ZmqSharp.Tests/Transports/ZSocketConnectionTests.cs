@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using FluentAssertions;
@@ -32,8 +33,9 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
+            using var sender = new ZmtpSession(client);
 
-            await client.SendFrameAsync("hello"u8.ToArray(), more: false);
+            await sender.SendFrameAsync("hello"u8.ToArray(), more: false);
 
             await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
@@ -53,11 +55,12 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
+            using var sender = new ZmtpSession(client);
 
             // A multi-segment frame exercises the buffer-list scatter write:
             // header + each segment, sent with one SendAsync call.
             using var message = MessageFactory.SegmentedFrame([.. "hel"u8], [.. "lo"u8], [.. "!"u8]);
-            await client.SendAsync(message);
+            await sender.SendAsync(message);
 
             await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
@@ -77,9 +80,10 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
+            using var sender = new ZmtpSession(client);
 
             var payload = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
-            await client.SendFrameAsync(payload, more: false);
+            await sender.SendFrameAsync(payload, more: false);
 
             await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
@@ -119,13 +123,56 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
+            using var sender = new ZmtpSession(client);
 
-            await client.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false);
+            await sender.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false);
 
             await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().BeEmpty();
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LargeScatterWrite_WithSmallSocketBuffer_WritesTheCompleteFrame(bool ipc)
+    {
+        var path = TestTransports.IpcSocketPath("zmq-scatter-");
+        EndPoint endpoint = ipc ? new UnixDomainSocketEndPoint(path) : new IPEndPoint(IPAddress.Loopback, 0);
+        using var listener = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
+        listener.Bind(endpoint);
+        listener.Listen();
+        using var client = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
+        client.SendBufferSize = 4096;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await client.ConnectAsync(listener.LocalEndPoint ?? endpoint, timeout.Token);
+            using var server = await listener.AcceptAsync(timeout.Token);
+            using var writer = new ZSocketConnection(client);
+            using var reader = new ZSocketConnection(server);
+            using var session = new ZmtpSession(writer);
+            var first = Enumerable.Repeat((byte)17, 700_000).ToArray();
+            var second = Enumerable.Repeat((byte)23, 800_000).ToArray();
+            using var message = MessageFactory.SegmentedFrame(first, second);
+            var delivered = 0;
+            using var parser = new ZmtpParser(reader, (frame, _) =>
+            {
+                var content = frame.ToSequence().ToArray();
+                content.Length.Should().Be(first.Length + second.Length);
+                content.AsSpan(0, first.Length).SequenceEqual(first).Should().BeTrue();
+                content.AsSpan(first.Length).SequenceEqual(second).Should().BeTrue();
+                delivered++;
+                return ValueTask.FromResult(true);
+            });
+            var receiving = parser.ParseAsync(timeout.Token).AsTask();
+            await session.SendAsync(message, timeout.Token);
+            writer.Abort();
+            await receiving.WaitAsync(timeout.Token);
+            delivered.Should().Be(1);
+        }
+        finally { if (ipc) File.Delete(path); }
     }
 
     /// <summary>Opens a connected raw-socket pair wrapped in ZSocketConnection.</summary>

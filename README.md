@@ -71,12 +71,15 @@ filtering or reconnect subscriptions. Receive rejections can be inspected as
 `ZReceiveRejectedException` in `PeerEnded`.
 
 See [the stage-one migration guide](docs/migration-stage-one.md) for public API
-changes and custom CURVE backend requirements.
+changes and custom CURVE backend requirements. The
+[replacement-model migration guide](docs/migration-frame-sessions.md) covers
+byte-only transports, fixed security roles, frame codecs and ZPeer signatures.
 
 ## Design
 
-Design documents live in `docs/impl/`. The architecture is a transport core (`ZSocketBase`) composed with per-pattern
-cores and bound to a semantic delivery seam (`IPatternSink`); surfaces are thin composition roots constructed directly
+Design documents live in `docs/impl/`. An internal socket runtime owns a single peer registry.
+Byte transports provide I/O, ZMTP sessions serialize messages and own optional frame codecs, and pattern
+coordinators receive explicit routing/send capabilities. Surfaces are thin composition roots constructed directly
 (`new ZPairSocket()`), with the queue surface as the default receive path (`Messages`) and `BindAsync`/`ConnectAsync`
 as the repeatable endpoint surface (0022, 0023).
 

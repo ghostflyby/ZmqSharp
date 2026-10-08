@@ -2,7 +2,7 @@
 
 Status: draft
 Date: 2026-08-12
-Revision: 1
+Revision: 2 (2026-10-08)
 
 Consolidates the design review of the transport and pattern layers into a
 forward plan. It captures four decisions that the current code already
@@ -19,7 +19,10 @@ motivates, plus one explicit deferral:
   transport set and is nearly free because `IZTransport` is endpoint-agnostic.
 - **Streaming messages** are deferred (section 7).
 
-This document is a plan, not a design for one feature: sections 2-6 each
+Follow-up: 0030 replaces the connection-wrapper security model, moves message
+serialization to sessions, and uses ZPeer in selection signatures.
+
+This document is a roadmap, not a design for one feature: sections 2-6 each
 define a work item with its decisions and acceptance, and section 8 orders
 them. It extends 0007 (transport core / pattern core / surface) and 0006
 (interop matrix, feature checklist).
@@ -61,7 +64,7 @@ Five observations from the current implementation converge on one direction:
 // selected peers, once each. Zero = drop the message.
 public interface IZDispatchPolicy
 {
-    int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets);
+    int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets);
 }
 
 // Identity only: the advertised Socket-Type and the peer-accept predicate.
@@ -122,42 +125,31 @@ matrix must be locked by the existing interop tests.
 
 ## 3. Security mechanisms
 
-### 3.1 "Arbitrary combination" means orthogonal layers
+### 3.1 Independent transport and mechanism capabilities
 
-ZMTP allows exactly one mechanism per connection (chosen in the greeting), so
-mechanisms do not stack with each other. Combination freedom lives in the
-four orthogonal layers:
+ZMTP configures one security mechanism per socket and matches it by greeting
+name. Mechanisms do not stack. A TLS transport encrypts byte I/O; CURVE provides
+both authentication and a protocol-frame transform. Encryption is not exclusively
+a transport concern. Socket type and reusable selection policies remain separate.
 
-```text
-socket type (section 2) x transport (encryption, e.g. TLS) x mechanism (authentication) x dispatch policy
-```
+### 3.2 Mechanism handshake and frame transform
 
-Encryption belongs in the transport (a TLS transport wrapping TCP), not in a
-mechanism. Mechanism = authentication, per ZMTP's design.
-
-### 3.2 Mechanism as a connection transform
-
-A mechanism is an `IZConnection -> IZConnection` transform; the parser never
-sees it. Handshake flow:
-
-1. Read the peer's greeting mechanism field.
-2. Instantiate the configured mechanism for that field.
-3. The mechanism runs its own handshake sequence on the raw connection
-   (NULL: expect READY directly; PLAIN: HELLO -> WELCOME -> READY; custom:
-   any command sequence).
-4. The mechanism returns a session connection (decrypt-on-read /
-   encrypt-on-write for CURVE), and the parser parses traffic on the session.
-
-Public seam: `IZSecurityMechanism` (name + handshake state machine) plus
-per-mechanism credential objects declared in socket options.
+The runtime emits the configured greeting, matches the peer mechanism name and
+runs a per-connection handshake session through metadata and command capabilities.
+The result provides peer metadata and an optional IZFrameCodec. An established
+ZmtpSession serializes whole messages, invokes the transform per frame and owns
+its lifetime. The parser reads bytes and receives logical frames directly from
+the codec; it never parses a reconstructed plaintext stream. Mechanism.Role comes
+from socket configuration, independently of bind/connect (0030).
 
 ### 3.3 Cost split
 
-- **PLAIN is cheap**: pure command frames, no crypto. Near-term target.
-- **CURVE is a large work item**: requires X25519. Native libsodium conflicts
-  with the zero-native-dependency / AOT stance; a managed implementation
-  (e.g. BouncyCastle) must be evaluated for AOT compatibility and audit
-  separately. CURVE is its own tracked item, not part of this phase.
+- **PLAIN** uses command frames without traffic encryption. The implemented
+  RFC 24 exchange is HELLO/WELCOME/INITIATE/READY; 0030 fixes the earlier
+  nonstandard credential and READY fixtures.
+- **CURVE** requires X25519 and authenticated frame transforms. It is now
+  implemented in the optional managed/AOT-compatible CURVE assembly (0017,
+  0027, 0030); crypto backend package separation remains separate work.
 
 ## 4. Dedicated socket connection
 
@@ -170,8 +162,8 @@ the `Stream` virtual-call layer, and unlocking the write path of section 6:
   with `Socket.ReceiveAsync(Memory, flags, token)`;
 - `SocketTransport` returns it when the underlying endpoint is a raw socket;
 - `ZConnection(Stream)` stays for generic transports (extension seam);
-- the per-connection write gate is retained: message-level atomic writes
-  still require serialization.
+- message serialization belongs to ZmtpSession, whose gate covers the
+  complete multipart message rather than each byte write (0030).
 
 Zero API cost: `ZConnection` is already internal.
 
@@ -222,7 +214,7 @@ ZmqSharp-vs-ZmqSharp on Windows and NetMQ interop on Unix.
 The encoder writes frames to a sink, not a stream:
 
 ```csharp
-public interface IZWriteSink
+public interface IZByteWriter
 {
     ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default);
     ValueTask WriteAsync(ReadOnlySequence<byte> sequence, CancellationToken token = default);
@@ -233,20 +225,22 @@ The encoder produces each frame (header + all segments) as one
 `ReadOnlySequence` and hands it to the sink in a single logical write:
 
 - the socket sink uses buffer-list scatter writes (`Socket.SendAsync` with a
-  buffer array), preserving the frame's segment structure with one system
-  call;
+  buffer array), preserving segments and retrying partial sends until the
+  entire input has been written;
 - the stream sink writes the segments sequentially (the current behavior)
-  but inside one gate acquisition;
+  within one logical write; the session holds the message gate;
 - a future lazy-segment source (section 7) feeds the same sequence channel.
 
-This fixes the N+1 system calls and the non-atomic multi-segment write.
+This permits scatter/gather without coalescing. Message atomicity is provided
+by the session, not by the transport write capability.
 
 ### 6.2 Two-phase encoding and PredictSize
 
 Two-phase encoding (compute the size, then write) is the standard way to
 enable pooled allocation. The ZMTP frame header is deterministic - 2-byte
 short header at length <= 255, 9-byte long header above - so the encoded size
-is exactly predictable, not just a lower bound. The seam offers both:
+is exactly predictable, not just a lower bound. The lengths are computable directly; the following were proposed DTO serializer
+concepts, not implemented public ZMTP methods:
 
 - `PredictMinimum` - the lower bound, for a cheap "does this fit the scratch
   buffer" check;

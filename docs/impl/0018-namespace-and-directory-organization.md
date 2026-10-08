@@ -48,10 +48,12 @@ A single `using ZmqSharp;` covers all basic usage:
   constructed, 0022/0023, each with its own public send surface per 0024),
   `IZSocket` (endpoints only), `IPatternSink`.
 - Base classes: `ZSocketBase`, `ZQueueSocketBase` (the default queue surface,
-  0023). Lifecycle infrastructure is owned by `ZSocketBase` (0029).
+  0023). Lifecycle infrastructure is internal to SocketRuntime (0030); the bases
+  provide the public surface facade.
 - Concrete sockets: `ZPairSocket`, `ZDealerSocket`, `ZReqSocket`, `ZRepSocket`,
   `ZPushSocket`, `ZPullSocket`, `ZRouterSocket`, `ZPubSocket`, `ZSubSocket`,
   `ZXPubSocket`, `ZXSubSocket`.
+- Peer identity: `ZPeer` (0030), with no I/O or disposal methods.
 - REP request value: `ZRequestContext` (the handler context of the README
   REQ/REP example).
 - Message model: `ZMessage`, `ZFrame`, `ZSegment`, `ZSegments`,
@@ -68,9 +70,9 @@ A single `using ZmqSharp;` covers all basic usage:
 ### Sub-namespaces - domain-specific feature areas
 
 - `ZmqSharp.Transports` (unchanged): `IZTransport`, `IZTransport<TSelf,TE>`,
-  `IZConnection`, `SocketTransport`, `ZTransportOptions`.
+  `IZConnection`, `IZByteReader`, `IZByteWriter`, `SocketTransport`.
 - `ZmqSharp.Zmtp` (wire codec only): `ZmtpParser`, `ZmtpFrameEncoder`,
-  `ZmtpCommands`, `ZmtpCommandCodec`, `IZMessageSink`, `ZFrameHandler`,
+  `ZmtpCommands`, `ZmtpCommandCodec`, `IZFrameCodec`, `ZmtpFrameData`, `ZFrameHandler`,
   `ZFrameHandlerAsync`, `ZmtpFrameFlags`. `ZmtpFrameFlags` is public because
   the CURVE example assembly (a separate project without
   `InternalsVisibleTo`) reproduces the frame flag bits.
@@ -100,11 +102,12 @@ A single `using ZmqSharp;` covers all basic usage:
   `ZDelimiterFraming` (REQ/REP delimiter wire format), `ZTopicFilter` /
   `ZTopicFilterPolicy` (SUB subscriptions), and the REQ/REP consume cores
   `ZReqCore` / `ZRepCore`, `ZEndpointRegistration`, `ZEndpointParser`, and
-  `ZReceiveGuard`.
-- `ZmqSharp.Zmtp` (internal): `ZmtpHandshake`, `ZmtpGreeting`.
-- `ZmqSharp.Transports` (internal): `ZConnection`.
+  `ZReceiveGuard`, SocketRuntime, PeerRecord, ReceiveQueueSurface, AggregateReader,
+  WakeGate, ReceiveMaterializer, RequestHandlerSlot, XPubCoordinator and ZmtpHandshake.
+- `ZmqSharp.Zmtp` (internal): `ZmtpGreeting`, ZmtpSession, FrameSequence.
+- `ZmqSharp.Transports` (internal): `ZConnection`, ZSocketConnection.
 - Internal helpers mixed into files with public types (`ZSequence`,
-  `ZBoundedQueueFactory`, `ZFrameAllocator`, ...) share the
+  `ZBoundedQueueFactory`, ...) share the
   top-level namespace with those types - "generally match" the directory.
 
 ## 4. Directory layout

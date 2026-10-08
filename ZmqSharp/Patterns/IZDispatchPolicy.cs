@@ -1,5 +1,3 @@
-using ZmqSharp.Transports;
-
 namespace ZmqSharp.Patterns;
 
 /// <summary>
@@ -27,5 +25,5 @@ public interface IZDispatchPolicy
     /// the message. The socket sends to exactly the selected peers, in order,
     /// once each.
     /// </summary>
-    int SelectTargets(ZMessage message, ReadOnlySpan<IZConnection> peers, Span<IZConnection> targets);
+    int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets);
 }

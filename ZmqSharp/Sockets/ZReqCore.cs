@@ -1,16 +1,15 @@
 using ZmqSharp.Patterns;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
 /// <summary>Coordinates one request at a time without depending on a socket implementation.</summary>
 internal sealed class ZReqCore : IZInboundPolicy
 {
-    private sealed class Request(IZConnection peer, CancellationToken token)
+    private sealed class Request(ZPeer peer, CancellationToken token)
     {
         private int finished;
         public bool TryFinish() => Interlocked.CompareExchange(ref finished, 1, 0) == 0;
-        public IZConnection Peer { get; } = peer;
+        public ZPeer Peer { get; } = peer;
         public CancellationToken Token { get; } = token;
         public TaskCompletionSource<ZMessage> Outcome { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<ZMessage> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -18,14 +17,14 @@ internal sealed class ZReqCore : IZInboundPolicy
 
     private readonly Lock gate = new();
     private readonly ZRoundRobinDispatch selection = new();
-    private readonly IZConnection[] target = new IZConnection[1];
-    private readonly Func<IZConnection[]> peers;
-    private readonly Func<IZConnection, ZMessage, CancellationToken, ValueTask> send;
-    private readonly Action<IZConnection> retire;
+    private readonly ZPeer[] target = new ZPeer[1];
+    private readonly Func<ZPeer[]> peers;
+    private readonly Func<ZPeer, ZMessage, CancellationToken, ValueTask> send;
+    private readonly Action<ZPeer> retire;
     private Request? pending;
 
-    public ZReqCore(Func<IZConnection[]> peers,
-        Func<IZConnection, ZMessage, CancellationToken, ValueTask> send, Action<IZConnection> retire)
+    public ZReqCore(Func<ZPeer[]> peers,
+        Func<ZPeer, ZMessage, CancellationToken, ValueTask> send, Action<ZPeer> retire)
     {
         this.peers = peers;
         this.send = send;
@@ -107,7 +106,7 @@ internal sealed class ZReqCore : IZInboundPolicy
         request.Outcome.TrySetException(error);
     }
 
-    public ValueTask<ZInboundDecision> DecideAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         Request? request;
         lock (gate) request = pending is { } active && ReferenceEquals(active.Peer, peer) ? active : null;
@@ -129,7 +128,7 @@ internal sealed class ZReqCore : IZInboundPolicy
         return ValueTask.FromResult(ZInboundDecision.Consumed());
     }
 
-    public void OnPeerEnded(IZConnection peer)
+    public void OnPeerEnded(ZPeer peer)
     {
         lock (gate)
         {

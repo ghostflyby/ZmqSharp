@@ -46,7 +46,7 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
         }
     }
 
-    public ValueTask OnMessageAsync(IZConnection peer, ZMessage message, CancellationToken token = default)
+    public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
     {
         samples[index] = GC.GetAllocatedBytesForCurrentThread();
         threadIds[index] = Environment.CurrentManagedThreadId;
