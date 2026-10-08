@@ -37,29 +37,27 @@ public class ZSubSocket : ZQueueSocketBase
     }
 
     /// <summary>Subscribes to a topic prefix; the empty prefix subscribes to everything.</summary>
-    public void Subscribe(byte[] topic)
+    public void Subscribe(ReadOnlySpan<byte> topic)
     {
-        ArgumentNullException.ThrowIfNull(topic);
-        filter.Add(topic);
-        BroadcastSubscription(0x01, topic);
+        var copy = filter.Add(topic);
+        BroadcastSubscription(0x01, copy);
     }
 
     /// <summary>Removes a subscription (matched by content).</summary>
-    public void Unsubscribe(byte[] topic)
+    public void Unsubscribe(ReadOnlySpan<byte> topic)
     {
-        ArgumentNullException.ThrowIfNull(topic);
         filter.RemoveAll(topic);
         BroadcastSubscription(0x00, topic);
     }
 
     /// <summary>libzmq wire convention: first frame 0x01 subscribes, 0x00 unsubscribes.</summary>
-    private void BroadcastSubscription(byte marker, byte[] topic)
+    private void BroadcastSubscription(byte marker, ReadOnlySpan<byte> topic)
     {
         foreach (var peer in PeerSnapshot)
         {
             var payload = new byte[1 + topic.Length];
             payload[0] = marker;
-            topic.CopyTo(payload, 1);
+            topic.CopyTo(payload.AsSpan(1));
             var message = new ZMessage(new ZSingleMessage(
                 new ZFrame(new ZSegment(payload, 0, payload.Length))));
             _ = SendToAsync(peer, message, CancellationToken.None);
@@ -72,7 +70,7 @@ public class ZSubSocket : ZQueueSocketBase
         {
             var payload = new byte[1 + topic.Length];
             payload[0] = 0x01;
-            topic.CopyTo(payload, 1);
+            topic.CopyTo(payload.AsSpan(1));
             var message = new ZMessage(new ZSingleMessage(
                 new ZFrame(new ZSegment(payload, 0, payload.Length))));
             _ = SendToAsync(peer, message, CancellationToken.None);

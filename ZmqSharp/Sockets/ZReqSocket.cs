@@ -1,34 +1,52 @@
 using System.Buffers;
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp;
 
 /// <summary>
 /// REQ composition root (0010 section 4; 0019): strict single in-flight
 /// request over a round-robin peer selection, replies accepted only from the
-/// current peer. The current connection is owned by the composed
-/// <see cref="ZCurrentPeerDispatch"/>; the request send routes through it and
-/// the reply intake is the consume arm of the composed inbound policy (the
+/// current peer. The request core selects and sends to a peer through injected
+/// capabilities; reply intake is the consume arm of the composed inbound policy (the
 /// <see cref="ZReqCore"/>), so a <see cref="ZSocketOptions.MessageSink"/>
 /// consumer is never hijacked by the protocol. Sends go through
-/// <see cref="RequestAsync"/>; the generic base send path is rejected when no
-/// request is in flight.
+/// <see cref="RequestAsync"/>; the generic base send path is unavailable.
 /// </summary>
 public sealed class ZReqSocket : ZSocketBase
 {
     private readonly ZReqCore core;
 
     public ZReqSocket(ZSocketOptions? options = null)
-        : this(options ?? new ZSocketOptions(), new ZCurrentPeerDispatch())
+        : this(options ?? new ZSocketOptions(), new RequestCapabilities())
     {
     }
 
-    private ZReqSocket(ZSocketOptions options, ZCurrentPeerDispatch dispatch)
-        : base(options, dispatch, ZSocketTypes.Req, new ZReqCore(dispatch))
+    private ZReqSocket(ZSocketOptions options, RequestCapabilities capabilities)
+        : this(options, capabilities, new ZReqCore(capabilities.Peers, capabilities.SendAsync, capabilities.Retire))
     {
-        core = (ZReqCore)InboundPolicy;
+    }
+
+    private ZReqSocket(ZSocketOptions options, RequestCapabilities capabilities, ZReqCore core)
+        : base(options, new ZNoDispatch("REQ sends through RequestAsync"), ZSocketTypes.Req, core)
+    {
+        this.core = core;
+        capabilities.ReadPeers = () => PeerSnapshot;
+        capabilities.Send = SendRequestToAsync;
+        capabilities.Stop = RetirePeer;
         PeerEnded += (peer, _) => core.OnPeerEnded(peer);
+    }
+
+    private sealed class RequestCapabilities
+    {
+        public Func<IZConnection[]> ReadPeers { get; set; } = () => [];
+        public Func<IZConnection, ZMessage, CancellationToken, ValueTask>? Send { get; set; }
+        public Action<IZConnection>? Stop { get; set; }
+        public IZConnection[] Peers() => ReadPeers();
+        public ValueTask SendAsync(IZConnection peer, ZMessage message, CancellationToken token)
+            => Send is { } sender ? sender(peer, message, token) : throw new InvalidOperationException("REQ is not initialized");
+        public void Retire(IZConnection peer) => Stop?.Invoke(peer);
     }
 
     /// <summary>
@@ -39,23 +57,23 @@ public sealed class ZReqSocket : ZSocketBase
     /// </summary>
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token = default)
     {
-        return core.RequestAsync(this, message, token);
+        return core.RequestAsync(message, token);
     }
 
     /// <summary>
     /// Sends a request that borrows the caller's buffer instead of copying
     /// (0026 3.6): zero pool rent, zero copy for <c>byte[]</c>-backed memory
     /// (a non-array backing may be copied inside the awaited write). The caller must not modify
-    /// the buffer until the reply arrives (the request is consumed only after
-    /// the reply, by protocol causality); a synchronous throw (no peer, a
-    /// request in flight) ends the borrow immediately.
+    /// the buffer until the returned task completes, including cancellation or failure.
+    /// Completion waits until the send has stopped accessing the buffer. A synchronous
+    /// throw (no peer, a request in flight) ends the borrow immediately.
     /// </summary>
     public Task<ZMessage> RequestAsync(ReadOnlyMemory<byte> request, CancellationToken token = default)
     {
         var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(request))));
         try
         {
-            return core.RequestAsync(this, message, token);
+            return core.RequestAsync(message, token);
         }
         catch
         {
@@ -71,7 +89,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = ZMessage.Copy(request);
         try
         {
-            return core.RequestAsync(this, message, token);
+            return core.RequestAsync(message, token);
         }
         catch
         {
@@ -86,7 +104,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = ZMessage.Copy(frames);
         try
         {
-            return core.RequestAsync(this, message, token);
+            return core.RequestAsync(message, token);
         }
         catch
         {
@@ -101,7 +119,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = ZMessage.Copy(frames);
         try
         {
-            return core.RequestAsync(this, message, token);
+            return core.RequestAsync(message, token);
         }
         catch
         {
@@ -110,13 +128,4 @@ public sealed class ZReqSocket : ZSocketBase
         }
     }
 
-    /// <summary>
-    /// Internal frame send for the REQ core (0024): routes the framed request
-    /// through the current-connection dispatch. REQ exposes no public generic
-    /// SendAsync - sends go through <see cref="RequestAsync"/>.
-    /// </summary>
-    internal ValueTask SendRequestFrameAsync(ZMessage framed, CancellationToken token)
-    {
-        return SendAsyncCore(framed, token);
-    }
 }

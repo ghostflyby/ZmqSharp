@@ -10,7 +10,7 @@ namespace ZmqSharp.Security.Curve.Tests;
 /// is the critical piece - a raw-X25519 derivation silently produces
 /// self-consistent but non-interoperable boxes. The vectors are unchanged
 /// from the byte[] backend; only the call shapes moved to destination spans
-/// (0023).
+/// (0027).
 /// </summary>
 public sealed class LibsodiumKnownVectorTests
 {
@@ -80,7 +80,7 @@ public sealed class LibsodiumKnownVectorTests
 
         var opened = new byte[LibsodiumBox.Length - 16];
         bc.TryUnbox(LibsodiumBox, Nonce, wrongSecret.Span, Pk1, opened, out _).Should().BeFalse();
-        // The destination must be untouched on a failed open (0023 D5).
+        // The destination must be untouched on a failed open (0027 D5).
         opened.Should().OnlyContain(b => b == 0);
     }
 

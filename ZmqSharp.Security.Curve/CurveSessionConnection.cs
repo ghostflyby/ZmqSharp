@@ -15,7 +15,7 @@ namespace ZmqSharp.Security.Curve;
 /// body) so <see cref="ZmtpParser"/> sees a normal frame stream; encryption
 /// seals each frame the socket layer sends.
 ///
-/// The hot path reuses per-connection buffers (0023): the seal buffer, the
+/// The hot path reuses per-connection buffers (0027): the seal buffer, the
 /// read scratch, and the staged plain frame are connection fields, and the
 /// nonce is a stack buffer, so steady-state frames allocate nothing. The
 /// seal buffer is shared by all sends, so sealing plus the raw write run
@@ -74,7 +74,7 @@ public sealed class CurveSessionConnection : IZConnection
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
         // Serve from the staged plaintext frame first. The staging array stays
-        // allocated across frames (0023); "has data" is pendingOffset <
+        // allocated across frames (0027); "has data" is pendingOffset <
         // pendingLength, never nulling the buffer, so the next frame reuses it.
         if (pending is { } staged && pendingOffset < pendingLength)
         {
@@ -197,7 +197,7 @@ public sealed class CurveSessionConnection : IZConnection
     {
         // The whole message is sealed and written under one gate hold: the
         // seal buffer is shared, and message-level atomicity must survive
-        // concurrent sends (0023, 0021 - the clear path serializes whole
+        // concurrent sends (0027, 0021 - the clear path serializes whole
         // messages under the connection write gate).
         await sendGate.WaitAsync(token);
         try

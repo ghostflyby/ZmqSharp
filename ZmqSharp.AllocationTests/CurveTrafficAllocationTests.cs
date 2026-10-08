@@ -7,7 +7,7 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.AllocationTests;
 
 /// <summary>
-/// Allocation measurements of the CURVE traffic path (0023): sealing and
+/// Allocation measurements of the CURVE traffic path (0027): sealing and
 /// opening reuse per-connection buffers and the backend is allocation-free,
 /// so steady-state frames allocate nothing. The fake connection's reads and
 /// writes complete synchronously, so each operation runs its whole chain on
@@ -89,7 +89,7 @@ public class CurveTrafficAllocationTests
 
         // A per-frame allocation would be a few hundred bytes minimum (a
         // rented buffer or an array); both loops completing under the gate
-        // proves the CURVE traffic path is steady-state allocation-free (0023).
+        // proves the CURVE traffic path is steady-state allocation-free (0027).
 #if !DEBUG
         sealAllocated.Should().BeGreaterThanOrEqualTo(0,
             "a negative seal delta means the window spanned two threads, not that the path allocated nothing");

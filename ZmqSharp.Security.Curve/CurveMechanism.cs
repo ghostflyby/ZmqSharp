@@ -14,7 +14,7 @@ namespace ZmqSharp.Security.Curve;
 /// crypto primitives come from the user-supplied <see cref="ICurveCryptoBackend"/>.
 /// The handshake builds every fixed-size stage buffer with stackalloc and the
 /// destination-style backend, so it allocates only the command frames
-/// themselves (0023).
+/// themselves (0027).
 /// </summary>
 public sealed class CurveMechanism : IZSecurityMechanism
 {
@@ -54,7 +54,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             // (INITIATE) carries the public, the vouch box is sealed with the
             // secret.
             Span<byte> publicBytes = stackalloc byte[32];
-            Org.BouncyCastle.Math.EC.Rfc7748.X25519.GeneratePublicKey(clientKey.Span, publicBytes);
+            crypto.DerivePublicKey(clientKey.Span, publicBytes);
             return new ClientSession(crypto, clientKey, Key32.From(publicBytes), serverKey);
         }
 
@@ -209,7 +209,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             // The boxed metadata (peer READY arguments) is the owned copy the
             // driver hands to the socket layer. The buffer is peer-sized (the
             // READY command is unauthenticated at this point), so it is rented
-            // from the shared pool instead of stackalloc'd (0023 C2).
+            // from the shared pool instead of stackalloc'd (0027 C2).
             var plaintext = ArrayPool<byte>.Shared.Rent(args.Length - 24);
             try
             {
@@ -363,7 +363,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             // Open the initiate box under (s', C'). The plaintext length is
             // peer-sized (the INITIATE body is unauthenticated until the box
             // opens), so it is rented from the shared pool instead of
-            // stackalloc'd (0023 C2).
+            // stackalloc'd (0027 C2).
             Span<byte> initiateNonce = stackalloc byte[24];
             CurveConstants.InitiateNoncePrefix.CopyTo(initiateNonce);
             body.AsSpan(105, 8).CopyTo(initiateNonce[16..]);

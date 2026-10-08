@@ -198,6 +198,10 @@ work, with two fixes in `SocketTransport`:
 `ZSocketExtensions` gains an `ipc://path` scheme mapping to a
 `UnixDomainSocketEndPoint` (plus unlink-on-dispose for the bound path).
 
+Follow-up (0029): string operations now belong to `IZSocket` and `ZSocketBase`;
+the extension facade is removed and parsing resides in the internal
+`ZmqSharp.Sockets.ZEndpointParser`.
+
 ### 5.3 Differentiation
 
 libzmq and NetMQ support `ipc` on Unix only. On Windows, ZmqSharp is likely

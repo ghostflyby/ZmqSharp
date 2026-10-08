@@ -120,3 +120,12 @@ Socket-Type compatibility is extended: `REQ <-> REP`.
   question; that is DEALER/ROUTER territory).
 - REP queue/channel surface (deferred; the typed callback is the primary
   shape per 0007 section 5).
+
+## Stage-one lifecycle follow-up (0029)
+
+0029 supersedes the request coordination/completion details above: REQ uses
+per-request outcome state and injected capabilities, faults malformed replies,
+and supports cancellation while sending or waiting for a reply. Cancellation
+and send failures retire the target; completion and slot release wait for the
+send to stop accessing the request buffer. No public return-type change is
+required. Direct core tests and TCP/IPC regression tests cover these paths.

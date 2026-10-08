@@ -40,8 +40,9 @@ the accepted socket's endpoint and applies the same rule.
 
 ## 3. Endpoint parsing
 
-`ZSocketExtensions.ParseEndpointAsync` now returns `EndPoint` and understands
-two schemes:
+The endpoint parser returns `EndPoint` and understands the following forms.
+Originally `ZSocketExtensions.ParseEndpointAsync`, it now resides in the internal
+`ZmqSharp.Sockets.ZEndpointParser` after the facade removal in 0029:
 
 - `tcp://host:port` - unchanged behavior (DNS resolution, literal addresses).
 - `ipc://path` - a `UnixDomainSocketEndPoint`. An absolute path keeps its

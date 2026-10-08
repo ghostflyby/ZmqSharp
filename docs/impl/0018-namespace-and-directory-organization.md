@@ -1,6 +1,6 @@
 # 0018 - Namespace and Directory Organization
 
-Status: draft
+Status: accepted
 Date: 2026-08-12
 
 Reorganizes the namespace and directory layout so that the public API is
@@ -48,8 +48,7 @@ A single `using ZmqSharp;` covers all basic usage:
   constructed, 0022/0023, each with its own public send surface per 0024),
   `IZSocket` (endpoints only), `IPatternSink`.
 - Base classes: `ZSocketBase`, `ZQueueSocketBase` (the default queue surface,
-  0023), `ZAsyncState` (public because public socket types derive from it; its
-  members are protected).
+  0023). Lifecycle infrastructure is owned by `ZSocketBase` (0029).
 - Concrete sockets: `ZPairSocket`, `ZDealerSocket`, `ZReqSocket`, `ZRepSocket`,
   `ZPushSocket`, `ZPullSocket`, `ZRouterSocket`, `ZPubSocket`, `ZSubSocket`,
   `ZXPubSocket`, `ZXSubSocket`.
@@ -58,13 +57,13 @@ A single `using ZmqSharp;` covers all basic usage:
 - Message model: `ZMessage`, `ZFrame`, `ZSegment`, `ZSegments`,
   `ZSingleMessage`, `ZMultiMessage` (with their nested enumerators).
 - Configuration: `ZSocketOptions` (one bag per socket, including queue tuning
-  and `ZReceiveSurface`, 0023), `ZSecurityOptions`, `ZSocketExtensions`.
+  and `ZReceiveSurface`, 0023), `ZSecurityOptions`.
 - Receive/queue tuning: `ZReceiveMode`, `ZReceiveAllocation`, `ZReceiveContext`,
   `IZReceivePolicy`, `ZDecide`, `ZDelegateReceivePolicy`, `ZReceiveOptions`,
   `ZReceiveRejectionReason`, `ZReceiveRejection`, `IZQueueFactory`,
   `ZQueueFactory`. These live with the configuration they feed
   (`ZSocketOptions`), so one import covers all configuration scenarios.
-- Exceptions: `ZeroMqProtocolException`.
+- Exceptions: `ZeroMqProtocolException`, `ZReceiveRejectedException` (0029).
 
 ### Sub-namespaces - domain-specific feature areas
 
@@ -100,11 +99,12 @@ A single `using ZmqSharp;` covers all basic usage:
 - `ZmqSharp.Sockets` (internal): the pattern-assembly helpers
   `ZDelimiterFraming` (REQ/REP delimiter wire format), `ZTopicFilter` /
   `ZTopicFilterPolicy` (SUB subscriptions), and the REQ/REP consume cores
-  `ZReqCore` / `ZRepCore`.
+  `ZReqCore` / `ZRepCore`, `ZEndpointRegistration`, `ZEndpointParser`, and
+  `ZReceiveGuard`.
 - `ZmqSharp.Zmtp` (internal): `ZmtpHandshake`, `ZmtpGreeting`.
 - `ZmqSharp.Transports` (internal): `ZConnection`.
 - Internal helpers mixed into files with public types (`ZSequence`,
-  `ZBoundedQueueFactory`, `ZReceiveGuard`, `ZFrameAllocator`, ...) share the
+  `ZBoundedQueueFactory`, `ZFrameAllocator`, ...) share the
   top-level namespace with those types - "generally match" the directory.
 
 ## 4. Directory layout
@@ -145,3 +145,12 @@ place.
   choose their own namespaces when they land. The dispatch/type/inbound
   split is resolved (section 5): the seams landed in `ZmqSharp.Patterns`.
 - No docs/ reorganization (0006 section 7.1 remains separate).
+
+## 7. Implementation follow-up (0029)
+
+The namespace model is implemented and accepted. The public receive-rejection
+payload and exception now live in the root namespace. `ZAsyncState` was folded
+into `ZSocketBase`; it is no longer a public base type. Basic usage requires
+only `using ZmqSharp;`; advanced composition and wire callbacks may reference
+existing domain namespaces. This does not require moving domain-specific types
+into the root namespace.

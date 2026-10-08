@@ -10,7 +10,7 @@ namespace ZmqSharp.Security;
 /// parser and the socket layer are unchanged because they only ever see the
 /// session. <see cref="PeerReadyBody"/> is an owned copy because the context's
 /// scratch is reused by the next read; the value is small and cold, so the
-/// copy stays owned rather than pooled (0023 D6).
+/// copy stays owned rather than pooled (0027 D6).
 /// </summary>
 public readonly struct ZMechanismResult(IZConnection sessionConnection, ReadOnlyMemory<byte> peerReadyBody)
 {

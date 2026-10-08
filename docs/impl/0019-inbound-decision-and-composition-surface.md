@@ -59,7 +59,7 @@ protected constructor is therefore the whole composition surface, and it must
 exactly contain what a developer decides:
 
 ```csharp
-public abstract class ZSocketBase : ZAsyncState, IZSocket
+public abstract class ZSocketBase : IZSocket
 {
     protected ZSocketBase(
         ZSocketOptions options,
@@ -176,7 +176,7 @@ per-type reason.
 | DEALER | `ZRoundRobinDispatch` | deliver passthrough | RR cursor |
 | PUSH | `ZRoundRobinDispatch` | deliver passthrough | RR cursor |
 | PULL | deny ("receive-only") | deliver passthrough | - |
-| REQ | `ZCurrentPeerDispatch` (routes current) over `ZRoundRobinDispatch` (selects next) | consume (current-peer check, delimiter strip, reply completion) | current, pending gate |
+| REQ | deny generic sends; core selects next via `ZRoundRobinDispatch` and sends directly (0029) | consume (current-peer check, delimiter strip, reply completion) | per-request outcome and send lifetime |
 | REP | deny ("replies through SendReplyAsync") | consume (slot, delimiter strip, request handler) | request slot |
 | ROUTER | `ZIdentityDispatch` (identity table) | deliver with identity prefix | identity table |
 | PUB | `ZBroadcastDispatch` | deliver passthrough | - |
@@ -187,8 +187,8 @@ per-type reason.
 ROUTER and REQ demonstrate the shape fully: ROUTER's identity routing
 *and* its inbound identity prefix both live in `ZIdentityDispatch` (the
 prefix is assigned by the policy the socket delegates to); REQ's inbound
-consume and outbound current-routing share the same in-flight gate through
-`ZCurrentPeerDispatch`.
+consume and directed sending share per-request state through injected capabilities
+(0029). The three seams are composition choices, not independent state machines.
 
 ## 6. Building blocks
 
@@ -349,3 +349,12 @@ All three work items landed. Deviations from the draft, recorded honestly:
 - The base constructor is `protected` and is the third-party composition
   face; custom types validate with in-library pair tests only (0015
   section 2.3), since libzmq/NetMQ hard-code their socket types.
+
+## 12. Lifecycle follow-up (0029)
+
+`ZSocketBase` owns lifecycle infrastructure directly; `ZAsyncState` is removed.
+REQ now receives peer selection, borrowing send, and retirement capabilities and
+is retained explicitly by its composition root. Cancellation and parsing failures
+have one request outcome and respect send-buffer lifetime. REP and XPUB remain
+stateful coordinators; removing their socket attachments is stage-three work in
+0028, not part of this behavioral change.

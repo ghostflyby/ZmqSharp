@@ -30,7 +30,7 @@ await server.BindAsync("tcp://127.0.0.1:5555");
 await client.ConnectAsync("tcp://127.0.0.1:5555");
 
 await client.SendAsync("hello"u8.ToArray());
-var message = await server.Messages.ReadAsync();
+using var message = await server.Messages.ReadAsync();
 
 // PAIR over ipc (Unix domain socket): an absolute path, a relative one
 // resolved against the system temp directory, or - on Linux - an abstract
@@ -46,12 +46,32 @@ REQ/REP (operation-oriented):
 
 ```csharp
 await using var rep = new ZRepSocket();
+await rep.BindAsync("tcp://127.0.0.1:5556");
 rep.BindRequestHandler((context, token) =>
     rep.SendReplyAsync(context, ZMessage.FromOwned("pong"u8.ToArray()), token));
 
 await using var req = new ZReqSocket();
-var reply = await req.RequestAsync(ZMessage.FromOwned("ping"u8.ToArray()));
+await req.ConnectAsync("tcp://127.0.0.1:5556");
+using var reply = await req.RequestAsync(ZMessage.FromOwned("ping"u8.ToArray()));
 ```
+
+Endpoint shutdown can be awaited with the same registered string:
+
+```csharp
+await client.DisconnectAsync("tcp://127.0.0.1:5555", cancellationToken);
+await server.UnbindAsync("tcp://127.0.0.1:5555", cancellationToken);
+```
+
+These operations complete after cleanup. Unbind preserves accepted peers;
+cancellation after shutdown begins cancels only the caller's wait. Generic
+`Disconnect`/`Unbind` initiate shutdown without waiting. Request cancellation
+retires the selected peer and finishes after the send stops using borrowed data.
+Subscription prefixes are copied; changing the original array does not change
+filtering or reconnect subscriptions. Receive rejections can be inspected as
+`ZReceiveRejectedException` in `PeerEnded`.
+
+See [the stage-one migration guide](docs/migration-stage-one.md) for public API
+changes and custom CURVE backend requirements.
 
 ## Design
 

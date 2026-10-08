@@ -37,12 +37,23 @@ public interface IZSocket : IAsyncDisposable
         where TTransport : IZTransport<TTransport, TEndpoint>;
     Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
+    void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
-    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
+    void Disconnect<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
+    ValueTask UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+    ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+    Task BindAsync(string endpoint, CancellationToken token = default);
+    Task ConnectAsync(string endpoint, CancellationToken token = default);
+    ValueTask UnbindAsync(string endpoint, CancellationToken token = default);
+    ValueTask DisconnectAsync(string endpoint, CancellationToken token = default);
 }
 ```
+
+Endpoint shutdown semantics and cancellation are specified by 0029: synchronous
+methods initiate shutdown; async methods wait for cleanup.
 
 - `IZSocket` is the small common contract (endpoints only, 0024) shared by
   every socket surface; there is no send or receive contract - each socket
@@ -52,8 +63,8 @@ public interface IZSocket : IAsyncDisposable
   multipart message arrives as consecutive frames until `More` is false.
   Returning false pauses the receive pump; `PeerEnded` reports connection
   teardown; `ResumePaused` resumes paused pumps.
-- Send is direct and synchronous-with-ownership: the socket type's
-  `RouteOutbound` selects the target connection(s) and the message is disposed
+- Send is asynchronous with ownership: the socket's
+  dispatch policy selects the target connection(s) and the message is disposed
   after the last peer send. The public send surface is decided per type
   (0024): send-capable types expose `SendAsync`, protocol types expose their
   operation surfaces, receive-only types expose none.
@@ -65,8 +76,8 @@ public interface IZSocket : IAsyncDisposable
 ```csharp
 public abstract class ZQueueSocketBase : ZSocketBase
 {
-    public ChannelReader<IZMessage> Messages { get; }       // aggregate reader over peer queues
-    public ChannelWriter<IZMessage>? Outbound { get; }      // optional send channel
+    public ChannelReader<ZMessage> Messages { get; }       // aggregate reader over peer queues
+    public ChannelWriter<ZMessage>? Outbound { get; }      // optional send channel
     // Send / Bind / Connect / Close from ZSocketBase.
 }
 

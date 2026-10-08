@@ -1,42 +1,15 @@
 using System.Net;
 using System.Net.Sockets;
-using ZmqSharp.Transports;
 
-namespace ZmqSharp;
+namespace ZmqSharp.Sockets;
 
 /// <summary>
-/// String-endpoint facade over the generic transport core: parses
-/// "tcp://host:port" and "ipc://path" and dispatches to the matching generic
-/// transport (0015 section 5.2).
+/// Parses the string endpoints used by the socket's transport facade
+/// (0015 section 5.2, 0029).
 /// </summary>
-public static class ZSocketExtensions
+internal static class ZEndpointParser
 {
-    extension(IZSocket socket)
-    {
-        public Task ConnectAsync(string endpoint, CancellationToken token = default)
-        {
-            return ConnectAsyncCore(socket, endpoint, token);
-        }
-
-        public Task BindAsync(string endpoint, CancellationToken token = default)
-        {
-            return BindAsyncCore(socket, endpoint, token);
-        }
-    }
-
-    private static async Task ConnectAsyncCore(IZSocket socket, string endpoint, CancellationToken token)
-    {
-        var parsed = await ParseEndpointAsync(endpoint, token);
-        await socket.ConnectAsync<EndPoint, SocketTransport>(parsed, token);
-    }
-
-    private static async Task BindAsyncCore(IZSocket socket, string endpoint, CancellationToken token)
-    {
-        var parsed = await ParseEndpointAsync(endpoint, token);
-        await socket.BindAsync<EndPoint, SocketTransport>(parsed, token);
-    }
-
-    private static async Task<EndPoint> ParseEndpointAsync(string endpoint, CancellationToken token)
+    internal static async Task<EndPoint> ParseEndpointAsync(string endpoint, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
         var uri = new Uri(endpoint);

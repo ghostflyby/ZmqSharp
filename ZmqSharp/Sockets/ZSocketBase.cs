@@ -1,8 +1,10 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using ZmqSharp.Patterns;
 using ZmqSharp.Security;
+using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -13,14 +15,65 @@ namespace ZmqSharp;
 /// Pattern-agnostic transport core (0007 section 2.1): calls the transport,
 /// stores connections, drives the handshake externally, aggregates messages
 /// for a bound <see cref="IPatternSink"/>, and delivers borrowed frames to the
-/// raw OnFrame callback. Behavior is composed as three independent seams
+/// raw OnFrame callback. Behavior has three composition seams
 /// (0015 section 2.1 / 0019): outbound selection (<see cref="IZDispatchPolicy"/>),
 /// inbound processing (<see cref="IZInboundPolicy"/>), and the advertised
 /// socket identity (<see cref="ZSocketType"/>); socket types are thin
 /// composition roots over the protected constructor.
 /// </summary>
-public abstract class ZSocketBase : ZAsyncState, IZSocket
+public abstract class ZSocketBase : IZSocket
 {
+    protected readonly MemoryPool<byte> Pool;
+    protected readonly Lock StateLock = new();
+    protected readonly List<Task> BackgroundTasks = [];
+    protected readonly CancellationTokenSource Cts = new();
+    protected int Closed;
+    private bool lifecycleDisposed;
+
+    protected void TrackBackground(Task task)
+    {
+        lock (StateLock)
+        {
+            BackgroundTasks.Add(task);
+        }
+    }
+
+    protected async Task AwaitBackgroundAsync()
+    {
+        Task[] tasks;
+        lock (StateLock)
+        {
+            tasks = [.. BackgroundTasks];
+        }
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ZeroMqProtocolException)
+        {
+        }
+        finally
+        {
+            lock (StateLock)
+            {
+                if (!lifecycleDisposed && Volatile.Read(ref Closed) == 1)
+                {
+                    lifecycleDisposed = true;
+                    Cts.Dispose();
+                }
+            }
+        }
+    }
+
+    protected void ThrowIfClosed()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref Closed) == 1, this);
+    }
+
     /// <summary>
     /// Copy-on-write routable-peer snapshot: rebuilt only when a peer is
     /// added or removed, read as a single volatile load on the hot path, so
@@ -37,11 +90,10 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     private readonly Dictionary<IZConnection, IZConnection> sessionConnections = [];
 
     /// <summary>Per-connection endpoint, used only by the rare DisconnectAsync lookup.</summary>
-    private readonly Dictionary<IZConnection, object?> endpoints = [];
+    private readonly Dictionary<IZConnection, ZEndpointRegistration> connections = [];
 
-    private readonly List<(IZTransport Listener, object? Endpoint)> listeners = [];
+    private readonly List<ZEndpointRegistration> listeners = [];
     private readonly Dictionary<IZConnection, TaskCompletionSource> establishedGates = [];
-    private readonly Dictionary<IZConnection, CancellationTokenSource> attemptTokens = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
 
     /// <summary>Per-peer frame accumulators for message aggregation (0007 2.3).</summary>
@@ -86,9 +138,9 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     /// </summary>
     protected ZSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
         IZInboundPolicy? inbound = null)
-        : base(options.Pool)
     {
         ArgumentNullException.ThrowIfNull(options);
+        Pool = options.Pool;
         ArgumentNullException.ThrowIfNull(dispatch);
         ArgumentNullException.ThrowIfNull(type);
         this.dispatch = dispatch;
@@ -104,7 +156,7 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
                 "queue configuration (ReceiveQueueFactory/ReceivePolicy/limits) requires the queue surface; this socket never composes a queue");
         // The local READY body depends only on the socket type and the
         // configured identity; building it once per socket instead of once
-        // per connection keeps the handshake cold path allocation-free (0023
+        // per connection keeps the handshake cold path allocation-free (0027
         // D6). The Identity property is attached only by types that advertise
         // one (REQ/DEALER/ROUTER, 0025) - the libzmq add_basic_properties gate.
         localReadyBody = ZmtpCommands.BuildReady(
@@ -279,70 +331,151 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         MaterializerRejected?.Invoke();
     }
 
-    public async Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+    public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
+        => ConnectCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
+
+    public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>
+        => BindCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
+
+    public async Task ConnectAsync(string endpoint, CancellationToken token = default)
+    {
+        var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
+        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+    }
+
+    public async Task BindAsync(string endpoint, CancellationToken token = default)
+    {
+        var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
+        await BindCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+    }
+
+    private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
+        CancellationToken token) where TTransport : IZTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
+        token.ThrowIfCancellationRequested();
         var connection = await TTransport.ConnectAsync(endpoint, new ZTransportOptions(), token);
-        var established = AddConnection(connection, endpoint, ZMechanismRole.Client, token);
+        var established = AddConnection(connection, endpoint, ZMechanismRole.Client, token, typeof(TTransport), address);
         await established.Task.WaitAsync(token);
     }
 
-    public async Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+    private async Task BindCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
+        CancellationToken token) where TTransport : IZTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
+        token.ThrowIfCancellationRequested();
         var listener = await TTransport.BindAsync(endpoint, new ZTransportOptions(), token);
+        ZEndpointRegistration? registration = null;
         listener.OnAccept += AcceptConnection;
         lock (StateLock)
         {
-            ThrowIfClosed();
-            listeners.Add((listener, endpoint));
-        }
-
-        TrackBackground(listener.StartAsync(Cts.Token).AsTask());
-    }
-
-    public Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-    {
-        IZTransport? listener = null;
-        lock (StateLock)
-        {
-            var index = listeners.FindIndex(entry => Equals(entry.Endpoint, endpoint));
-            if (index >= 0)
+            if (Volatile.Read(ref Closed) == 0 && !token.IsCancellationRequested)
             {
-                listener = listeners[index].Listener;
-                listeners.RemoveAt(index);
+                registration = new ZEndpointRegistration(listener, endpoint, typeof(TTransport), address, Cts.Token);
+                listeners.Add(registration);
+                TrackBackground(registration.Completion.Task);
             }
         }
-
-        listener?.Dispose();
-        return Task.CompletedTask;
+        if (registration is null)
+        {
+            listener.Dispose();
+            token.ThrowIfCancellationRequested();
+            ThrowIfClosed();
+            return;
+        }
+        _ = RunListenerAsync(listener, registration);
     }
 
-    public Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+    private async Task RunListenerAsync(IZTransport listener, ZEndpointRegistration registration)
     {
-        List<IZConnection> matches;
+        Exception? failure = null;
+        try
+        {
+            await listener.StartAsync(registration.Token);
+        }
+        catch (OperationCanceledException) when (registration.Token.IsCancellationRequested) { }
+        catch (ObjectDisposedException) when (registration.Token.IsCancellationRequested) { }
+        catch (SocketException) when (registration.Token.IsCancellationRequested) { }
+        catch (Exception ex) { failure = ex; }
+        finally
+        {
+            try { await registration.FinishAsync(); }
+            catch (Exception ex) { failure ??= ex; }
+            lock (StateLock)
+            {
+                registration.Complete(failure);
+                listeners.Remove(registration);
+            }
+        }
+    }
+
+    /// <summary>Requests listener shutdown without waiting for the accept loop.</summary>
+    public void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
+        where TTransport : IZTransport<TTransport, TEndpoint>
+        => RequestEndpointStop(endpoint, typeof(TTransport), null, true);
+
+    /// <summary>Requests peer shutdown without waiting for receive callbacks or cleanup.</summary>
+    public void Disconnect<TEndpoint, TTransport>(TEndpoint endpoint)
+        where TTransport : IZTransport<TTransport, TEndpoint>
+        => RequestEndpointStop(endpoint, typeof(TTransport), null, false);
+
+    /// <summary>Stops matching listeners and waits for cleanup. Existing accepted peers remain connected.</summary>
+    public ValueTask UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>
+        => StopEndpointAsync(endpoint, typeof(TTransport), null, true, token);
+
+    /// <summary>Stops matching peers and waits for cleanup. Do not await this from a targeted peer's callback.</summary>
+    public ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>
+        => StopEndpointAsync(endpoint, typeof(TTransport), null, false, token);
+
+    public ValueTask UnbindAsync(string endpoint, CancellationToken token = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, true, token);
+    }
+
+    public ValueTask DisconnectAsync(string endpoint, CancellationToken token = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, false, token);
+    }
+
+    private ZEndpointRegistration[] RequestEndpointStop(object? endpoint, Type transport, string? address, bool listening)
+    {
+        ZEndpointRegistration[] matches;
         lock (StateLock)
         {
-            matches = [];
-            foreach (var connection in peerSnapshot)
-                if (endpoints.TryGetValue(connection, out var peerEndpoint) && Equals(peerEndpoint, endpoint))
-                    matches.Add(connection);
-
-            foreach (var match in matches)
-                // Cancel the in-flight attempt first: disposing the transport
-                // stream does not reliably interrupt a pending read, which
-                // would leave the connection pump stuck and the peer routable.
-                if (attemptTokens.TryGetValue(match, out var attemptCts))
-                    attemptCts.Cancel();
+            var source = listening ? listeners : connections.Values.AsEnumerable();
+            matches = [.. source.Where(entry => entry.Transport == transport &&
+                (address is null ? Equals(entry.Endpoint, endpoint) : entry.Address == address))];
+            if (!listening)
+                foreach (var pair in connections)
+                    if (matches.Contains(pair.Value)) PublishRemove(pair.Key);
         }
+        foreach (var match in matches) match.RequestStop();
+        return matches;
+    }
 
-        foreach (var match in matches) match.Dispose();
+    private async ValueTask StopEndpointAsync(object? endpoint, Type transport, string? address, bool listening,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var matches = RequestEndpointStop(endpoint, transport, address, listening);
+        await Task.WhenAll(matches.Select(entry => entry.Completion.Task)).WaitAsync(token);
+    }
 
-        return Task.CompletedTask;
+    internal void RetirePeer(IZConnection peer)
+    {
+        ZEndpointRegistration? registration;
+        lock (StateLock)
+        {
+            connections.TryGetValue(peer, out registration);
+            PublishRemove(peer);
+        }
+        registration?.RequestStop();
     }
 
     /// <summary>
@@ -373,16 +506,12 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     protected async Task StopCoreAsync()
     {
         await Cts.CancelAsync();
-        List<IZTransport> listenerSnapshot;
+        ZEndpointRegistration[] registrations;
         lock (StateLock)
         {
-            listenerSnapshot = [.. listeners.Select(entry => entry.Listener)];
-            listeners.Clear();
+            registrations = [.. listeners, .. connections.Values];
         }
-
-        foreach (var listener in listenerSnapshot) listener.Dispose();
-
-        Cts.Dispose();
+        foreach (var registration in registrations) registration.RequestStop();
     }
 
     /// <summary>
@@ -469,7 +598,15 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         }
     }
 
-    private async ValueTask SendToPeerAsync(IZConnection connection, ZMessage message, CancellationToken token)
+    /// <summary>Borrows a framed request until the write finishes; the request core owns disposal.</summary>
+    internal ValueTask SendRequestToAsync(IZConnection peer, ZMessage message, CancellationToken token)
+    {
+        ThrowIfClosed();
+        return SendToPeerAsync(peer, message, token, false);
+    }
+
+    private async ValueTask SendToPeerAsync(IZConnection connection, ZMessage message, CancellationToken token,
+        bool suppressRetirement = true)
     {
         await WaitUntilEstablishedAsync(connection, token);
 
@@ -488,7 +625,7 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         {
             await peer.SendAsync(message, token);
         }
-        catch (Exception ex) when (ex is ObjectDisposedException or IOException or SocketException)
+        catch (Exception ex) when (suppressRetirement && ex is (ObjectDisposedException or IOException or SocketException))
         {
             // The peer's connection retired between routing and the write
             // (or mid-write); a send to a dying peer is dropped, never a
@@ -519,59 +656,68 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     }
 
     private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint,
-        ZMechanismRole role = ZMechanismRole.Client, CancellationToken token = default)
+        ZMechanismRole role = ZMechanismRole.Client, CancellationToken token = default,
+        Type? transport = null, string? address = null)
     {
         ReceiveMaterializer? materializer = null;
         ZFrameAllocator? allocator = null;
         var established = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ZEndpointRegistration? registration = null;
+        Exception? setupFailure = null;
         lock (StateLock)
         {
-            if (Volatile.Read(ref Closed) == 1)
+            // Register cancellation and completion before publishing a routable peer.
+            // Accepted peers may be rejected while the socket is closing or its
+            // incomplete-handshake budget is exhausted; cleanup runs outside the lock.
+            if (Volatile.Read(ref Closed) == 0 &&
+                (role == ZMechanismRole.Client || maxIncompleteHandshakes <= 0 || incompleteHandshakes < maxIncompleteHandshakes))
             {
-                // The socket closed while this connection was being set up;
-                // report cancellation instead of success so ConnectAsync never
-                // completes as established. Accepted peers are dropped silently.
-                connection.Dispose();
-                established.TrySetCanceled();
-                return established;
+                if (receivePolicy is { } policy)
+                {
+                    materializer = new ReceiveMaterializer(
+                        Pool, policy, maxFrameLength, maxMessageLength, maxFramesPerMessage, OnMaterializerRejected);
+                    allocator = materializer.CreateAllocator();
+                }
+                registration = new ZEndpointRegistration(connection, endpoint, transport, address, Cts.Token, token);
+                incompleteHandshakes++;
+                establishedGates[connection] = established;
+                connections.Add(connection, registration);
+                TrackBackground(registration.Completion.Task);
+                PublishAdd(connection);
+                try { peerConnected?.Invoke(connection); }
+                catch (Exception ex) { setupFailure = ex; }
             }
-
-            if (receivePolicy is { } policy)
-            {
-                materializer = new ReceiveMaterializer(
-                    Pool, policy, maxFrameLength, maxMessageLength, maxFramesPerMessage, OnMaterializerRejected);
-                allocator = materializer.CreateAllocator();
-            }
-
-            // Inbound (accepted) connections are the uncontrolled surface: cap
-            // the number of incomplete handshakes so a slow-connecting flood
-            // cannot exhaust resources (0006 3.2). Outbound ConnectAsync is
-            // caller-initiated and not gated.
-            if (endpoint is null && maxIncompleteHandshakes > 0 && incompleteHandshakes >= maxIncompleteHandshakes)
-            {
-                connection.Dispose();
-                established.TrySetCanceled();
-                return established;
-            }
-
-            incompleteHandshakes++;
-            establishedGates[connection] = established;
-            // Register before the pump starts. Sends block on the establishment
-            // gate until the handshake completes, and DisconnectAsync must
-            // always be able to find the peer to cancel the in-flight attempt.
-            PublishAdd(connection, endpoint);
-            peerConnected?.Invoke(connection);
         }
-
-        var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(Cts.Token, token);
-        lock (StateLock)
+        if (registration is null)
         {
-            attemptTokens[connection] = attemptCts;
+            connection.Dispose();
+            established.TrySetCanceled();
+            return established;
         }
-
-        var pump = RunConnectionAsync(connection, established, role, allocator, materializer, attemptCts);
-        TrackBackground(pump);
+        _ = RunRegisteredConnectionAsync(connection, established, role, allocator, materializer, registration, setupFailure);
         return established;
+    }
+
+    private async Task RunRegisteredConnectionAsync(IZConnection connection, TaskCompletionSource established,
+        ZMechanismRole role, ZFrameAllocator? allocator, ReceiveMaterializer? materializer,
+        ZEndpointRegistration registration, Exception? setupFailure)
+    {
+        Exception? failure = null;
+        try
+        {
+            await RunConnectionAsync(connection, established, role, allocator, materializer, registration.Token, setupFailure);
+        }
+        catch (Exception ex) { failure = ex; }
+        finally
+        {
+            try { await registration.FinishAsync(); }
+            catch (Exception ex) { failure ??= ex; }
+            lock (StateLock)
+            {
+                registration.Complete(failure);
+                connections.Remove(connection);
+            }
+        }
     }
 
     private async Task RunConnectionAsync(
@@ -580,13 +726,13 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         ZMechanismRole role,
         ZFrameAllocator? allocator,
         ReceiveMaterializer? materializer,
-        CancellationTokenSource attemptCts)
+        CancellationToken attemptToken, Exception? setupFailure)
     {
         Exception? failure = null;
-        var attemptToken = attemptCts.Token;
         ZmtpParser? parser = null;
         try
         {
+            if (setupFailure is { } error) throw error;
             // The handshake writes the greeting, matches the mechanism, and
             // runs its command sequence; the socket-type predicate then
             // validates the peer's READY (0015 section 2.4). The parser is
@@ -629,7 +775,7 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
             var trafficHandler = NeedsAggregation
                 ? MessageSinkHandler(connection, parser, materializer)
                 : BorrowedSink(parser);
-            connection.SetFrameHandler((frame, _) => trafficHandler(frame, Cts.Token));
+            connection.SetFrameHandler((frame, _) => trafficHandler(frame, attemptToken));
             lock (StateLock)
             {
                 sessionConnections[connection] = result.Value.SessionConnection;
@@ -675,7 +821,6 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
             {
                 PublishRemove(connection);
                 establishedGates.Remove(connection);
-                attemptTokens.Remove(connection);
                 sessionConnections.Remove(connection);
                 incompleteHandshakes--;
                 if (accumulators.Remove(connection, out var accumulator))
@@ -693,8 +838,6 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
             finally
             {
                 parser?.Dispose();
-                connection.Dispose();
-                attemptCts.Dispose();
             }
         }
     }
@@ -720,16 +863,16 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
     /// </summary>
     private ZFrameHandlerAsync BorrowedSink(ZmtpParser parser)
     {
-        return (frame, _) =>
+        return (frame, token) =>
         {
-            var keepGoing = RaiseOnFrame(frame);
+            var keepGoing = RaiseOnFrame(frame, token);
             if (!keepGoing) paused.Enqueue(parser);
 
             return ValueTask.FromResult(keepGoing);
         };
     }
 
-    private bool RaiseOnFrame(ZFrame frame)
+    private bool RaiseOnFrame(ZFrame frame, CancellationToken token)
     {
         ZFrameHandler? handler;
         lock (StateLock)
@@ -740,7 +883,7 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         if (handler is null) return true;
 
         var keepGoing = true;
-        foreach (var item in handler.GetInvocationList()) keepGoing &= ((ZFrameHandler)item)(frame, Cts.Token);
+        foreach (var item in handler.GetInvocationList()) keepGoing &= ((ZFrameHandler)item)(frame, token);
 
         return keepGoing;
     }
@@ -768,7 +911,7 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
             accumulators[connection] = accumulator;
         }
 
-        return (frame, _) => OnMessageSinkFrameAsync(connection, accumulator, frame, Cts.Token);
+        return (frame, token) => OnMessageSinkFrameAsync(connection, accumulator, frame, token);
     }
 
     private async ValueTask<bool> OnMessageSinkFrameAsync(
@@ -950,16 +1093,15 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
 
     /// <summary>
     /// Publishes a peer into the routable snapshot; must be called while
-    /// holding <see cref="ZAsyncState.StateLock"/>. Copy-on-write: the read
+    /// holding <see cref="StateLock"/>. Copy-on-write: the read
     /// path is a single volatile load (0006 3.6).
     /// </summary>
-    private void PublishAdd(IZConnection connection, object? endpoint)
+    private void PublishAdd(IZConnection connection)
     {
         var updated = new IZConnection[peerSnapshot.Length + 1];
         peerSnapshot.CopyTo(updated, 0);
         updated[^1] = connection;
         peerSnapshot = updated;
-        endpoints[connection] = endpoint;
     }
 
     private void PublishRemove(IZConnection connection)
@@ -972,6 +1114,5 @@ public abstract class ZSocketBase : ZAsyncState, IZSocket
         current.AsSpan(0, index).CopyTo(updated);
         current.AsSpan(index + 1).CopyTo(updated.AsSpan(index));
         peerSnapshot = updated;
-        endpoints.Remove(connection);
     }
 }

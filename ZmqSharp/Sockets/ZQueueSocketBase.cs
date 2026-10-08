@@ -181,7 +181,6 @@ public abstract class ZQueueSocketBase : ZSocketBase
     {
         if (Interlocked.Exchange(ref Closed, 1) != 0) return;
 
-        PeerEnded -= OnPeerEnded;
         sendChannel?.Writer.TryComplete();
 
         await StopCoreAsync();
@@ -207,10 +206,10 @@ public abstract class ZQueueSocketBase : ZSocketBase
 
         await AwaitBackgroundAsync();
 
-        // All pumps have exited and no writer can enqueue. The PeerEnded
-        // unsubscribe above means OnPeerEnded no longer runs during disposal,
-        // so reclaiming here is the only path for messages that lose their
-        // consumer on socket disposal (0006 3.5).
+        // Keep per-peer reclamation subscribed until the pumps have exited:
+        // an overlapping DisconnectAsync must also wait for queue cleanup.
+        PeerEnded -= OnPeerEnded;
+        // All pumps have exited; reclaim any remaining state defensively.
         foreach (var state in peerSnapshot) Reclaim(state);
 
         if (sendChannel is { } outbound)
@@ -356,7 +355,7 @@ public abstract class ZQueueSocketBase : ZSocketBase
 
     /// <summary>
     /// Publishes a peer into the aggregate-reader snapshot; must be called
-    /// while holding <see cref="ZAsyncState.StateLock"/>. Copy-on-write: the
+    /// while holding <see cref="ZSocketBase.StateLock"/>. Copy-on-write: the
     /// read path is a single volatile load (0006 3.6).
     /// </summary>
     private void PublishAdd(PeerState state)

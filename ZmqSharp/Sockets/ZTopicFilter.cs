@@ -15,9 +15,11 @@ internal sealed class ZTopicFilter
     private readonly Lock filterLock = new();
     private readonly List<byte[]> subscriptions = [];
 
-    public void Add(byte[] topic)
+    public byte[] Add(ReadOnlySpan<byte> topic)
     {
-        lock (filterLock) subscriptions.Add(topic);
+        var copy = topic.ToArray();
+        lock (filterLock) subscriptions.Add(copy);
+        return copy;
     }
 
     public void RemoveAll(ReadOnlySpan<byte> topic)

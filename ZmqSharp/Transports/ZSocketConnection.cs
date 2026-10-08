@@ -117,7 +117,8 @@ internal sealed class ZSocketConnection : IZConnection
         // Disposing the socket aborts pending async receives/sends, so a
         // pump parked on ReadAsync is released (the DisconnectAsync scenario
         // that a stream dispose could not reliably interrupt, 0006 3.6).
-        writeGate.Dispose();
+        // An in-flight async write still releases the managed gate in its finally.
+        // Closing the transport interrupts I/O; leave the gate alive for that release.
         socket.Dispose();
     }
 
