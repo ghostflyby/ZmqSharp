@@ -4,7 +4,14 @@ using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Sockets;
 
-internal enum PeerPhase { Registered, Handshaking, Established, Stopping, Closed }
+internal enum PeerPhase
+{
+    Registered,
+    Handshaking,
+    Established,
+    Stopping,
+    Closed
+}
 
 /// <summary>The single lifecycle record and resource owner for a peer.</summary>
 internal sealed class PeerRecord(IZConnection connection, ZEndpointRegistration registration, bool accepted)

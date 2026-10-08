@@ -18,16 +18,19 @@ internal sealed class RecordingByteConnection(byte[]? feed = null, int capacity 
         position += length;
         return ValueTask.FromResult(length);
     }
+
     public async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         if (yieldWrites) await Task.Yield();
         token.ThrowIfCancellationRequested();
         written.AddRange(bytes.Span);
     }
+
     public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
+
     public void Abort() { }
     public void Dispose() { }
 }

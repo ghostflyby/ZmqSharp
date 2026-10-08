@@ -4,12 +4,8 @@ namespace ZmqSharp;
 public class ZeroMqProtocolException : InvalidOperationException
 {
     public ZeroMqProtocolException(string message)
-        : base(message)
-    {
-    }
+        : base(message) { }
 
     public ZeroMqProtocolException(string message, Exception innerException)
-        : base(message, innerException)
-    {
-    }
+        : base(message, innerException) { }
 }

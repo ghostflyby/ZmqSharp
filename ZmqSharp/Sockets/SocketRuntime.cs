@@ -44,12 +44,8 @@ internal sealed class SocketRuntime : IZSocket
         {
             await Task.WhenAll(tasks);
         }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ZeroMqProtocolException)
-        {
-        }
+        catch (OperationCanceledException) { }
+        catch (ZeroMqProtocolException) { }
         finally
         {
             lock (StateLock)
@@ -158,6 +154,7 @@ internal sealed class SocketRuntime : IZSocket
     internal event Action<ZPeer, ReadOnlyMemory<byte>?>? PeerEstablished;
     internal event Action<ZPeer, Exception?>? PeerRemoved;
     internal ReceiveQueueSurface? QueueSurface { get; }
+
     internal void ConfigureInbound(IZInboundPolicy policy)
     {
         if (peers.Count != 0) throw new InvalidOperationException("configure the coordinator before connections");
@@ -295,6 +292,7 @@ internal sealed class SocketRuntime : IZSocket
                 TrackBackground(registration.Completion.Task);
             }
         }
+
         if (registration is null)
         {
             listener.Dispose();
@@ -302,6 +300,7 @@ internal sealed class SocketRuntime : IZSocket
             ThrowIfClosed();
             return;
         }
+
         _ = RunListenerAsync(listener, registration);
     }
 
@@ -315,11 +314,21 @@ internal sealed class SocketRuntime : IZSocket
         catch (OperationCanceledException) when (registration.Token.IsCancellationRequested) { }
         catch (ObjectDisposedException) when (registration.Token.IsCancellationRequested) { }
         catch (SocketException) when (registration.Token.IsCancellationRequested) { }
-        catch (Exception ex) { failure = ex; }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
         finally
         {
-            try { await registration.FinishAsync(); }
-            catch (Exception ex) { failure ??= ex; }
+            try
+            {
+                await registration.FinishAsync();
+            }
+            catch (Exception ex)
+            {
+                failure ??= ex;
+            }
+
             lock (StateLock)
             {
                 registration.Complete(failure);
@@ -366,12 +375,17 @@ internal sealed class SocketRuntime : IZSocket
         lock (StateLock)
         {
             var source = listening ? listeners : peers.Values.Where(record => !record.Accepted).Select(record => record.Registration);
-            matches = [.. source.Where(entry => entry.Transport == transport &&
-                (address is null ? Equals(entry.Endpoint, endpoint) : entry.Address == address))];
+            matches =
+            [
+                .. source.Where(entry => entry.Transport == transport &&
+                                         (address is null ? Equals(entry.Endpoint, endpoint) : entry.Address == address))
+            ];
             if (!listening)
                 foreach (var record in peers.Values)
-                    if (matches.Contains(record.Registration)) MarkStopping(record);
+                    if (matches.Contains(record.Registration))
+                        MarkStopping(record);
         }
+
         foreach (var match in matches) match.RequestStop();
         return matches;
     }
@@ -398,6 +412,7 @@ internal sealed class SocketRuntime : IZSocket
                 MarkStopping(record);
             }
         }
+
         record?.Registration.RequestStop();
     }
 
@@ -423,6 +438,7 @@ internal sealed class SocketRuntime : IZSocket
     /// cref="ZQueueSocketBase"/>.
     /// </summary>
     private TaskCompletionSource? disposed;
+
     public ValueTask DisposeAsync()
     {
         TaskCompletionSource completion;
@@ -432,6 +448,7 @@ internal sealed class SocketRuntime : IZSocket
             completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             disposed = completion;
         }
+
         _ = DisposeCoreAsync(completion);
         return new ValueTask(completion.Task);
     }
@@ -440,11 +457,25 @@ internal sealed class SocketRuntime : IZSocket
     {
         Exception? failure = null;
         QueueSurface?.Stop();
-        try { await StopAsync(); }
-        catch (Exception ex) { failure = ex; }
+        try
+        {
+            await StopAsync();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
         // Even a failing cancellation callback must not skip waiting for peer cleanup.
-        try { await AwaitBackgroundAsync(); }
-        catch (Exception ex) { failure ??= ex; }
+        try
+        {
+            await AwaitBackgroundAsync();
+        }
+        catch (Exception ex)
+        {
+            failure ??= ex;
+        }
+
         QueueSurface?.Complete();
         if (failure is { } error) completion.TrySetException(error);
         else completion.TrySetResult();
@@ -471,6 +502,7 @@ internal sealed class SocketRuntime : IZSocket
             foreach (var record in peers.Values) MarkStopping(record);
             registrations = [.. listeners, .. peers.Values.Select(record => record.Registration)];
         }
+
         foreach (var registration in registrations) registration.RequestStop();
         await Cts.CancelAsync();
     }
@@ -535,9 +567,14 @@ internal sealed class SocketRuntime : IZSocket
         {
             if (state is IZConnection connection) connection.Abort();
         }, record.Connection);
-        try { return await handshake.EstablishAsync(timeout.Token); }
+        try
+        {
+            return await handshake.EstablishAsync(timeout.Token);
+        }
         catch (OperationCanceledException) when (!record.Registration.Token.IsCancellationRequested)
-        { throw new TimeoutException("ZMTP handshake timed out"); }
+        {
+            throw new TimeoutException("ZMTP handshake timed out");
+        }
     }
 
     /// <summary>
@@ -552,8 +589,14 @@ internal sealed class SocketRuntime : IZSocket
 
     private async Task ObserveSendAsync(ZPeer peer, ZMessage message)
     {
-        try { await SendToAsync(peer, message, LifetimeToken); }
-        catch (Exception) { RetirePeer(peer); }
+        try
+        {
+            await SendToAsync(peer, message, LifetimeToken);
+        }
+        catch (Exception)
+        {
+            RetirePeer(peer);
+        }
     }
 
     internal ValueTask SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
@@ -582,9 +625,11 @@ internal sealed class SocketRuntime : IZSocket
                     if (suppressRetirement) return;
                     throw new IOException("peer retired before send");
                 }
+
                 record.ActiveSends++;
                 leased = true;
             }
+
             if (!record.Established.Task.IsCompletedSuccessfully)
                 await record.Established.Task.WaitAsync(token);
             if (record.Session is not { } session) throw new IOException("peer has no established session");
@@ -595,7 +640,10 @@ internal sealed class SocketRuntime : IZSocket
         finally
         {
             // Owned background sends release their message before teardown can dispose the session.
-            try { if (disposeMessage) message.Dispose(); }
+            try
+            {
+                if (disposeMessage) message.Dispose();
+            }
             finally
             {
                 if (leased && record is { } active)
@@ -650,6 +698,7 @@ internal sealed class SocketRuntime : IZSocket
                 PublishAdd(record.Peer);
             }
         }
+
         if (record is null)
         {
             connection.Dispose();
@@ -657,6 +706,7 @@ internal sealed class SocketRuntime : IZSocket
             rejected.TrySetCanceled();
             return rejected;
         }
+
         _ = RunConnectionAsync(record);
         return record.Established;
     }
@@ -674,6 +724,7 @@ internal sealed class SocketRuntime : IZSocket
                 if (record.Phase >= PeerPhase.Stopping) throw new OperationCanceledException(token);
                 record.Phase = PeerPhase.Handshaking;
             }
+
             using var handshake = new ZmtpHandshake(record.Connection, mechanism, localReadyBody, maxCommandSize, Pool);
             var result = await EstablishWithTimeoutAsync(handshake, record);
             if (result is not { } established) throw new IOException("peer closed during ZMTP handshake");
@@ -684,6 +735,7 @@ internal sealed class SocketRuntime : IZSocket
                 await record.Session.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), token);
                 throw new ZeroMqProtocolException($"peer socket type '{peerType}' is not accepted by local socket type '{type.Name}'");
             }
+
             PeerEstablished?.Invoke(record.Peer, ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span));
             ZFrameHandlerAsync handler = static (_, _) => ValueTask.FromResult(true);
             parser = record.Session.CreateParser((frame, ct) => handler(frame, ct),
@@ -698,11 +750,14 @@ internal sealed class SocketRuntime : IZSocket
                 QueueSurface?.Add(record);
                 record.Established.TrySetResult();
             }
+
             peerConnected?.Invoke(record.Peer);
             await parser.ParseAsync(token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested || record.Phase >= PeerPhase.Stopping)
-        { record.Established.TrySetCanceled(token); }
+        {
+            record.Established.TrySetCanceled(token);
+        }
         catch (Exception ex)
         {
             if (!token.IsCancellationRequested || ex is ZeroMqProtocolException) failure = ex;
@@ -720,13 +775,22 @@ internal sealed class SocketRuntime : IZSocket
                 if (record.ActiveSends == 0) sends = Task.CompletedTask;
                 else sends = (record.SendsDrained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
             }
+
             record.Registration.RequestStop();
             await sends;
+
             void Clean(Action action)
             {
-                try { action(); }
-                catch (Exception ex) { cleanupFailure ??= ex; }
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    cleanupFailure ??= ex;
+                }
             }
+
             Clean(() => PeerRemoved?.Invoke(record.Peer, failure));
             Clean(() => QueueSurface?.Reclaim(record, failure));
             Clean(() =>
@@ -734,12 +798,25 @@ internal sealed class SocketRuntime : IZSocket
                 foreach (var frame in record.Accumulator.Frames) frame.Dispose();
                 record.Accumulator.Frames.Clear();
             });
-            try { await record.Registration.FinishAsync(); }
-            catch (Exception ex) { cleanupFailure ??= ex; }
+            try
+            {
+                await record.Registration.FinishAsync();
+            }
+            catch (Exception ex)
+            {
+                cleanupFailure ??= ex;
+            }
+
             Clean(() => record.Session?.Dispose());
             Clean(record.Connection.Dispose);
-            try { RaisePeerEnded(record.Peer, failure); }
-            catch (Exception ex) { cleanupFailure ??= ex; }
+            try
+            {
+                RaisePeerEnded(record.Peer, failure);
+            }
+            catch (Exception ex)
+            {
+                cleanupFailure ??= ex;
+            }
             finally
             {
                 lock (StateLock)
@@ -835,6 +912,7 @@ internal sealed class SocketRuntime : IZSocket
             await queue.DeliverAsync(record, toDeliver, token);
             return true;
         }
+
         if (messageSink is null)
         {
             // A non-default inbound policy delivering without a bound sink

@@ -220,12 +220,12 @@ frames, callback reception, 1,000 warmup frames and five batches of 10,000 frame
 The same harness runs against archived pre-change HEAD and the working tree.
 Median process bytes per delivered message on this macOS ARM64/.NET 10.0.401 run:
 
-| Path | Before | After |
-| --- | ---: | ---: |
-| TCP NULL | 431.15 | 79.06 |
+| Path      | Before | After |
+|-----------|-------:|------:|
+| TCP NULL  | 431.15 | 79.06 |
 | TCP CURVE | 262.42 | 88.40 |
-| IPC NULL | 299.17 | 75.16 |
-| IPC CURVE | 86.45 | 73.40 |
+| IPC NULL  | 299.17 | 75.16 |
+| IPC CURVE |  86.45 | 73.40 |
 
 These are comparative measurements, not zero-allocation network guarantees: BCL
 completion scheduling varies between batches. Deterministic allocation tests enforce

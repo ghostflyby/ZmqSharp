@@ -37,6 +37,7 @@ public class CurveTrafficAllocationTests
             bodies[i] = new ZmtpFrameData { Body = new(wire.AsMemory(offset, size)) };
             offset += size;
         }
+
         using var codec = CurveSessionTrafficTests.NewCodec();
         for (var i = 0; i < warmup; i++) codec.Decode(bodies[i]);
         before = GC.GetAllocatedBytesForCurrentThread();
@@ -47,6 +48,7 @@ public class CurveTrafficAllocationTests
         allocated.Should().BeInRange(0, 1023);
 #endif
     }
+
     [Fact]
     public async Task CurveTraffic_ParserAndDecode_AreAllocationFreePerFrame()
     {
@@ -58,6 +60,7 @@ public class CurveTrafficAllocationTests
             using var message = ZMessage.FromOwned([.. "parser-curve"u8]);
             for (var i = 0; i < count + warmup; i++) await session.SendAsync(message);
         }
+
         using var input = new RecordingByteConnection(recording.Recorded);
         using var codec = CurveSessionTrafficTests.NewCodec();
         var seen = 0;
@@ -77,5 +80,4 @@ public class CurveTrafficAllocationTests
         allocated.Should().BeInRange(0, 1023);
 #endif
     }
-
 }

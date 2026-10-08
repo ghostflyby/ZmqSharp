@@ -172,7 +172,10 @@ public sealed class ZSocketConnectionTests
             await receiving.WaitAsync(timeout.Token);
             delivered.Should().Be(1);
         }
-        finally { if (ipc) File.Delete(path); }
+        finally
+        {
+            if (ipc) File.Delete(path);
+        }
     }
 
     /// <summary>Opens a connected raw-socket pair wrapped in ZSocketConnection.</summary>

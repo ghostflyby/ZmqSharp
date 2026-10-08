@@ -9,6 +9,4 @@ namespace ZmqSharp;
 /// message reaches the bound sink (pass-through inbound, unlike SUB).
 /// </summary>
 // ReSharper disable once InconsistentNaming
-public sealed class ZXSubSocket(ZSocketOptions? options = null) : ZSubSocket(options ?? new ZSocketOptions(), ZSocketTypes.XSub)
-{
-}
+public sealed class ZXSubSocket(ZSocketOptions? options = null) : ZSubSocket(options ?? new ZSocketOptions(), ZSocketTypes.XSub) { }

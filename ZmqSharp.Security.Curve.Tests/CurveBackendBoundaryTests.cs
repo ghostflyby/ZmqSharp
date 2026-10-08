@@ -28,20 +28,27 @@ public sealed class CurveBackendBoundaryTests
     private sealed class RecordingBackend : ICurveCryptoBackend
     {
         public int Derivations { get; private set; }
+
         public void DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey)
         {
             Derivations++;
             publicKey.Clear();
         }
+
         public void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey) => throw new NotSupportedException();
         public void DeriveSharedSecret(ReadOnlySpan<byte> senderSecret, ReadOnlySpan<byte> recipientPublic, Span<byte> destination) => throw new NotSupportedException();
+
         public int Box(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> senderSecret,
             ReadOnlySpan<byte> recipientPublic, Span<byte> destination) => throw new NotSupportedException();
+
         public bool TryUnbox(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> recipientSecret,
             ReadOnlySpan<byte> senderPublic, Span<byte> destination, out int written) => throw new NotSupportedException();
+
         public int SecretBox(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> key, Span<byte> destination) => throw new NotSupportedException();
+
         public bool TrySecretBoxOpen(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> key,
             Span<byte> destination, out int written) => throw new NotSupportedException();
+
         public void Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> secretKey, Span<byte> signature) => throw new NotSupportedException();
         public bool Verify(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey) => throw new NotSupportedException();
         public void RandomBytes(Span<byte> destination) => throw new NotSupportedException();

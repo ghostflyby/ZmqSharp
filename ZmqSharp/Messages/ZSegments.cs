@@ -88,8 +88,6 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
             index = -1;
         }
 
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }

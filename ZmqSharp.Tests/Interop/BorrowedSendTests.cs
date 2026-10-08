@@ -177,12 +177,8 @@ public sealed class BorrowedSendTests
 
         public override MemoryHandle Pin(int elementIndex = 0) => new();
 
-        public override void Unpin()
-        {
-        }
+        public override void Unpin() { }
 
-        protected override void Dispose(bool disposing)
-        {
-        }
+        protected override void Dispose(bool disposing) { }
     }
 }

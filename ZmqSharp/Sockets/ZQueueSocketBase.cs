@@ -9,9 +9,12 @@ public abstract class ZQueueSocketBase : ZSocketBase
 {
     protected ZQueueSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
         IZInboundPolicy? inbound = null) : base(new SocketRuntime(options, dispatch, type, inbound, supportsQueue: true)) { }
+
     private protected ZQueueSocketBase(SocketRuntime runtime) : base(runtime) { }
+
     public ChannelReader<ZMessage> Messages => Runtime.QueueSurface?.Messages
-        ?? throw new InvalidOperationException("no queue composed: remove MessageSink or set ReceiveSurface = ZReceiveSurface.Queue");
+                                               ?? throw new InvalidOperationException("no queue composed: remove MessageSink or set ReceiveSurface = ZReceiveSurface.Queue");
+
     public ChannelWriter<ZMessage>? Outbound => Runtime.QueueSurface?.Outbound;
     public long ReceiveRejections => ReceiveRejectionsCount;
 }

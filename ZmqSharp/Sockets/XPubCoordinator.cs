@@ -12,6 +12,7 @@ internal sealed class XPubCoordinator(Func<ZPeer[]> peers, Action<ZPeer, ZMessag
             if (ReferenceEquals(peer, other)) continue;
             forward(other, ZMessage.FromOwned(message[0].ToSequence().ToArray()));
         }
+
         return ValueTask.FromResult(ZInboundDecision.Deliver());
     }
 }

@@ -102,9 +102,7 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
         set => throw new NotSupportedException();
     }
 
-    public override void Flush()
-    {
-    }
+    public override void Flush() { }
 
     public override int Read(byte[] buffer, int offset, int count)
     {
@@ -418,9 +416,7 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
         return ValueTask.FromResult(onFrame?.Invoke(frame, token) ?? true);
     }
 
-    public void OnConnectionEnded()
-    {
-    }
+    public void OnConnectionEnded() { }
 }
 
 /// <summary>
@@ -633,9 +629,7 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() { }
 }
 
 internal sealed class EstablishedFakeConnection : IZConnection
@@ -672,6 +666,7 @@ internal sealed class EstablishedFakeConnection : IZConnection
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
+
     public void Abort() => Dispose();
 
     public void Dispose()

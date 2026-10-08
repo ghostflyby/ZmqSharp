@@ -63,8 +63,7 @@ A single `using ZmqSharp;` covers all basic usage:
 - Receive/queue tuning: `ZReceiveMode`, `ZReceiveAllocation`, `ZReceiveContext`,
   `IZReceivePolicy`, `ZDecide`, `ZDelegateReceivePolicy`, `ZReceiveOptions`,
   `ZReceiveRejectionReason`, `ZReceiveRejection`, `IZQueueFactory`,
-  `ZQueueFactory`. These live with the configuration they feed
-  (`ZSocketOptions`), so one import covers all configuration scenarios.
+  `ZQueueFactory`. These live with the configuration they feed (`ZSocketOptions`), so one import covers all configuration scenarios.
 - Exceptions: `ZeroMqProtocolException`, `ZReceiveRejectedException` (0029).
 
 ### Sub-namespaces - domain-specific feature areas
@@ -80,21 +79,20 @@ A single `using ZmqSharp;` covers all basic usage:
   `ZMechanismContext`, `ZMechanismResult`, `ZMechanismCommand`,
   `ZMechanismRole`, `ZNullMechanism`, `ZPlainMechanism`,
   `ZPlainAuthenticator`, `ZMechanismException`. Mechanism authors are a
-  distinct audience from wire-codec consumers; the CURVE example mechanism
-  (ZmqSharp.Security.Curve) already lives under this area. Note that a
-  mechanism author also imports `ZmqSharp.Zmtp` for the shared wire rules
-  (`ZmtpCommandCodec`, `ZmtpCommands`) - the codec is de-facto mechanism
+  distinct audience from wire-codec consumers; the CURVE example mechanism (ZmqSharp.Security.Curve) already lives under this area. Note that a
+  mechanism author also imports `ZmqSharp.Zmtp` for the shared wire rules (`ZmtpCommandCodec`, `ZmtpCommands`) - the codec is de-facto mechanism
   infrastructure.
 - `ZmqSharp.Patterns` (new): the socket-composition seams (0015 section 2.1 /
-  0019) - `IZDispatchPolicy` and the `Z*Dispatch` policies,
-  `IZInboundPolicy` with `ZInboundAction` / `ZInboundDecision` /
-  `ZInboundDecide` / `ZDelegateInboundPolicy` / `ZInboundPolicy`, and the
-  socket identity `ZSocketType` / `ZSocketTypes` (`ForCustom`). These are the
-  extension face for custom socket types: a developer subclassing
-  `ZSocketBase` (in `ZmqSharp`) imports `ZmqSharp.Patterns` for the
-  constructor's seam arguments, mirroring how a mechanism author imports
-  `ZmqSharp.Security`. Users constructing the built-in sockets never write
-  these types and do not pay the import.
+    0019)
+        - `IZDispatchPolicy` and the `Z*Dispatch` policies,
+          `IZInboundPolicy` with `ZInboundAction` / `ZInboundDecision` /
+          `ZInboundDecide` / `ZDelegateInboundPolicy` / `ZInboundPolicy`, and the
+          socket identity `ZSocketType` / `ZSocketTypes` (`ForCustom`). These are the
+          extension face for custom socket types: a developer subclassing
+          `ZSocketBase` (in `ZmqSharp`) imports `ZmqSharp.Patterns` for the
+          constructor's seam arguments, mirroring how a mechanism author imports
+          `ZmqSharp.Security`. Users constructing the built-in sockets never write
+          these types and do not pay the import.
 
 ### Internal API - namespaces match the directory layout
 

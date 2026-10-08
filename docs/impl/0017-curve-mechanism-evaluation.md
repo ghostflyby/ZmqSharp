@@ -154,17 +154,16 @@ transparent.
 
 The CURVE mechanism needs four primitives: **X25519**, **XSalsa20-Poly1305**
 (the libsodium `crypto_box_curve25519xsalsa20poly1305` construction, fixed by
-the wire protocol - it cannot be substituted with ChaCha20-Poly1305),
-**Ed25519** (vouch signatures), and a **CSPRNG**.
+the wire protocol - it cannot be substituted with ChaCha20-Poly1305), **Ed25519** (vouch signatures), and a **CSPRNG**.
 
-| Option | X25519 | Ed25519 | XSalsa20-Poly1305 | Native dep | AOT | Maintenance |
-|---|---|---|---|---|---|---|
-| BouncyCastle.Cryptography 2.7 | yes | yes | primitives only (compose XSalsa20+Poly1305) | none | **`IsAotCompatible=true`**, clean NativeAOT publishing (issues #620/#500 closed as non-library bugs) | very active, 396M downloads, 2026-07-30 |
-| NSec.Cryptography 26.4 | yes | yes | **internal only, not public** | libsodium | unproven (no IsAotCompatible flag) | active, 14.9M downloads |
-| Chaos.NaCl | yes | yes | yes | none | n/a | dead (last push 2021), no NuGet, `[Obsolete("Needs more testing")]` |
-| libsodium bindings (Sodium.Core, or a hand-written `LibraryImport` shim) | yes | yes | yes (crypto_box) | **libsodium native** (RID `runtimes/*/native`) | `DllImport`/`LibraryImport` are NativeAOT-supported; the native package is the standard RID pattern | Sodium.Core not actively developed; a thin self-written shim over the `libsodium` native package is lower risk |
-| .NET BCL | **.NET 11 only** (X25519DiffieHellman, OpenSSL/CNG-backed) | no (open proposal #63174) | no | OpenSSL/CNG (in 11) | - | in-flight |
-| NetMQ's own CURVE | NaCl.Net 0.1.13 (pure managed libsodium port) | same | same | none | unverified | NaCl.Net last push 2023; NetMQ itself is the best protocol reference |
+| Option                                                                   | X25519                                                     | Ed25519                   | XSalsa20-Poly1305                           | Native dep                                     | AOT                                                                                                  | Maintenance                                                                                                    |
+|--------------------------------------------------------------------------|------------------------------------------------------------|---------------------------|---------------------------------------------|------------------------------------------------|------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| BouncyCastle.Cryptography 2.7                                            | yes                                                        | yes                       | primitives only (compose XSalsa20+Poly1305) | none                                           | **`IsAotCompatible=true`**, clean NativeAOT publishing (issues #620/#500 closed as non-library bugs) | very active, 396M downloads, 2026-07-30                                                                        |
+| NSec.Cryptography 26.4                                                   | yes                                                        | yes                       | **internal only, not public**               | libsodium                                      | unproven (no IsAotCompatible flag)                                                                   | active, 14.9M downloads                                                                                        |
+| Chaos.NaCl                                                               | yes                                                        | yes                       | yes                                         | none                                           | n/a                                                                                                  | dead (last push 2021), no NuGet, `[Obsolete("Needs more testing")]`                                            |
+| libsodium bindings (Sodium.Core, or a hand-written `LibraryImport` shim) | yes                                                        | yes                       | yes (crypto_box)                            | **libsodium native** (RID `runtimes/*/native`) | `DllImport`/`LibraryImport` are NativeAOT-supported; the native package is the standard RID pattern  | Sodium.Core not actively developed; a thin self-written shim over the `libsodium` native package is lower risk |
+| .NET BCL                                                                 | **.NET 11 only** (X25519DiffieHellman, OpenSSL/CNG-backed) | no (open proposal #63174) | no                                          | OpenSSL/CNG (in 11)                            | -                                                                                                    | in-flight                                                                                                      |
+| NetMQ's own CURVE                                                        | NaCl.Net 0.1.13 (pure managed libsodium port)              | same                      | same                                        | none                                           | unverified                                                                                           | NaCl.Net last push 2023; NetMQ itself is the best protocol reference                                           |
 
 ### 3.1 Verdict
 
@@ -189,12 +188,10 @@ be an abstraction over the *protocol* - only over the *primitives*. The
 cleanest expression of that is what this evaluation recommends:
 
 1. **Ship CURVE as a separately distributed, optional package**: the protocol
-   skeleton from section 2 plus an `ICurveCryptoBackend` contract, with a
-   **BouncyCastle-based backend** as the default implementation. This is the
+   skeleton from section 2 plus an `ICurveCryptoBackend` contract, with a **BouncyCastle-based backend** as the default implementation. This is the
    "user picks their crypto library" story: the protocol is done once, the
    user only supplies the four primitives - or just takes the BouncyCastle
-   backend.
-   **Implemented** (this revision): the standalone NuGet package
+   backend. **Implemented** (this revision): the standalone NuGet package
    `ZmqSharp.Security.Curve` (project in `ZmqSharp.Security.Curve/`) -
    `CurveMechanism` (RFC 24 handshake via the public mechanism seam),
    `CurveSessionConnection` (frame-level encrypt/decrypt),
@@ -223,13 +220,12 @@ cleanest expression of that is what this evaluation recommends:
    the MESSAGE literal - our session connection first sent/required them as
    command frames, which libzmq rejects. The final verification is against
    real libzmq itself (pyzmq 4.3.5): both directions - our client and server
-   - complete the handshake and exchange encrypted messages.
+    - complete the handshake and exchange encrypted messages.
 4. **Only if a built-in CURVE is later demanded** does the BouncyCastle
    dependency move into the core library, behind a feature flag - the package
    backend becomes the built-in backend unchanged.
 
-Resolved (this revision): the example lives as a standalone package
-(`ZmqSharp.Security.Curve`) rather than a `samples/` folder, so users opt in
+Resolved (this revision): the example lives as a standalone package (`ZmqSharp.Security.Curve`) rather than a `samples/` folder, so users opt in
 by referencing the package - the "generic mechanism" route.
 
 ## 5. References
@@ -237,8 +233,7 @@ by referencing the package - the "generic mechanism" route.
 - 0016 - replaceable security mechanism boundary (the seam this builds on;
   section 9: CURVE session connection).
 - RFC 24 / CurveZMQ (wire protocol: message sequence, nonce prefixes, vouch).
-- `zeromq/netmq` - CURVE is a faithful port of libzmq's curve mechanisms
-  (PR #851), interop-tested against real native libzmq on its Windows CI;
+- `zeromq/netmq` - CURVE is a faithful port of libzmq's curve mechanisms (PR #851), interop-tested against real native libzmq on its Windows CI;
   `CurveMechanismBase.cs` is the maintained C# protocol reference.
 - `bcgit/bc-csharp` - BouncyCastle.Cryptography: `X25519Agreement`,
   `Ed25519Signer`, `XSalsa20Engine`, `Poly1305`; csproj sets

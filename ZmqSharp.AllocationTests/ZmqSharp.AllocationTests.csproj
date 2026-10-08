@@ -1,32 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <IsPackable>false</IsPackable>
-        <IsTestProject>true</IsTestProject>
-        <!-- xUnit.net v3 projects are self-executing Microsoft.Testing.Platform
-             applications: the framework generates the entry point, so the test
-             assembly is an Exe and no VSTest host or adapter is involved. -->
-        <OutputType>Exe</OutputType>
-    </PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- xUnit.net v3 projects are self-executing Microsoft.Testing.Platform
+         applications: the framework generates the entry point, so the test
+         assembly is an Exe and no VSTest host or adapter is involved. -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
 
-    <ItemGroup>
-        <PackageReference Include="xunit.v3" Version="4.0.1"/>
-        <!-- Registers the TRX reporter with Microsoft.Testing.Platform, which the
-             CI `dotnet test` invocation selects. -->
-        <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1"/>
-        <PackageReference Include="FluentAssertions" Version="8.11.0"/>
-    </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" Version="4.0.1"/>
+    <!-- Registers the TRX reporter with Microsoft.Testing.Platform, which the
+         CI `dotnet test` invocation selects. -->
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1"/>
+    <PackageReference Include="FluentAssertions" Version="8.11.0"/>
+  </ItemGroup>
 
-    <ItemGroup>
-        <ProjectReference Include="../ZmqSharp/ZmqSharp.csproj"/>
-        <ProjectReference Include="../ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj"/>
-    </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ZmqSharp/ZmqSharp.csproj"/>
+    <ProjectReference Include="../ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj"/>
+  </ItemGroup>
 
-    <ItemGroup>
-        <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
-    </ItemGroup>
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
+  </ItemGroup>
 
 </Project>

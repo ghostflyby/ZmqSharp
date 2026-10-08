@@ -51,6 +51,7 @@ public class SendAllocationTests
             await socket.SendAsync(messages[i]);
             if (Environment.CurrentManagedThreadId != windowThread) windowThreadStable = false;
         }
+
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         windowThreadStable.Should().BeTrue(

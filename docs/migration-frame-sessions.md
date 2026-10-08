@@ -22,7 +22,7 @@ ZFrameHandlerAsync and optional IZFrameCodec explicitly.
 
 ## Security mechanisms
 
-Add Role to IZSecurityMechanism and implement parameterless CreateSession(). Role
+Add Role to IZSecurityMechanism and implement parameterless CreateSession (). Role
 is fixed by socket configuration, independently of bind/connect. NULL uses None;
 PLAIN/CURVE credentials/authenticator constructors select Client or Server.
 A client can bind, and a server can connect; accepting limits use network origin.

@@ -4,8 +4,7 @@ Status: accepted
 Date: 2026-08-13
 Revision: 1
 
-Implements 0015 section 4 (the dedicated socket connection) and section 6.1
-(the write sink), the connection-shaped half of work item #3. 0015 section
+Implements 0015 section 4 (the dedicated socket connection) and section 6.1 (the write sink), the connection-shaped half of work item #3. 0015 section
 6.2 (PredictSize / two-phase encoding) is tracked separately and is not
 implemented here.
 
@@ -54,11 +53,8 @@ transports that bypass the encoder and connection).
 wrapper on the socket transport:
 
 - reads directly with `Socket.ReceiveAsync(buffer, SocketFlags.None, token)`;
-- writes a multi-segment sequence with one buffer-list scatter send
-  (`Socket.SendAsync(IList<ArraySegment<byte>>, SocketFlags)`), gathering the
-  frame's segments into a reused list; array-backed segments go in place
-  (the rule: header plus owned/pooled segment memories), non-array-backed
-  (native) memory falls back to a single pooled copy;
+- writes a multi-segment sequence with one buffer-list scatter send (`Socket.SendAsync(IList<ArraySegment<byte>>, SocketFlags)`), gathering the
+  frame's segments into a reused list; array-backed segments go in place (the rule: header plus owned/pooled segment memories), non-array-backed (native) memory falls back to a single pooled copy;
 - keeps the per-connection `SemaphoreSlim` write gate - message-level atomic
   writes still require serialization (0015 section 4);
 - `Dispose` closes the socket directly, which aborts a pending
@@ -71,16 +67,15 @@ accept loop. `ZConnection(Stream)` stays for generic transports (0015 section
 
 ## 4. Measured write cost: scatter vs. alternatives
 
-The scatter overload is the only multi-buffer `SendAsync` in .NET 10
-(no `ReadOnlySequence` / `ReadOnlyMemory[]` overloads exist), and it returns a
+The scatter overload is the only multi-buffer `SendAsync` in .NET 10 (no `ReadOnlySequence` / `ReadOnlyMemory[]` overloads exist), and it returns a
 BCL `Task<int>` while the Memory-based overloads return `ValueTask<int>`. A
 loopback benchmark (50k sends, 128-byte body, Release) measured the trade:
 
-| Path | Syscalls/frame | BCL alloc/frame | µs/frame |
-|------|---------------|-----------------|----------|
-| Scatter `IList<ArraySegment<byte>>` (chosen) | 1 | ~72 B `Task<int>` | 1.45 |
-| Two separate `Memory` sends | 2 | 0 | 2.02 |
-| One coalesced `Memory` send (copy) | 1 | 0 | 1.17 |
+| Path                                         | Syscalls/frame | BCL alloc/frame   | µs/frame |
+|----------------------------------------------|----------------|-------------------|----------|
+| Scatter `IList<ArraySegment<byte>>` (chosen) | 1              | ~72 B `Task<int>` | 1.45     |
+| Two separate `Memory` sends                  | 2              | 0                 | 2.02     |
+| One coalesced `Memory` send (copy)           | 1              | 0                 | 1.17     |
 
 The syscall dominates: a second send costs ~0.57 µs against ~0.28 µs for the
 72 B of gen-0 garbage (the real cost of which is the GC pressure it causes at
@@ -111,8 +106,7 @@ and no token-taking scatter overload has ever been added. Cancellation of an
 in-flight `IList` send is therefore defined as socket teardown - which is
 exactly what `ZSocketConnection.Dispose` performs. The write gate is what
 makes the per-socket cached SAEA reusable in the first place: two concurrent
-`IList` sends on one socket would fall through to allocating a fresh SAEA
-(the runtime keeps only one cached).
+`IList` sends on one socket would fall through to allocating a fresh SAEA (the runtime keeps only one cached).
 
 ## 5. Testing
 

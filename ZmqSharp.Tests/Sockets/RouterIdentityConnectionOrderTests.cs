@@ -122,7 +122,10 @@ public sealed class RouterIdentityConnectionOrderTests
         await router.BindAsync($"tcp://127.0.0.1:{port}");
 
         var rejected = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        router.PeerEnded += (_, failure) => { if (failure is not null) rejected.TrySetResult(failure); };
+        router.PeerEnded += (_, failure) =>
+        {
+            if (failure is not null) rejected.TrySetResult(failure);
+        };
 
         var identity = new byte[] { 0xAA, 0xBB, 0xCC, 0xDD };
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));

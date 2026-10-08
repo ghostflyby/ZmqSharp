@@ -14,14 +14,10 @@ namespace ZmqSharp;
 public class ZPubSocket : ZQueueSocketBase
 {
     public ZPubSocket(ZSocketOptions? options = null)
-        : this(options ?? new ZSocketOptions(), ZSocketTypes.Pub)
-    {
-    }
+        : this(options ?? new ZSocketOptions(), ZSocketTypes.Pub) { }
 
     internal ZPubSocket(ZSocketOptions options, ZSocketType type, IZInboundPolicy? inbound = null)
-        : base(options, new ZBroadcastDispatch(), type, inbound)
-    {
-    }
+        : base(options, new ZBroadcastDispatch(), type, inbound) { }
 
     private protected ZPubSocket(SocketRuntime runtime) : base(runtime) { }
 

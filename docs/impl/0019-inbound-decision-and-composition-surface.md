@@ -10,15 +10,13 @@ seam (`ZSocketType`); this document adds the inbound decision fragment and turns
 the socket's composition face into a usable third-party surface.
 
 - **Inbound behavior has no seam.** Filtering, framing, forwarding, and
-  protocol consumption are still scattered across `ZSocketBase` virtuals
-  (`PrepareInboundForSink`), the `IPatternSink` interception of REQ/REP, and
+  protocol consumption are still scattered across `ZSocketBase` virtuals (`PrepareInboundForSink`), the `IPatternSink` interception of REQ/REP, and
   socket overrides (SUB filter, ROUTER identity prefix, XPUB subscription
   forwarding, XSUB passthrough). Two different mechanisms express the same
   decision: `ZMessage?` for deliver-or-drop, `IPatternSink` for consume.
 - **The composition face is internal.** `ZSocketBase`'s constructor takes
   the seams but is `internal`, so only the library (and the test project via
-  `InternalsVisibleTo`) can build a socket type. A third-party custom type
-  (0015 section 2.3) cannot subclass it.
+  `InternalsVisibleTo`) can build a socket type. A third-party custom type (0015 section 2.3) cannot subclass it.
 - **Extraction must serve the user's combination face, not the library's
   extraction face.** Shared line-format helpers and lifecycle plumbing that
   no new socket type needs to combine stay internal; only what a developer
@@ -70,10 +68,8 @@ public abstract class ZSocketBase : IZSocket
 ```
 
 Three decisions, matching three questions a developer answers to define a
-socket type: **what do I send to (dispatch), what do I do with what arrives
-(inbound), and what do I call myself / who do I accept (type)**. `inbound`
-defaults to pass-through delivery, so sockets that only need outbound routing
-(single-peer, round-robin, broadcast) declare nothing inbound. The base
+socket type: **what do I send to (dispatch), what do I do with what arrives (inbound), and what do I call myself / who do I accept (type)**. `inbound`
+defaults to pass-through delivery, so sockets that only need outbound routing (single-peer, round-robin, broadcast) declare nothing inbound. The base
 executes these decisions; the socket type composes them. REQ, REP and XPUB
 also need bidirectional coordinator state and explicit send capabilities; these
 are not three mutually independent strategies (0030).
@@ -118,12 +114,12 @@ return `ValueTask.FromResult`.
 
 Ownership contract (the library's move rules, 0007 M3):
 
-| State | Original message | Result |
-|---|---|---|
-| `Deliver`, `Message == null` | passes through, base does not dispose | sink receives the original and disposes it |
+| State                        | Original message                                                  | Result                                        |
+|------------------------------|-------------------------------------------------------------------|-----------------------------------------------|
+| `Deliver`, `Message == null` | passes through, base does not dispose                             | sink receives the original and disposes it    |
 | `Deliver`, `Message != null` | frames moved into the replacement; the policy must not dispose it | sink receives the replacement and disposes it |
-| `Drop` | the policy disposed it (or its frames) | nothing |
-| `Consumed` | the policy owns it completely | nothing |
+| `Drop`                       | the policy disposed it (or its frames)                            | nothing                                       |
+| `Consumed`                   | the policy owns it completely                                     | nothing                                       |
 
 The delegate wrapper mirrors `ZDecide` / `ZDelegateReceivePolicy` so simple
 filters need no class:
@@ -142,8 +138,7 @@ public sealed class ZDelegateInboundPolicy(ZInboundDecide decide) : IZInboundPol
 ## 4. Base integration
 
 - The receive pipeline has two tiers, unchanged in spirit. The **borrowed
-  tier** (`OnFrame`) delivers raw frames and runs no inbound policy. The
-  **aggregated tier** accumulates frames into a message and runs the policy;
+  tier** (`OnFrame`) delivers raw frames and runs no inbound policy. The **aggregated tier** accumulates frames into a message and runs the policy;
   it activates when a message sink is bound **or** the socket composes a
   non-default inbound policy (protocol sockets such as REQ/REP need the
   aggregation but no public sink). A `Deliver` decision on the aggregated
@@ -172,25 +167,23 @@ behavior, private state. Built-ins that do not send (PULL, SUB, XSUB) or
 whose sends are directed (ROUTER, REQ, REP) deny the generic send path with a
 per-type reason.
 
-| Type | Outbound | Inbound | Private state |
-|---|---|---|---|
-| PAIR | `ZSinglePeerDispatch` | deliver passthrough | - |
-| DEALER | `ZRoundRobinDispatch` | deliver passthrough | RR cursor |
-| PUSH | `ZRoundRobinDispatch` | deliver passthrough | RR cursor |
-| PULL | deny ("receive-only") | deliver passthrough | - |
-| REQ | deny generic sends; core selects next via `ZRoundRobinDispatch` and sends directly (0029) | consume (current-peer check, delimiter strip, reply completion) | per-request outcome and send lifetime |
-| REP | deny ("replies through SendReplyAsync") | consume (slot, delimiter strip, request handler) | request slot |
-| ROUTER | `ZIdentityDispatch` (identity table) | deliver with identity prefix | identity table |
-| PUB | `ZBroadcastDispatch` | deliver passthrough | - |
-| SUB | deny ("receive-only") | deliver/drop (topic filter) | subscriptions |
-| XPUB | `ZBroadcastDispatch` | deliver + forward subscription frames | - |
-| XSUB | deny ("receive-only") | deliver passthrough | - |
+| Type   | Outbound                                                                                  | Inbound                                                         | Private state                         |
+|--------|-------------------------------------------------------------------------------------------|-----------------------------------------------------------------|---------------------------------------|
+| PAIR   | `ZSinglePeerDispatch`                                                                     | deliver passthrough                                             | -                                     |
+| DEALER | `ZRoundRobinDispatch`                                                                     | deliver passthrough                                             | RR cursor                             |
+| PUSH   | `ZRoundRobinDispatch`                                                                     | deliver passthrough                                             | RR cursor                             |
+| PULL   | deny ("receive-only")                                                                     | deliver passthrough                                             | -                                     |
+| REQ    | deny generic sends; core selects next via `ZRoundRobinDispatch` and sends directly (0029) | consume (current-peer check, delimiter strip, reply completion) | per-request outcome and send lifetime |
+| REP    | deny ("replies through SendReplyAsync")                                                   | consume (slot, delimiter strip, request handler)                | request slot                          |
+| ROUTER | `ZIdentityDispatch` (identity table)                                                      | deliver with identity prefix                                    | identity table                        |
+| PUB    | `ZBroadcastDispatch`                                                                      | deliver passthrough                                             | -                                     |
+| SUB    | deny ("receive-only")                                                                     | deliver/drop (topic filter)                                     | subscriptions                         |
+| XPUB   | `ZBroadcastDispatch`                                                                      | deliver + forward subscription frames                           | -                                     |
+| XSUB   | deny ("receive-only")                                                                     | deliver passthrough                                             | -                                     |
 
-ROUTER and REQ demonstrate the shape fully: ROUTER's identity routing
-*and* its inbound identity prefix both live in `ZIdentityDispatch` (the
+ROUTER and REQ demonstrate the shape fully: ROUTER's identity routing *and* its inbound identity prefix both live in `ZIdentityDispatch` (the
 prefix is assigned by the policy the socket delegates to); REQ's inbound
-consume and directed sending share per-request state through injected capabilities
-(0029). The three seams are composition choices, not independent state machines.
+consume and directed sending share per-request state through injected capabilities (0029). The three seams are composition choices, not independent state machines.
 
 ## 6. Building blocks
 
@@ -213,17 +206,14 @@ Public (combinable by a new socket type):
 
 Internal (built-in assembly, not API):
 
-- `ZDelimiterFraming` - the empty-delimiter wire format shared by REQ and REP
-  (encode / decode; the current `ZReqCore`/`ZRepCore` bodies are verbatim
+- `ZDelimiterFraming` - the empty-delimiter wire format shared by REQ and REP (encode / decode; the current `ZReqCore`/`ZRepCore` bodies are verbatim
   duplicates, the same shape of duplication 0015 section 1 called out for
   round-robin). The library's `ZRepCore` currently references
   `ZReqCore.EmptyFrame`; the shared type removes that coupling.
-- `ZSubscriptionFrames` - the libzmq subscription wire convention
-  (`0x01` + topic subscribe, `0x00` + topic unsubscribe) shared by SUB,
+- `ZSubscriptionFrames` - the libzmq subscription wire convention (`0x01` + topic subscribe, `0x00` + topic unsubscribe) shared by SUB,
   XSUB, and XPUB's forwarding.
 - `ZTopicFilter` - SUB's subscription set and prefix match.
-- `IZPeerLifecycle` - peer add/remove notifications for stateful policies
-  (`ZIdentityDispatch` identity release, `ZCurrentPeerDispatch` current
+- `IZPeerLifecycle` - peer add/remove notifications for stateful policies (`ZIdentityDispatch` identity release, `ZCurrentPeerDispatch` current
   clearing); the base detects it on the composed dispatch. Internal because
   only built-in policies need it today; promoted if a custom dispatch policy
   surfaces the need.
@@ -302,25 +292,21 @@ Evaluated and rejected. CoR is "candidate handlers, the first that can handle
 it wins" (UI bubbling, middleware). Pattern inbound is not that: each type
 has at most one inbound fragment and the decision is a deterministic
 three-state, never a search for a handler. CoR handlers are also decoupled
-through the request object, but pattern decisions need type-specific state
-(SUB's subscriptions, REQ's pending gate), so a chain would degrade into
-`is`-casting per handler. What resembles a chain is a short-circuit pipeline
-(fixed-order transforms, any may terminate) - and even that is overbuilt for
-per-type single-fragment decisions. Combination here is compositional
-(assemble fragments per type), not sequential (walk a chain).
+through the request object, but pattern decisions need type-specific state (SUB's subscriptions, REQ's pending gate), so a chain would degrade into
+`is`-casting per handler. What resembles a chain is a short-circuit pipeline (fixed-order transforms, any may terminate) - and even that is overbuilt for
+per-type single-fragment decisions. Combination here is compositional (assemble fragments per type), not sequential (walk a chain).
 
 ## 10. Work items
 
-| # | Item | Size | Notes |
-|---|------|------|-------|
-| 1 | Inbound seam: `IZInboundPolicy`/`ZInboundAction`/`ZInboundDecision`/`ZInboundDecide`/`ZDelegateInboundPolicy`, base ctor becomes `protected` with default inbound, remove `PrepareInboundForSink`/`OnPatternPeerEnded` and the REQ/REP `IPatternSink` interception | Medium | The core deliverable |
-| 2 | Internal assembly: `ZDelimiterFraming` (dedupe REQ/REP), `ZSubscriptionFrames`, `ZTopicFilter`, `IZPeerLifecycle` | Medium | Pure extraction; behavior identical |
-| 3 | `ZSocketType.ForCustom` and policy/inbound seam tests | Small | Custom-type scenario tests (0015 section 2.3) |
+| # | Item                                                                                                                                                                                                                                                               | Size   | Notes                                         |
+|---|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|-----------------------------------------------|
+| 1 | Inbound seam: `IZInboundPolicy`/`ZInboundAction`/`ZInboundDecision`/`ZInboundDecide`/`ZDelegateInboundPolicy`, base ctor becomes `protected` with default inbound, remove `PrepareInboundForSink`/`OnPatternPeerEnded` and the REQ/REP `IPatternSink` interception | Medium | The core deliverable                          |
+| 2 | Internal assembly: `ZDelimiterFraming` (dedupe REQ/REP), `ZSubscriptionFrames`, `ZTopicFilter`, `IZPeerLifecycle`                                                                                                                                                  | Medium | Pure extraction; behavior identical           |
+| 3 | `ZSocketType.ForCustom` and policy/inbound seam tests                                                                                                                                                                                                              | Small  | Custom-type scenario tests (0015 section 2.3) |
 
 Ordering: 1 first - it is the actual third-party composition surface; 2 is
 safe extraction that removes the second verbatim duplication; 3 closes the
-custom-type story. The seams land in the `ZmqSharp.Patterns` sub-namespace
-(0018 section 5, resolved): dispatch, inbound, and type are the extension
+custom-type story. The seams land in the `ZmqSharp.Patterns` sub-namespace (0018 section 5, resolved): dispatch, inbound, and type are the extension
 face for custom socket types, imported like `ZmqSharp.Security` by the
 extension author; factory users never write these types and do not pay the
 import.

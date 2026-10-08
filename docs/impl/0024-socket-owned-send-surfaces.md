@@ -15,8 +15,7 @@ solely for compatibility with the current prototype" (0006 section 6) and
 
 `IZSocket` declared a generic `SendAsync(ZMessage)` / `SendAsync(bytes)`, and
 every socket inherited its implementation from `ZSocketBase`. On most types
-that surface is the real send path - but on ROUTER, REP, SUB, and PULL it
-**always throws** (their dispatch policies have no generic-send answer), and
+that surface is the real send path - but on ROUTER, REP, SUB, and PULL it **always throws** (their dispatch policies have no generic-send answer), and
 on REQ it is only legal while a request is in flight. The interface promised
 an operation that a third of the types cannot perform; the exception message
 pointing at the correct API was runtime first aid for an API that should not
@@ -37,7 +36,7 @@ honestly support.
 - Each concrete type decides its own public send surface:
 
   | Type | Public send surface |
-  |---|---|
+      |---|---|
   | PAIR, DEALER, PUSH, PUB (and XPUB via PUB) | `SendAsync` x2, forwarding `SendAsyncCore` |
   | ROUTER | `SendAsync(byte[] identity, ...)` x2 (own overloads) |
   | REQ | `RequestAsync` only; the core sends frames through an internal `SendRequestFrameAsync` |
@@ -57,8 +56,7 @@ as do their unit tests.
 - The fail-loudly messages survive where they still matter (the dispatch
   policies and the directed-send paths).
 - Custom `ZSocketBase` subclasses now expose only what they declare; a custom
-  type that wants to send adds its own `SendAsync` forwarding
-  (`SendAsyncCore`), and one that does not simply leaves it out.
+  type that wants to send adds its own `SendAsync` forwarding (`SendAsyncCore`), and one that does not simply leaves it out.
 - Known limitation, unchanged from before: `SendQueueFactory` on a
   receive-only socket (PULL/SUB/XSUB + outbound channel) still fails at
   runtime through the dispatch policy rather than at construction. The

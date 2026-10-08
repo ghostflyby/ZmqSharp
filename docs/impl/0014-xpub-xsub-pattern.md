@@ -45,8 +45,7 @@ permits).
 ## 5. Interop acceptance
 
 Both directions over TCP: NetMQ XSub <-> ZmqSharp XPub (subscription frame
-observed and data broadcast back), ZmqSharp XSub <-> NetMQ XPub
-(subscription frame sent, unfiltered data received).
+observed and data broadcast back), ZmqSharp XSub <-> NetMQ XPub (subscription frame sent, unfiltered data received).
 
 ## 6. Non-goals
 

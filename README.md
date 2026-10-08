@@ -79,8 +79,7 @@ byte-only transports, fixed security roles, frame codecs and ZPeer signatures.
 
 Design documents live in `docs/impl/`. An internal socket runtime owns a single peer registry.
 Byte transports provide I/O, ZMTP sessions serialize messages and own optional frame codecs, and pattern
-coordinators receive explicit routing/send capabilities. Surfaces are thin composition roots constructed directly
-(`new ZPairSocket()`), with the queue surface as the default receive path (`Messages`) and `BindAsync`/`ConnectAsync`
+coordinators receive explicit routing/send capabilities. Surfaces are thin composition roots constructed directly (`new ZPairSocket()`), with the queue surface as the default receive path (`Messages`) and `BindAsync`/`ConnectAsync`
 as the repeatable endpoint surface (0022, 0023).
 
 ## License

@@ -95,8 +95,7 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
   contiguous and non-contiguous frames freely.
 
 `ZFrame` is therefore `IReadOnlyList<ZSegment>`: indexing and enumeration work
-uniformly whether the frame is contiguous (one segment) or non-contiguous
-(several), exactly as `ZMessage` is `IReadOnlyList<ZFrame>` across its single
+uniformly whether the frame is contiguous (one segment) or non-contiguous (several), exactly as `ZMessage` is `IReadOnlyList<ZFrame>` across its single
 and multipart cases.
 
 ## 4. ZMessage (Single / Multi)
@@ -134,12 +133,12 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 
 Every frame is one of:
 
-| Frame case | Owner | Meaning |
-| --- | --- | --- |
-| Contiguous (`ZSegment`) | `byte[]` | owned, single segment |
-| Contiguous (`ZSegment`) | `IMemoryOwner<byte>` | pooled, single segment |
-| Contiguous (`ZSegment`) | scratch owner + `IsBorrowed` | borrowed view (callback; Dispose no-op) |
-| NonContiguous (`ZSegments`) | per-segment owners | segmented frame |
+| Frame case                  | Owner                        | Meaning                                 |
+|-----------------------------|------------------------------|-----------------------------------------|
+| Contiguous (`ZSegment`)     | `byte[]`                     | owned, single segment                   |
+| Contiguous (`ZSegment`)     | `IMemoryOwner<byte>`         | pooled, single segment                  |
+| Contiguous (`ZSegment`)     | scratch owner + `IsBorrowed` | borrowed view (callback; Dispose no-op) |
+| NonContiguous (`ZSegments`) | per-segment owners           | segmented frame                         |
 
 Messages combine these freely: a `ZSingleMessage` may hold a contiguous or a
 segmented frame; a `ZMultiMessage` holds any mix. Ownership is always read from each
@@ -162,8 +161,7 @@ its `byte[]` only when it is actually a `byte[]`.
   borrowed path keeps zero-copy semantics by referring to the scratch source.
 - Parser reads segment content through the `ZSegments` indexer; encoder reads
   each segment's `Memory` (reacquired and sliced per access).
-- Each union root provides an implicit conversion from its case types
-  (`ZSegment`/`ZSegments` to `ZFrame`; `ZSingleMessage`/`ZMultiMessage` to
+- Each union root provides an implicit conversion from its case types (`ZSegment`/`ZSegments` to `ZFrame`; `ZSingleMessage`/`ZMultiMessage` to
   `ZMessage`), so a case value can be used directly where its root is
   expected. The reverse direction stays explicit (`TryGetValue` overloads),
   keeping the active case discoverable.

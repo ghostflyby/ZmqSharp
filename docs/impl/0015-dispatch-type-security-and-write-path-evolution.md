@@ -24,8 +24,7 @@ serialization to sessions, and uses ZPeer in selection signatures.
 
 This document is a roadmap, not a design for one feature: sections 2-6 each
 define a work item with its decisions and acceptance, and section 8 orders
-them. It extends 0007 (transport core / pattern core / surface) and 0006
-(interop matrix, feature checklist).
+them. It extends 0007 (transport core / pattern core / surface) and 0006 (interop matrix, feature checklist).
 
 ## 1. Problem
 
@@ -88,8 +87,7 @@ type:
 - `ZSinglePeerDispatch` - PAIR; selects the single peer.
 - `ZBroadcastDispatch` - PUB, XPUB; selects every peer, so the generic send
   path broadcasts.
-- `ZIdentityDispatch` - ROUTER; owns the identity-to-connection routing table
-  (identity assignment on inbound, resolution for the directed identity send,
+- `ZIdentityDispatch` - ROUTER; owns the identity-to-connection routing table (identity assignment on inbound, resolution for the directed identity send,
   teardown release) - the socket delegates to it. The generic path is
   rejected: the routing identity is caller-supplied, separate from the
   message, so the message alone cannot be routed.
@@ -267,8 +265,7 @@ A ZMTP frame header must precede the body with its length, so a
 - **Total length unknown** - just split into multiple messages and send each;
   the existing async send already supports this, so no new API is needed.
 
-Streamed messages matter only when a large logical message needs atomicity
-(REQ/REP reply, ROUTER identity frames) and cannot be split.
+Streamed messages matter only when a large logical message needs atomicity (REQ/REP reply, ROUTER identity frames) and cannot be split.
 
 ### 7.2 Use cases after mmap
 
@@ -311,14 +308,14 @@ touching the encoder.
 
 Adopted from the review discussion (section 7 is deferred):
 
-| # | Work item | Section | Size | Notes |
-|---|-----------|---------|------|-------|
-| 1 | Dispatch/type split | 2 | Medium | Zero protocol risk; unblocks custom types and the neutral policy names |
-| 2 | ipc + parameterized tests | 5 | Small | Two fixes in `SocketTransport`; clear differentiator |
-| 3 | Write-path cluster: sink + socket connection + PredictSize | 6, 4 | Medium | One cluster; the sink is the shared seam |
-| 4 | PLAIN mechanism | 3 | Small | Pure command frames, no crypto |
-| 5 | CURVE mechanism | 3 | Large | Own tracked item; managed X25519 AOT evaluation first |
-| 6 | Streaming messages | 7 | Large | Deferred; only the `ReadOnlySequence` channel is reserved now |
+| # | Work item                                                  | Section | Size   | Notes                                                                  |
+|---|------------------------------------------------------------|---------|--------|------------------------------------------------------------------------|
+| 1 | Dispatch/type split                                        | 2       | Medium | Zero protocol risk; unblocks custom types and the neutral policy names |
+| 2 | ipc + parameterized tests                                  | 5       | Small  | Two fixes in `SocketTransport`; clear differentiator                   |
+| 3 | Write-path cluster: sink + socket connection + PredictSize | 6, 4    | Medium | One cluster; the sink is the shared seam                               |
+| 4 | PLAIN mechanism                                            | 3       | Small  | Pure command frames, no crypto                                         |
+| 5 | CURVE mechanism                                            | 3       | Large  | Own tracked item; managed X25519 AOT evaluation first                  |
+| 6 | Streaming messages                                         | 7       | Large  | Deferred; only the `ReadOnlySequence` channel is reserved now          |
 
 Ordering rationale: 1 first because the socket-type declaration is the base
 for custom sockets and touches the handshake; 2 is cheap and visible; 3
@@ -333,7 +330,6 @@ reviewed and **rejected**: `PipeReader` hands out `ReadOnlySequence`s over the
 pipe's internal buffer, and materializing frames from that buffer into the
 target adds a copy - the original reason Pipelines was discarded. The plan
 keeps the hand-written zero-copy path and adopts only Pipelines' *shape*:
-a sink abstraction, prefetch (GetMemory-equivalent), and multi-segment writes
-(section 6), all as library-owned types rather than BCL pipes.
+a sink abstraction, prefetch (GetMemory-equivalent), and multi-segment writes (section 6), all as library-owned types rather than BCL pipes.
 
 This is recorded so the evaluation does not need to be repeated.

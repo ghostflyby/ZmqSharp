@@ -215,9 +215,7 @@ public sealed class DispatchPolicyTests
     private sealed class MultiSelectSocket : ZSocketBase
     {
         public MultiSelectSocket()
-            : base(new ZSocketOptions(), new SelectAllDispatch(), ZSocketTypes.Pair)
-        {
-        }
+            : base(new ZSocketOptions(), new SelectAllDispatch(), ZSocketTypes.Pair) { }
 
         public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
         {
@@ -238,6 +236,4 @@ public sealed class DispatchPolicyTests
             return ValueTask.CompletedTask;
         }
     }
-
-
 }

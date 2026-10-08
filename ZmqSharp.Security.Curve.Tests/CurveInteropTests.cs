@@ -38,10 +38,12 @@ public sealed class CurveInteropTests
         listener.Stop();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         void SendHello(object? sender, NetMQSocketEventArgs args)
         {
             if (args.Socket.TrySendFrame("reference-hello")) args.Socket.SendReady -= SendHello;
         }
+
         reference.SendReady += SendHello;
         reference.ReceiveReady += (_, args) =>
         {
@@ -57,6 +59,7 @@ public sealed class CurveInteropTests
             reference.Connect(endpoint);
         }
         else reference.Bind(endpoint);
+
         using var poller = new NetMQPoller { reference };
         poller.RunAsync();
         if (!localBinds) await local.ConnectAsync(endpoint, timeout.Token);

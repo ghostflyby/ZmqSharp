@@ -13,7 +13,7 @@ name: publish
 # build job and one nupkg per package is the whole flow.
 on:
   push:
-    tags: ['v*.*.*']
+    tags: [ 'v*.*.*' ]
 
 # A publish must never be cancelled mid-flight (a half-pushed release), and two pushes
 # of the same tag cannot happen — but guard anyway: same-ref publishes serialize.
@@ -42,7 +42,7 @@ jobs:
 
       - name: Set version from tag
         run: |
-          "VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          "VERSION=$( $env:GITHUB_REF_NAME -replace '^v', '' )" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
 
       # A release candidate must pass the full suite before anything ships.
       # No --nologo here: in Microsoft.Testing.Platform mode dotnet test forwards
@@ -103,8 +103,9 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           "VERSION=$version" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
-              throw "tag '$env:GITHUB_REF_NAME' is not a valid vX.Y.Z[(-suffix)] version"
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')
+          {
+            throw "tag '$env:GITHUB_REF_NAME' is not a valid vX.Y.Z[(-suffix)] version"
           }
           # Refuse versions nuget.org already has, before anything is pushed. With
           # --skip-duplicate gone from the push this is the belt to its suspenders,
@@ -112,64 +113,119 @@ jobs:
           # version) a clear early exit instead of a push that cannot succeed.
           # Both packages: a partial previous release (core pushed, Curve not) must
           # not be silently re-pushed either.
-          foreach ($id in 'zmqsharp', 'zmqsharp.security.curve') {
-              $index = try { Invoke-RestMethod -Uri "https://api.nuget.org/v3-flatcontainer/$id/index.json" -TimeoutSec 30 } catch { $null }
-              if ($index -and ($index.versions -contains $version)) {
-                  throw "version '$version' of $id is already published on nuget.org — refusing to republish (traceability tag only)"
-              }
+          foreach ($id in 'zmqsharp', 'zmqsharp.security.curve')
+          {
+            $index = try
+            {
+              Invoke-RestMethod -Uri "https://api.nuget.org/v3-flatcontainer/$id/index.json" -TimeoutSec 30
+            }
+            catch
+            {
+              $null
+            }
+            if ($index -and ($index.versions -contains $version))
+            {
+              throw "version '$version' of $id is already published on nuget.org — refusing to republish (traceability tag only)"
+            }
           }
           # The tag commit must sit on main's history: a tag on a side branch or a
           # stray commit never reaches the production publish.
           git fetch origin main
           $onMain = $false
-          try {
-              git merge-base --is-ancestor "$env:GITHUB_SHA" origin/main 2>$null
-              $onMain = ($LASTEXITCODE -eq 0)
-          } catch {
-              $global:LASTEXITCODE = 0
-              $onMain = $false
+          try
+          {
+            git merge-base --is-ancestor "$env:GITHUB_SHA" origin/main 2> $null
+            $onMain = ($LASTEXITCODE -eq 0)
           }
-          if (-not $onMain) { throw "tag commit $env:GITHUB_SHA is not an ancestor of origin/main" }
+          catch
+          {
+            $global:LASTEXITCODE = 0
+            $onMain = $false
+          }
+          if (-not $onMain)
+          {
+            throw "tag commit $env:GITHUB_SHA is not an ancestor of origin/main"
+          }
           # And its CI must have passed: a release rides on the commit the
           # three-platform suite ran against.
-          $run = try {
-              gh run list --workflow ci.yml --commit "$env:GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null
-          } catch {
-              $global:LASTEXITCODE = 0
-              $null
+          $run = try
+          {
+            gh run list --workflow ci.yml --commit "$env:GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2> $null
           }
-          if (-not $run) { throw "no successful (completed) ci.yml run found for tag commit $env:GITHUB_SHA — merge first, wait for CI on main to go green, then tag" }
+          catch
+          {
+            $global:LASTEXITCODE = 0
+            $null
+          }
+          if (-not $run)
+          {
+            throw "no successful (completed) ci.yml run found for tag commit $env:GITHUB_SHA — merge first, wait for CI on main to go green, then tag"
+          }
           Write-Host "ok: tag commit is on main with green CI (run $run)"
           # 'gh release list' exits 1 when no release exists yet (first publish); with
           # $PSNativeCommandUseErrorActionPreference = $true that becomes a terminating
           # error, so wrap it. The catch must also reset $LASTEXITCODE: pwsh exits the
           # script with the last external command's code, so a swallowed '1' would still
           # fail the step.
-          $latest = try {
-              gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>$null
-          } catch {
-              $global:LASTEXITCODE = 0
-              $null
+          $latest = try
+          {
+            gh release list --limit 1 --json tagName --jq '.[0].tagName' 2> $null
           }
-          if ($latest) {
-              function Test-Newer([string]$candidate, [string]$previous) {
-                  $c = $candidate -split '-'; $p = $previous -split '-'
-                  $cNum = [version]$c[0]; $pNum = [version]$p[0]
-                  if ($cNum -gt $pNum) { return $true }
-                  if ($cNum -lt $pNum) { return $false }
-                  $cPre = if ($c.Count -gt 1) { $c[1] } else { '' }
-                  $pPre = if ($p.Count -gt 1) { $p[1] } else { '' }
-                  if ($pPre -eq '' -and $cPre -ne '') { return $false }   # 1.0.0-beta < 1.0.0
-                  if ($cPre -eq '' -and $pPre -ne '') { return $true }
-                  return $cPre -gt $pPre
+          catch
+          {
+            $global:LASTEXITCODE = 0
+            $null
+          }
+          if ($latest)
+          {
+            function Test-Newer([string]$candidate, [string]$previous)
+            {
+              $c = $candidate -split '-'; $p = $previous -split '-'
+              $cNum = [version]$c[0]; $pNum = [version]$p[0]
+              if ($cNum -gt $pNum)
+              {
+                return $true
               }
-              $latestV = $latest -replace '^v', ''
-              if (-not (Test-Newer $version $latestV)) {
-                  throw "version '$version' is not newer than the latest release '$latestV'"
+              if ($cNum -lt $pNum)
+              {
+                return $false
               }
-              Write-Host "ok: $version > $latestV"
-          } else {
-              Write-Host 'no previous release; this is the first publish'
+              $cPre = if ($c.Count -gt 1)
+              {
+                $c[1]
+              }
+              else
+              {
+                ''
+              }
+              $pPre = if ($p.Count -gt 1)
+              {
+                $p[1]
+              }
+              else
+              {
+                ''
+              }
+              if ($pPre -eq '' -and $cPre -ne '')
+              {
+                return $false
+              }   # 1.0.0-beta < 1.0.0
+              if ($cPre -eq '' -and $pPre -ne '')
+              {
+                return $true
+              }
+              return $cPre -gt $pPre
+            }
+            $latestV = $latest -replace '^v', ''
+            if (-not (Test-Newer $version $latestV))
+            {
+              throw "version '$version' is not newer than the latest release '$latestV'"
+            }
+            Write-Host "ok: $version > $latestV"
+          }
+          else
+          {
+            Write-Host 'no previous release; this is the first publish'
           }
           # Normal path ends cleanly even if an external command left $LASTEXITCODE set;
           # throw paths above terminate with a non-zero exit before reaching here.
@@ -183,16 +239,31 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $expected = @("ZmqSharp.$env:VERSION.nupkg", "ZmqSharp.Security.Curve.$env:VERSION.nupkg")
-          foreach ($name in $expected) {
-              $path = "pkgs/$name"
-              if (-not (Test-Path -LiteralPath $path)) { throw "missing package: $name" }
-              $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $path))
-              try {
-                  $dll = @($zip.Entries | Where-Object { $_.FullName -like 'lib/net10.0/*.dll' })
-                  $nuspec = @($zip.Entries | Where-Object { $_.FullName -like '*.nuspec' })
-                  if ($dll.Count -ne 1) { throw "${name}: expected 1 lib dll, found $($dll.Count)" }
-                  if ($nuspec.Count -ne 1) { throw "${name}: expected 1 nuspec, found $($nuspec.Count)" }
-              } finally { $zip.Dispose() }
+          foreach ($name in $expected)
+          {
+            $path = "pkgs/$name"
+            if (-not (Test-Path -LiteralPath $path))
+            {
+              throw "missing package: $name"
+            }
+            $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $path))
+            try
+            {
+              $dll = @($zip.Entries | Where-Object { $_.FullName -like 'lib/net10.0/*.dll' })
+              $nuspec = @($zip.Entries | Where-Object { $_.FullName -like '*.nuspec' })
+              if ($dll.Count -ne 1)
+              {
+                throw "${name}: expected 1 lib dll, found $( $dll.Count )"
+              }
+              if ($nuspec.Count -ne 1)
+              {
+                throw "${name}: expected 1 nuspec, found $( $nuspec.Count )"
+              }
+            }
+            finally
+            {
+              $zip.Dispose()
+            }
           }
 
       - name: NuGet login (OIDC → temporary API key)

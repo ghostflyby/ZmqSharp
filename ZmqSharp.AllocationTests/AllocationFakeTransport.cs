@@ -42,9 +42,7 @@ internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransp
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() { }
 
     /// <summary>The connection created by the most recent ConnectAsync. Tests in
     /// this non-parallel project use it to script the peer's inbound frames.</summary>
@@ -170,6 +168,7 @@ internal sealed class AllocationFakeConnection : IZConnection
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
+
     public void Abort() => Dispose();
 
     public void Dispose()

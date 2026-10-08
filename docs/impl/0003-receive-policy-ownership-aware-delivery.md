@@ -128,11 +128,11 @@ separation are defined by 0008.
   `ZReceiveOptions.ContiguousFrameLimit` already produce the `Segmented` flag.
 - Segmenting a large frame requires reading it in blocks. Two options, to be
   resolved in review:
-  - (a) The parser gains an optional block-read mode that hands out a frame as
-    a chain of borrowed blocks; materialization then copies each block into
-    its own pooled segment.
-  - (b) Materialization reads through the borrowed contiguous frame and splits
-    it into segments. Simpler, but doubles the copy for large frames.
+    - (a) The parser gains an optional block-read mode that hands out a frame as
+      a chain of borrowed blocks; materialization then copies each block into
+      its own pooled segment.
+    - (b) Materialization reads through the borrowed contiguous frame and splits
+      it into segments. Simpler, but doubles the copy for large frames.
 
 ### 4.3 Where materialization lives
 
@@ -176,7 +176,6 @@ public interface IZMessage
 
 ## 6. Open Questions
 
-1. Is segmented materialization (4.2) in v1, and with which read strategy,
-   (a) parser block-read or (b) split-after-read?
+1. Is segmented materialization (4.2) in v1, and with which read strategy, (a) parser block-read or (b) split-after-read?
 2. Does `TryGetOwnedArray` need a multi-segment owned variant (owned segments
    from distinct arrays), or is single-segment sufficient for the first cut?

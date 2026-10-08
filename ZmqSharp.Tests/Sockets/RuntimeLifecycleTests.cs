@@ -90,7 +90,10 @@ public sealed class RuntimeLifecycleTests
             runtime.PeerSnapshot.Should().BeEmpty();
             endpoint.Connection.Disposals.Should().Be(1);
         }
-        finally { endpoint.Connection.ReleaseWrite.TrySetResult(); }
+        finally
+        {
+            endpoint.Connection.ReleaseWrite.TrySetResult();
+        }
     }
 
     [Fact]
@@ -121,13 +124,17 @@ public sealed class RuntimeLifecycleTests
         {
             await ZNullMechanism.Instance.CreateSession().RunAsync(context, token);
             entered.TrySetResult();
-            try { await Task.Delay(System.Threading.Timeout.Infinite, token); }
+            try
+            {
+                await Task.Delay(System.Threading.Timeout.Infinite, token);
+            }
             catch (OperationCanceledException)
             {
                 cancelled.TrySetResult();
                 await release.Task;
                 throw;
             }
+
             return null;
         });
         await using var runtime = new SocketRuntime(new ZSocketOptions
@@ -151,7 +158,10 @@ public sealed class RuntimeLifecycleTests
             pool.Outstanding.Should().Be(0);
             endpoint.Connection.Disposals.Should().Be(1);
         }
-        finally { release.TrySetResult(); }
+        finally
+        {
+            release.TrySetResult();
+        }
     }
 
     private static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -183,6 +193,7 @@ public sealed class RuntimeLifecycleTests
                 position += count;
                 return count;
             }
+
             await Aborted.Task;
             return 0;
         }
@@ -194,17 +205,30 @@ public sealed class RuntimeLifecycleTests
             => Interlocked.Increment(ref sequenceWrites) > 1
                 ? throw new IOException("peer closed before the ERROR write")
                 : ValueTask.CompletedTask;
+
         public void Abort() => Aborted.TrySetResult();
-        public void Dispose() { Abort(); Interlocked.Increment(ref Disposals); }
+
+        public void Dispose()
+        {
+            Abort();
+            Interlocked.Increment(ref Disposals);
+        }
     }
 
     private sealed class ClosingTransport : IZTransport<ClosingTransport, ClosingEndpoint>
     {
-        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept { add { } remove { } }
+        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+        {
+            add { }
+            remove { }
+        }
+
         public static ValueTask<IZConnection> ConnectAsync(ClosingEndpoint endpoint, CancellationToken token = default)
             => ValueTask.FromResult<IZConnection>(endpoint.Connection);
+
         public static ValueTask<ClosingTransport> BindAsync(ClosingEndpoint endpoint, CancellationToken token = default)
             => throw new NotSupportedException();
+
         public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();
         public void Dispose() { }
     }
@@ -227,6 +251,7 @@ public sealed class RuntimeLifecycleTests
         public int Disposals;
         public bool BlockWrites;
         public bool FailWrite;
+
         public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
             if (position < handshake.Length)
@@ -237,11 +262,14 @@ public sealed class RuntimeLifecycleTests
                 position += count;
                 return count;
             }
+
             ReadWaiting.TrySetResult();
             await Aborted.Task;
             return 0;
         }
+
         public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
+
         public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
         {
             if (!BlockWrites) return;
@@ -252,28 +280,44 @@ public sealed class RuntimeLifecycleTests
             if (FailWrite) throw new IOException("write failed");
             if (Aborted.Task.IsCompleted) throw new IOException("aborted write");
         }
+
         public void Abort() => Aborted.TrySetResult();
-        public void Dispose() { Abort(); Interlocked.Increment(ref Disposals); }
+
+        public void Dispose()
+        {
+            Abort();
+            Interlocked.Increment(ref Disposals);
+        }
     }
 
     private sealed class ByteTransport : IZTransport<ByteTransport, ByteEndpoint>
     {
-        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept { add { } remove { } }
+        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+        {
+            add { }
+            remove { }
+        }
+
         public static ValueTask<IZConnection> ConnectAsync(ByteEndpoint endpoint, CancellationToken token = default)
             => ValueTask.FromResult<IZConnection>(endpoint.Connection);
+
         public static ValueTask<ByteTransport> BindAsync(ByteEndpoint endpoint, CancellationToken token = default)
             => throw new NotSupportedException();
+
         public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();
         public void Dispose() { }
     }
 
-    private sealed class TestMechanism(IdentityCodec? codec,
+    private sealed class TestMechanism(
+        IdentityCodec? codec,
         Func<ZMechanismContext, CancellationToken, ValueTask<ZMechanismResult?>>? run = null) : IZSecurityMechanism
     {
         public string Name => "NULL";
         public ZMechanismRole Role => ZMechanismRole.None;
         public IZMechanismSession CreateSession() => new Session(codec, run);
-        private sealed class Session(IdentityCodec? codec,
+
+        private sealed class Session(
+            IdentityCodec? codec,
             Func<ZMechanismContext, CancellationToken, ValueTask<ZMechanismResult?>>? run) : IZMechanismSession
         {
             public async ValueTask<ZMechanismResult?> RunAsync(ZMechanismContext context, CancellationToken token)

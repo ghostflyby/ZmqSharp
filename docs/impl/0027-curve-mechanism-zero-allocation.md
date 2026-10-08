@@ -41,8 +41,7 @@ message (one pool rent, 0008 / AllocationTests) and the clear send path is
 steady-state allocation-free - the CURVE path is 5-10x its plaintext
 counterpart and is the only mechanism that allocates per frame.
 
-**Handshake path (cold, per connection).** The CURVE handshake
-(`CurveMechanism` client and server sessions) builds every fixed-size stage
+**Handshake path (cold, per connection).** The CURVE handshake (`CurveMechanism` client and server sessions) builds every fixed-size stage
 buffer with `new byte[...]`: the 200-byte HELLO, the 128-byte WELCOME
 plaintext, nonces, the vouch, the INITIATE body, the cookie, and multiple
 `RandomBytes(16)` tails - roughly 25-35 small gen-0 arrays per connection.
@@ -67,8 +66,7 @@ a straight re-shape, not an additive overload.
 the storage for the crypto primitives. The per-connection ephemeral key pair
 and the per-socket long-term key pair stop being two heap arrays each.
 `Key32` is AOT-safe: no reflection, no dynamic codegen, plain value
-semantics. The storage is an inline array
-(`[InlineArray(32)]`, .NET 8+), so the span views are over the actual
+semantics. The storage is an inline array (`[InlineArray(32)]`, .NET 8+), so the span views are over the actual
 bytes - no explicit layout, no padding guarantees to hand-roll. The struct
 and its storage are deliberately **mutable**: a readonly struct would force
 a defensive copy on every field access, silently returning stale bytes
@@ -76,8 +74,7 @@ whenever the write is not inlined - a real failure mode this implementation
 hit and fixed.
 
 **D3 - The session connection reuses per-connection buffers.** `SealFrame`
-and the read path keep a small set of buffers rented once per connection
-(a plaintext buffer, a wire buffer, a plain-frame reconstruction buffer, one
+and the read path keep a small set of buffers rented once per connection (a plaintext buffer, a wire buffer, a plain-frame reconstruction buffer, one
 `byte[24]` nonce per direction whose tail 8 bytes are rewritten). Growth
 follows the `ZMechanismContext` / `ZmtpParser` scratch pattern (double or
 `ArrayPool` rent, shrink past a threshold). The steady state is zero
@@ -172,15 +169,15 @@ public CurveMechanism(ICurveCryptoBackend crypto, Key32 serverLongTermKey);
 
 Send (`SealFrame`), current code on the left, target on the right:
 
-| Allocation | Today | Target |
-|---|---|---|
-| plaintext `[1+payload]` | `new` | connection buffer |
-| nonce `[24]` | `new` | stack, tail rewritten |
-| keystream + zero input | `new` x2 | stack (hand-written cores) |
-| ciphertext | `new` | destination region of wire buffer |
-| tag+body `[16+ct]` | `new` | destination region of wire buffer |
-| wire frame | `new` | connection buffer |
-| engine objects | `new` x2 per call | none (hand-written Salsa20/Poly1305 cores) |
+| Allocation              | Today             | Target                                     |
+|-------------------------|-------------------|--------------------------------------------|
+| plaintext `[1+payload]` | `new`             | connection buffer                          |
+| nonce `[24]`            | `new`             | stack, tail rewritten                      |
+| keystream + zero input  | `new` x2          | stack (hand-written cores)                 |
+| ciphertext              | `new`             | destination region of wire buffer          |
+| tag+body `[16+ct]`      | `new`             | destination region of wire buffer          |
+| wire frame              | `new`             | connection buffer                          |
+| engine objects          | `new` x2 per call | none (hand-written Salsa20/Poly1305 cores) |
 
 Receive (`ReadFrameAsync`), likewise: three read buffers and the frame
 reconstruction buffer move into connection scratch; the nonce becomes a
@@ -227,8 +224,7 @@ connection, all required by the seam's borrowed-scratch lifetime rule (0016).
 ## 7. Testing
 
 - **Known vectors stay byte-identical.** `LibsodiumKnownVectorTests` keeps
-  every vector value; only the backend call shapes moved to destination spans
-  (0027). These vectors lock the hand-written Salsa20/HSalsa20/Poly1305
+  every vector value; only the backend call shapes moved to destination spans (0027). These vectors lock the hand-written Salsa20/HSalsa20/Poly1305
   cores byte-for-byte against libsodium.
 - **Allocation gates for the CURVE traffic path.** `CurveTrafficAllocationTests`
   in the allocation project drives seal and open over an in-process fake
@@ -247,13 +243,13 @@ connection, all required by the seam's borrowed-scratch lifetime rule (0016).
 
 ## 8. Milestones
 
-| # | Work item | Size | Status |
-|---|-----------|------|--------|
+| # | Work item                                                                                             | Size   | Status          |
+|---|-------------------------------------------------------------------------------------------------------|--------|-----------------|
 | 1 | `Key32` value type + `ICurveCryptoBackend` destination signatures + `BouncyCastleCurveCrypto` rewrite | Medium | **Implemented** |
-| 2 | `CurveSessionConnection` buffer reuse (send and receive) | Medium | **Implemented** |
-| 3 | `CurveMechanism` handshake `stackalloc` + `CurveKeyPair` removal | Small | **Implemented** |
-| 4 | Cold-path deltas: `PeerReadyBody` type, cached READY body | Small | **Implemented** |
-| 5 | CURVE allocation gate + backend call-shape migration in tests | Small | **Implemented** |
+| 2 | `CurveSessionConnection` buffer reuse (send and receive)                                              | Medium | **Implemented** |
+| 3 | `CurveMechanism` handshake `stackalloc` + `CurveKeyPair` removal                                      | Small  | **Implemented** |
+| 4 | Cold-path deltas: `PeerReadyBody` type, cached READY body                                             | Small  | **Implemented** |
+| 5 | CURVE allocation gate + backend call-shape migration in tests                                         | Small  | **Implemented** |
 
 Milestones 1 and 2 land together - the destination signatures are what make
 the buffer reuse possible; 3-5 follow independently.

@@ -47,9 +47,7 @@ public sealed class ZmtpParser : IDisposable
 
     public ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
         IZFrameCodec? codec = null, MemoryPool<byte>? pool = null)
-        : this(reader, onFrame, null, pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec)
-    {
-    }
+        : this(reader, onFrame, null, pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec) { }
 
     internal ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
         ZFrameAllocator? allocator, MemoryPool<byte> pool,
@@ -128,6 +126,7 @@ public sealed class ZmtpParser : IDisposable
                     CheckCommand(decoded.Body.First.Span);
                     continue;
                 }
+
                 var decodedLength = checked((int)decoded.Body.Length);
                 var decodedMore = (decoded.Flags & ZmtpFrameFlags.More) != 0;
                 ZFrame decodedFrame;
@@ -152,6 +151,7 @@ public sealed class ZmtpParser : IDisposable
                     }
                     else decodedFrame = new ZFrame(ZSegment.Borrowed(decoded.Body.First), decodedMore);
                 }
+
                 if (!await onFrame(decodedFrame, token)) await WaitForResumeAsync(token);
                 continue;
             }
@@ -191,11 +191,13 @@ public sealed class ZmtpParser : IDisposable
                     materialized.Dispose();
                     throw;
                 }
+
                 if (!complete)
                 {
                     materialized.Dispose();
                     return;
                 }
+
                 if (!await onFrame(materialized, token)) await WaitForResumeAsync(token);
                 continue;
             }

@@ -13,6 +13,7 @@ internal sealed class FrameSequence
             RunningIndex = index;
             Next = null;
         }
+
         public void Link(Node next) => Next = next;
     }
 
@@ -20,7 +21,11 @@ internal sealed class FrameSequence
     private int count;
     private long length;
 
-    public void Clear() { count = 0; length = 0; }
+    public void Clear()
+    {
+        count = 0;
+        length = 0;
+    }
 
     public void Add(ReadOnlyMemory<byte> memory)
     {

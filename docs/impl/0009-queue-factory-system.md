@@ -5,8 +5,7 @@ Date: 2026-08-10
 
 Defines the declaration-style channel construction system for the queue
 surface (`ZQueueSocketBase`, 0002/0023): a `ZQueueFactory` strategy type with
-bounded and unbounded implementations, mirroring the receive policy system
-(0003/0008). Channel configuration lives in two factory properties on
+bounded and unbounded implementations, mirroring the receive policy system (0003/0008). Channel configuration lives in two factory properties on
 `ZSocketOptions`; BCL channel options convert implicitly
 into a factory.
 
@@ -41,8 +40,7 @@ public abstract class ZQueueFactory : IZQueueFactory
 }
 ```
 
-The channel element type is fixed to `ZMessage`. The two concrete factories
-(`ZBoundedQueueFactory` / `ZUnboundedQueueFactory`) are internal
+The channel element type is fixed to `ZMessage`. The two concrete factories (`ZBoundedQueueFactory` / `ZUnboundedQueueFactory`) are internal
 implementation details; the public surface is the abstract `ZQueueFactory`
 base plus its two implicit conversions from the BCL options types. Every
 consumer configures a factory by constructing BCL options, which convert
@@ -93,8 +91,7 @@ var options = new ZSocketOptions
 
 - A factory is stateless and thread-safe; the same instance may create many
   channels (`OnPeerConnected` calls `ReceiveQueueFactory.Create` per peer).
-- `Create` receives the library's mandatory `itemDropped` hook
-  (`static message => message.Dispose()`) and wires it into
+- `Create` receives the library's mandatory `itemDropped` hook (`static message => message.Dispose()`) and wires it into
   `Channel.CreateBounded`. A user factory cannot bypass the reclamation path;
   an unbounded channel has no drop concept and ignores the hook (explicit
   drains still reclaim, 0006 section 2.2).
@@ -120,14 +117,14 @@ trades that bound for never blocking.
 
 ## 5. Decisions
 
-| # | Decision | Rationale |
-|---|----------|-----------|
+| #  | Decision                                                                                                                                                                                         | Rationale                                                                                                                                                                                                                     |
+|----|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | D1 | The public surface is the non-generic `ZQueueFactory` base (implementing `IZQueueFactory`), which hosts the implicit conversions from the BCL options types; the concrete factories are internal | C# requires the operator on source or target, and a generic-interface target is invisible to operator lookup, so the conversions live on the abstract base; the concrete factories add no public shape, so they stay internal |
-| D2 | `Create(Action<T> itemDropped)` takes the reclamation hook as an argument | Mandatory drop disposal stays a library responsibility (0006 2.2); a user factory cannot bypass it |
-| D3 | `SingleReader` forced true; `SingleWriter` preserved | The library is the sole reader; the outbound channel is a shared producer surface, so single-writer is a per-use decision |
-| D4 | Options copied at construction | `BoundedChannelOptions` is a mutable class without a clone; the snapshot keeps factories consistent and immune to later mutation |
-| D5 | The convenience constructor takes the BCL `BoundedChannelFullMode` directly; no ZmqSharp full-mode enum exists | Users configuring via `BoundedChannelOptions` and via the convenience constructor use the same BCL enum, removing a redundant parallel type |
-| D6 | Unbounded is opt-in and revises 0004 constraint 3 | Default remains bounded with HWM control; unbounded trades the peak-memory bound for never blocking |
+| D2 | `Create(Action<T> itemDropped)` takes the reclamation hook as an argument                                                                                                                        | Mandatory drop disposal stays a library responsibility (0006 2.2); a user factory cannot bypass it                                                                                                                            |
+| D3 | `SingleReader` forced true; `SingleWriter` preserved                                                                                                                                             | The library is the sole reader; the outbound channel is a shared producer surface, so single-writer is a per-use decision                                                                                                     |
+| D4 | Options copied at construction                                                                                                                                                                   | `BoundedChannelOptions` is a mutable class without a clone; the snapshot keeps factories consistent and immune to later mutation                                                                                              |
+| D5 | The convenience constructor takes the BCL `BoundedChannelFullMode` directly; no ZmqSharp full-mode enum exists                                                                                   | Users configuring via `BoundedChannelOptions` and via the convenience constructor use the same BCL enum, removing a redundant parallel type                                                                                   |
+| D6 | Unbounded is opt-in and revises 0004 constraint 3                                                                                                                                                | Default remains bounded with HWM control; unbounded trades the peak-memory bound for never blocking                                                                                                                           |
 
 ## 6. Non-Goals
 

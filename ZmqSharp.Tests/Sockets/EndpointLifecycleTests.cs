@@ -195,6 +195,7 @@ public sealed class EndpointLifecycleTests
     }
 
     private sealed class First;
+
     private sealed class Second;
 
     private sealed class ControlledEndpoint
@@ -210,6 +211,7 @@ public sealed class EndpointLifecycleTests
             FactoryEntered.TrySetResult();
             await FactoryRelease.Task;
         }
+
         public TaskCompletionSource Parked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Stopping { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -218,7 +220,10 @@ public sealed class EndpointLifecycleTests
         public async Task ParkAsync(CancellationToken token)
         {
             Parked.TrySetResult();
-            try { await Task.Delay(System.Threading.Timeout.Infinite, token); }
+            try
+            {
+                await Task.Delay(System.Threading.Timeout.Infinite, token);
+            }
             catch (OperationCanceledException)
             {
                 Stopping.TrySetResult();
@@ -231,19 +236,26 @@ public sealed class EndpointLifecycleTests
     private sealed class ControlledTransport<T>(ControlledEndpoint endpoint)
         : IZTransport<ControlledTransport<T>, ControlledEndpoint>
     {
-        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept { add { } remove { } }
+        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+        {
+            add { }
+            remove { }
+        }
+
         public static async ValueTask<IZConnection> ConnectAsync(ControlledEndpoint endpoint,
             CancellationToken token = default)
         {
             await endpoint.WaitForFactoryAsync();
             return new ControlledConnection(endpoint);
         }
+
         public static async ValueTask<ControlledTransport<T>> BindAsync(ControlledEndpoint endpoint,
             CancellationToken token = default)
         {
             await endpoint.WaitForFactoryAsync();
             return new ControlledTransport<T>(endpoint);
         }
+
         public ValueTask StartAsync(CancellationToken token = default) => new(endpoint.ParkAsync(token));
         public void Dispose() => Interlocked.Increment(ref endpoint.Disposals);
     }
@@ -252,6 +264,7 @@ public sealed class EndpointLifecycleTests
     {
         private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
         private int position;
+
         public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
         {
             if (endpoint.Handshake && position < handshake.Length)
@@ -261,14 +274,18 @@ public sealed class EndpointLifecycleTests
                 position += count;
                 return count;
             }
+
             await endpoint.ParkAsync(token);
             return 0;
         }
+
         public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
+
         public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
         {
             foreach (var segment in bytes) await WriteAsync(segment, token);
         }
+
         public void Abort() { }
 
         public void Dispose() => Interlocked.Increment(ref endpoint.Disposals);

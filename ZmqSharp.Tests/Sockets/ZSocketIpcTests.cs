@@ -52,8 +52,7 @@ public sealed class ZSocketIpcTests
     {
         await using var client = new ZPairSocket();
 
-        var failure = await Record.ExceptionAsync(
-            () => client.ConnectAsync($"ipc://{path}").WaitAsync(TimeSpan.FromSeconds(5)));
+        var failure = await Record.ExceptionAsync(() => client.ConnectAsync($"ipc://{path}").WaitAsync(TimeSpan.FromSeconds(5)));
         failure.Should().NotBeNull();
         (failure is SocketException or IOException).Should().BeTrue();
     }
@@ -127,9 +126,7 @@ public sealed class ZSocketIpcTests
         {
             await Task.WhenAll(drainA, drainB);
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
     }
 
     [Theory]

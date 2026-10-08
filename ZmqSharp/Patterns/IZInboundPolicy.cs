@@ -80,6 +80,5 @@ public static class ZInboundPolicy
     /// Pass-through delivery: every message reaches the bound sink untouched.
     /// The default when a socket composes no inbound policy.
     /// </summary>
-    public static IZInboundPolicy PassThrough { get; } = new ZDelegateInboundPolicy(
-        (_, _, _) => ValueTask.FromResult(ZInboundDecision.Deliver()));
+    public static IZInboundPolicy PassThrough { get; } = new ZDelegateInboundPolicy((_, _, _) => ValueTask.FromResult(ZInboundDecision.Deliver()));
 }

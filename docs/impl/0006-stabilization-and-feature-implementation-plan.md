@@ -111,8 +111,7 @@ slice in this plan.
   receive values. These are design candidates, not accepted signatures; the
   shared architecture that fixes them (transport core, pattern core, semantic
   seam, composition roots, ownership/move rules) is designed in 0007, and its
-  acceptance supersedes this candidate list. The semantic seam
-  (`IPatternSink`, with message aggregation in the transport core) has landed
+  acceptance supersedes this candidate list. The semantic seam (`IPatternSink`, with message aggregation in the transport core) has landed
   as 0007 section 6 step 1+4.
 - Queue types may remain internal implementation machinery even when a
   pattern exposes an async stream or operation-oriented API.
@@ -225,8 +224,7 @@ Implemented:
   internal writable view reacquire the concrete memory from the owner on
   every call and slice it (`byte[]` returns the array; a pooled owner returns
   its `Memory`).
-- Borrowed segments refer to the parser's existing scratch owner
-  (`IMemoryOwner<byte>`) with an `IsBorrowed` flag and `Dispose` skips them;
+- Borrowed segments refer to the parser's existing scratch owner (`IMemoryOwner<byte>`) with an `IsBorrowed` flag and `Dispose` skips them;
   the no-op sentinel owner was removed. `Dispose` releases only a pooled
   owner actually owned by the segment; owner-specific behavior after disposal
   is neither caught nor normalized (0005 section 2.1).
@@ -234,7 +232,7 @@ Implemented:
   layout stays four value fields.
 - 0005 was amended: the contiguous-case bullet, the ownership matrix borrowed
   row, and the impact/parser-encoder bullets now describe the scratch-source
-  + `IsBorrowed` model instead of the no-op owner.
+    + `IsBorrowed` model instead of the no-op owner.
 - Tests: the existing owned/pooled/borrowed/segmented assertions (including
   the parser borrowed-offset path) pass unchanged, and new tests cover a
   sliced owned segment retaining its offset view with array identity and
@@ -318,20 +316,17 @@ Implemented:
   instead of allocating a list per operation: `ZSocketBase.peerSnapshot`
   (routable connections) and `ZQueueSocketBase.peerSnapshot` (active peer states)
   are rebuilt only when a peer is added or removed. `RouteOutbound` takes the
-  snapshot as a `ReadOnlySpan<IZConnection>` and returns a single target
-  (`IZConnection?`; null = drop), so the send path allocates no peer list and
+  snapshot as a `ReadOnlySpan<IZConnection>` and returns a single target (`IZConnection?`; null = drop), so the send path allocates no peer list and
   no result collection. Steady-state sends are allocation-free in an
   optimized build (0004 constraint 4; the absolute allocation gate is
   asserted under Release because Debug boxes async state machines).
 - The send path routes to establishing peers and awaits their establishment
   gate (the failure still surfaces from the send mechanism, per the decided
   semantics); the gate fast path skips the wait when the peer is already
-  established. A peer that retires before or during its write is dropped
-  (decided), not a fault, and never aborts the send.
+  established. A peer that retires before or during its write is dropped (decided), not a fault, and never aborts the send.
 - Peer receive-queue lifetime is modeled as `Active`, `Draining`, and
   `Closed` (`ZQueueSocketBase.PeerPhase`). On disconnect the peer is moved to
-  `Draining`, removed from the aggregate snapshot, and reclaimed immediately
-  (accumulated frames plus buffered messages disposed through the 0006 2.2
+  `Draining`, removed from the aggregate snapshot, and reclaimed immediately (accumulated frames plus buffered messages disposed through the 0006 2.2
   path), then marked `Closed`; this satisfies the completion-gate
   counting-pool expectation that peer failure returns outstanding rentals to
   zero.
@@ -477,8 +472,7 @@ not part of creating this plan.
 ### 7.2 License decision
 
 The project license is **Apache-2.0** (owner decision): permissive adoption
-with an explicit patent grant. The root `LICENSE`, package license expression
-(`PackageLicenseExpression=Apache-2.0`), package readme, repository metadata,
+with an explicit patent grant. The root `LICENSE`, package license expression (`PackageLicenseExpression=Apache-2.0`), package readme, repository metadata,
 and `NOTICE` third-party notices (NetMQ/xUnit/FluentAssertions test
 dependencies) are in place; test-only NetMQ and assertion dependencies are
 included in the notice and redistribution review.
