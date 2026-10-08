@@ -23,7 +23,7 @@ public sealed class ZBroadcastDispatch : IZDispatchPolicy
 /// <summary>
 /// ROUTER identity router (0012): owns the identity-to-connection routing
 /// table. The directed identity send
-/// <see cref="ZRouterSocket.SendAsync(byte[], ZMessage, CancellationToken)"/>
+/// <see cref="ZRouterSocket.SendAsync(ReadOnlyMemory<byte>, ZMessage, CancellationToken)"/>
 /// resolves its target through the policy, inbound peers are assigned their
 /// routing id by it, and teardown releases the mapping here - the policy is
 /// the source of ROUTER's routing and the socket delegates to it. The generic

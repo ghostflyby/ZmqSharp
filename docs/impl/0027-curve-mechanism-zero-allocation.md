@@ -1,4 +1,4 @@
-# 0023 - CURVE Mechanism Zero-Allocation
+# 0027 - CURVE Mechanism Zero-Allocation
 
 Status: accepted
 Date: 2026-08-14
@@ -223,7 +223,7 @@ connection, all required by the seam's borrowed-scratch lifetime rule (0016).
 
 - **Known vectors stay byte-identical.** `LibsodiumKnownVectorTests` keeps
   every vector value; only the backend call shapes moved to destination spans
-  (0023). These vectors lock the hand-written Salsa20/HSalsa20/Poly1305
+  (0027). These vectors lock the hand-written Salsa20/HSalsa20/Poly1305
   cores byte-for-byte against libsodium.
 - **Allocation gates for the CURVE traffic path.** `CurveTrafficAllocationTests`
   in the allocation project drives seal and open over an in-process fake

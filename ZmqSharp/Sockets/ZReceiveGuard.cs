@@ -1,40 +1,4 @@
-namespace ZmqSharp;
-
-/// <summary>Why a received frame was rejected by the connection-level guard.</summary>
-internal enum ZReceiveRejectionReason
-{
-    /// <summary>The frame exceeds the configured single-frame limit.</summary>
-    FrameTooLarge,
-
-    /// <summary>The accumulated message exceeds the configured total limit.</summary>
-    MessageTooLarge,
-
-    /// <summary>The message has more frames than the configured per-message limit.</summary>
-    TooManyFrames
-}
-
-/// <summary>The rejection payload of the connection-level guard (0008 D1).</summary>
-internal readonly struct ZReceiveRejection
-{
-    /// <summary>Classification of the rejection.</summary>
-    public ZReceiveRejectionReason Reason { get; init; }
-
-    /// <summary>The configured limit, when the rejection is a numeric-limit violation.</summary>
-    public long? Limit { get; init; }
-
-    /// <summary>The observed value, when the rejection is a numeric-limit violation.</summary>
-    public long? Actual { get; init; }
-}
-
-/// <summary>
-/// Internal signal that the connection-level guard rejected a frame.
-/// Propagates as the connection failure through the existing teardown path; no
-/// wire ERROR is sent for a traffic-phase rejection (0008 D5).
-/// </summary>
-internal sealed class ZReceiveRejectedException(ZReceiveRejection rejection) : Exception
-{
-    public ZReceiveRejection Rejection { get; } = rejection;
-}
+namespace ZmqSharp.Sockets;
 
 /// <summary>Checked message-total accounting for the receive pipeline (0008 D3/D6).</summary>
 internal static class ZReceiveGuard

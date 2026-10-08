@@ -17,9 +17,20 @@ public interface IZSocket : IAsyncDisposable
     Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    Task UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint)
+    void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    Task DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint)
+    void Disconnect<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
+
+    ValueTask UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+
+    ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+
+    Task BindAsync(string endpoint, CancellationToken token = default);
+    Task ConnectAsync(string endpoint, CancellationToken token = default);
+    ValueTask UnbindAsync(string endpoint, CancellationToken token = default);
+    ValueTask DisconnectAsync(string endpoint, CancellationToken token = default);
 }

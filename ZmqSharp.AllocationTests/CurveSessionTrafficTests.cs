@@ -14,7 +14,7 @@ namespace ZmqSharp.AllocationTests;
 /// exceeds the 255-byte long-size boundary, multi-frame message atomicity
 /// under concurrent sends, and the negative paths (tampered ciphertext,
 /// replayed nonce). These lock the frame reconstruction logic and the
-/// whole-message send gate (0023 review fixes).
+/// whole-message send gate (0027 review fixes).
 /// </summary>
 public sealed class CurveSessionTrafficTests
 {

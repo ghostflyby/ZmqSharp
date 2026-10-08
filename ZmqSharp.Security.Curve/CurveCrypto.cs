@@ -16,7 +16,7 @@ namespace ZmqSharp.Security.Curve;
 /// so the span views are zero-copy over the actual bytes. The struct and its
 /// storage are deliberately mutable: a readonly struct would force a
 /// defensive copy on every field access, silently returning stale bytes
-/// (0023 D2).
+/// (0027 D2).
 /// </summary>
 [InlineArray(32)]
 public struct Key32 : IEquatable<Key32>
@@ -81,12 +81,15 @@ public struct Key32 : IEquatable<Key32>
 /// The protocol skeleton (<see cref="CurveMechanism"/>) composes this; a user
 /// supplies the backend with their library of choice - the BouncyCastle
 /// implementation in this project is one pure-managed, AOT-safe option (0017).
-/// Every primitive writes into a caller-provided destination (0023 D1): output
+/// Every primitive writes into a caller-provided destination (0027 D1): output
 /// sizes are protocol-fixed, so the caller reserves the exact buffer and the
 /// backend never allocates.
 /// </summary>
 public interface ICurveCryptoBackend
 {
+    /// <summary>Derives the 32-byte X25519 public key from a 32-byte secret key.</summary>
+    void DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey);
+
     /// <summary>Generates a fresh X25519 key pair (for the ephemeral connection keys).</summary>
     void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey);
 
@@ -105,7 +108,7 @@ public interface ICurveCryptoBackend
         Span<byte> destination);
 
     /// <summary>
-    /// Opens a <see cref="Box"/> payload. The tag is verified first (0023 D5):
+    /// Opens a <see cref="Box"/> payload. The tag is verified first (0027 D5):
     /// on authentication failure the destination is left untouched and false is
     /// returned; on success <paramref name="written"/> is the plaintext length.
     /// </summary>
@@ -137,18 +140,25 @@ public interface ICurveCryptoBackend
 /// construction composes XSalsa20 + Poly1305 the way libsodium's
 /// crypto_secretbox does: the first 32 bytes of the XSalsa20 keystream form
 /// the one-time Poly1305 key, the rest encrypts the message. The Salsa20 core
-/// and Poly1305 are hand-written (0023) in the style of the existing HSalsa20,
+/// and Poly1305 are hand-written (0027) in the style of the existing HSalsa20,
 /// so the hot path is stateless and allocates nothing; BouncyCastle is used
 /// only for X25519 and Ed25519. libsodium known vectors lock the wire bytes.
 /// </summary>
 public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
 {
+    public void DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey)
+    {
+        ArgumentOutOfRangeException.ThrowIfNotEqual(secretKey.Length, 32);
+        ArgumentOutOfRangeException.ThrowIfLessThan(publicKey.Length, 32);
+        X25519.GeneratePublicKey(secretKey, publicKey);
+    }
+
     public void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey)
     {
         Span<byte> secret = stackalloc byte[32];
         RandomNumberGenerator.Fill(secret);
         Span<byte> pub = stackalloc byte[32];
-        X25519.GeneratePublicKey(secret, pub);
+        DerivePublicKey(secret, pub);
         secretKey = Key32.From(secret);
         publicKey = Key32.From(pub);
     }
@@ -216,7 +226,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
             throw new ArgumentException("destination is too small for the opened box", nameof(destination));
 
         // Verify the one-time Poly1305 tag before decrypting: the destination
-        // is untouched on authentication failure (0023 D5).
+        // is untouched on authentication failure (0027 D5).
         Span<byte> polyKey = stackalloc byte[32];
         Poly1305Key(key, nonce, polyKey);
         Span<byte> expected = stackalloc byte[16];

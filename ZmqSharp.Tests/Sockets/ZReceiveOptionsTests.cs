@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Xunit;
+using ZmqSharp.Sockets;
 
 namespace ZmqSharp.Tests.Sockets;
 

@@ -92,7 +92,8 @@ internal sealed class ZConnection(Stream stream) : IZConnection
     public void Dispose()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-        writeGate.Dispose();
+        // An in-flight async write still releases the managed gate in its finally.
+        // Closing the transport interrupts I/O; leave the gate alive for that release.
         stream.Dispose();
     }
 }
