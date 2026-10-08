@@ -1,6 +1,6 @@
 # 0030 - Byte Connections, Frame Sessions, and Peer Lifecycle
 
-Status: draft
+Status: accepted
 Date: 2026-10-08
 
 Implements the replacement model authorized after the reviews in 0028 and 0029.
@@ -233,8 +233,7 @@ library hot-path budgets. The performance harness is retained at
 `eng/measure-wire-allocations/` for repeating the measurements against another checkout.
 
 Release build, full tests, format verification and Native AOT publish/run are
-required final checks. This document remains draft pending design review, even
-though its implementation is present.
+required final checks; section 9 records their results.
 
 ## 9. Final validation
 
@@ -269,8 +268,11 @@ prerequisites, uses Python 3.12 with pyzmq 27.1.0, runs NULL and reverse-topolog
 CURVE over TCP/IPC, and checks all four PLAIN role/bind combinations with that
 same native executable. It also builds the allocation measurement consumer and
 verifies formatting of both engineering projects; performance measurements remain
-manual. The job has a 20-minute timeout and uploads publish/run logs on failure.
+manual. The job has a 20-minute timeout and uploads its logs regardless of outcome.
 
-These are configured CI checks, not recorded Linux results. Linux AOT and PLAIN
-acceptance can only be claimed after an actual successful workflow run. The local
-macOS evidence above is retained independently.
+The validation has run in CI: on pull request #41 and on main at commit
+`767974e` (2026-10-08). The AOT consumer printed `AOT-SMOKE-OK`, the PLAIN
+harness passed all four role/bind combinations, and all three platform jobs
+reported 412 tests with zero failures. Linux AOT and PLAIN acceptance therefore
+rest on a recorded workflow run. The local macOS evidence above is retained
+independently.

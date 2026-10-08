@@ -6,8 +6,8 @@ Date: 2026-10-07
 Records the follow-up review of the architecture/API assessment and the agreed
 implementation sequence. Stage one is specified in 0029. Stages two and three
 are specified by 0030 and implemented after the correctness work, in the
-user-authorized role, frame-boundary and registry change sequence. 0030 remains
-draft pending design review.
+user-authorized role, frame-boundary and registry change sequence. 0030 is
+accepted.
 
 ## 1. Review conclusions
 
