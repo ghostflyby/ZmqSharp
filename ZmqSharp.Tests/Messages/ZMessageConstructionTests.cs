@@ -30,7 +30,7 @@ public sealed class ZMessageConstructionTests
 
         var message = ZMessage.Copy(frames);
 
-        message.TryGetValue(out ZMultiMessage multi).Should().BeTrue();
+        message.TryGetValue(out ZMultiMessage _).Should().BeTrue();
         message.Count.Should().Be(3);
         message[0].ToSequence().ToArray().Should().Equal([.. "a"u8]);
         message[1].ToSequence().ToArray().Should().Equal([.. "bb"u8]);
@@ -54,7 +54,7 @@ public sealed class ZMessageConstructionTests
         var message = ZMessage.Copy(new ReadOnlySequence<byte>("payload"u8.ToArray()));
 
         message.TryGetValue(out ZSingleMessage single).Should().BeTrue();
-        single[0].TryGetValue(out ZSegment segment).Should().BeTrue();
+        single[0].TryGetValue(out ZSegment _).Should().BeTrue();
         single[0].ToSequence().ToArray().Should().Equal([.. "payload"u8]);
         message.Dispose();
     }

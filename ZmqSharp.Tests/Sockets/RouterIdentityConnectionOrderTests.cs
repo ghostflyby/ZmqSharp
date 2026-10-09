@@ -4,9 +4,7 @@ using System.Threading.Channels;
 using FluentAssertions;
 using NetMQ;
 using Xunit;
-using ZmqSharp;
 using ZmqSharp.Tests.Interop;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Tests.Sockets;
 

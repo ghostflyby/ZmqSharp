@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Net;
 using System.Net.Sockets;
 using FluentAssertions;
 using Xunit;

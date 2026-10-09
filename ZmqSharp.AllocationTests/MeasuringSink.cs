@@ -1,5 +1,3 @@
-using ZmqSharp.Transports;
-
 namespace ZmqSharp.AllocationTests;
 
 /// <summary>
@@ -13,18 +11,16 @@ namespace ZmqSharp.AllocationTests;
 /// </summary>
 internal sealed class MeasuringSink(int capacity) : IPatternSink
 {
-    private readonly long[] samples = new long[capacity];
-    private readonly int[] threadIds = new int[capacity];
     private readonly Lock gate = new();
     private readonly List<(int Threshold, TaskCompletionSource Tcs)> pending = [];
     private int index;
     private long received;
 
     /// <summary>Per-delivery absolute counters, captured on the pump thread.</summary>
-    public long[] Samples => samples;
+    public long[] Samples { get; } = new long[capacity];
 
     /// <summary>Thread id observed at each delivery, for diagnosing pump thread stability.</summary>
-    public int[] ThreadIds => threadIds;
+    public int[] ThreadIds { get; } = new int[capacity];
 
     /// <summary>Messages delivered so far.</summary>
     public int Count => (int)Volatile.Read(ref received);
@@ -48,8 +44,8 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 
     public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
     {
-        samples[index] = GC.GetAllocatedBytesForCurrentThread();
-        threadIds[index] = Environment.CurrentManagedThreadId;
+        Samples[index] = GC.GetAllocatedBytesForCurrentThread();
+        ThreadIds[index] = Environment.CurrentManagedThreadId;
         index++;
         Volatile.Write(ref received, index);
         NotifyWaiters();

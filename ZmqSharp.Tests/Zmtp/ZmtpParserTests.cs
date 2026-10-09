@@ -1,8 +1,6 @@
 using FluentAssertions;
 using Xunit;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Zmtp;
 

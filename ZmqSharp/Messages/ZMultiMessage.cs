@@ -111,20 +111,11 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator()
-    {
-        return new Enumerator(frames);
-    }
+    public Enumerator GetEnumerator() => new(frames);
 
-    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public void Dispose()
     {

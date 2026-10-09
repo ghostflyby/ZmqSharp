@@ -1,12 +1,9 @@
 using System.Buffers;
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
-using ZmqSharp;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Tests.Interop;
 

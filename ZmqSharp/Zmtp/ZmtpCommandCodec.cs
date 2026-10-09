@@ -35,12 +35,9 @@ public static class ZmtpCommandCodec
         var candidate = body.Slice(1, nameLength);
         foreach (var c in candidate)
         {
-            var isAlpha = (c >= (byte)'A' && c <= (byte)'Z') || (c >= (byte)'a' && c <= (byte)'z');
-            if (!isAlpha)
-            {
-                name = default;
-                return false;
-            }
+            if (char.IsAsciiLetter(Convert.ToChar(c))) continue;
+            name = default;
+            return false;
         }
 
         name = candidate;

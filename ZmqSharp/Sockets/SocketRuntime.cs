@@ -563,7 +563,7 @@ internal sealed class SocketRuntime : IZSocket
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(record.Registration.Token);
         if (handshakeTimeoutMs > 0) timeout.CancelAfter(handshakeTimeoutMs);
-        using var abort = timeout.Token.UnsafeRegister(static state =>
+        await using var abort = timeout.Token.UnsafeRegister(static state =>
         {
             if (state is IZConnection connection) connection.Abort();
         }, record.Connection);
@@ -715,7 +715,6 @@ internal sealed class SocketRuntime : IZSocket
     {
         Exception? failure = null;
         Exception? cleanupFailure = null;
-        ZmtpParser? parser = null;
         var token = record.Registration.Token;
         try
         {
@@ -738,7 +737,7 @@ internal sealed class SocketRuntime : IZSocket
 
             PeerEstablished?.Invoke(record.Peer, ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span));
             ZFrameHandlerAsync handler = static (_, _) => ValueTask.FromResult(true);
-            parser = record.Session.CreateParser((frame, ct) => handler(frame, ct),
+            var parser = record.Session.CreateParser((frame, ct) => handler(frame, ct),
                 record.Materializer?.CreateAllocator(), Pool, maxCommandSize, maxFrameLength);
             handler = NeedsAggregation ? MessageSinkHandler(record) : BorrowedSink(parser);
             lock (StateLock)

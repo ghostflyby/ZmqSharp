@@ -84,24 +84,24 @@ internal sealed class ReceiveQueueSurface
 
     public void Complete()
     {
-        if (outbound is { } queue)
-            while (queue.Reader.TryRead(out var message))
+        if (outbound is not null)
+            while (outbound.Reader.TryRead(out var message))
                 message.Dispose();
         completion.TrySetResult();
     }
 
     private async Task SendPumpAsync(CancellationToken token)
     {
-        if (outbound is not { } channel) return;
+        if (outbound is null) return;
         try
         {
-            await foreach (var message in channel.Reader.ReadAllAsync(token))
+            await foreach (var message in outbound.Reader.ReadAllAsync(token))
                 await runtime.SendAsyncCore(message, token);
         }
         catch (Exception failure) when (failure is OperationCanceledException or ChannelClosedException) { }
         catch (Exception failure)
         {
-            channel.Writer.TryComplete(failure);
+            outbound.Writer.TryComplete(failure);
         }
     }
 }

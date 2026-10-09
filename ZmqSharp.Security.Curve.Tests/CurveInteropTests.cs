@@ -60,7 +60,8 @@ public sealed class CurveInteropTests
         }
         else reference.Bind(endpoint);
 
-        using var poller = new NetMQPoller { reference };
+        using var poller = new NetMQPoller();
+        poller.Add(reference);
         poller.RunAsync();
         if (!localBinds) await local.ConnectAsync(endpoint, timeout.Token);
         using (var hello = await local.Messages.ReadAsync(timeout.Token))

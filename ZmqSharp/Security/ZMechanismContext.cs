@@ -18,7 +18,6 @@ public sealed class ZMechanismContext : IDisposable
 {
     private readonly IZByteReader reader;
     private readonly ZmtpFrameEncoder encoder;
-    private readonly int maxCommandSize;
     private readonly MemoryPool<byte> pool;
     private readonly byte[] headerBuffer = new byte[9];
     private IMemoryOwner<byte>? scratchOwner;
@@ -33,7 +32,7 @@ public sealed class ZMechanismContext : IDisposable
         reader = connection;
         encoder = new ZmtpFrameEncoder(connection);
         LocalReadyBody = localReadyBody;
-        this.maxCommandSize = maxCommandSize;
+        this.MaxCommandSize = maxCommandSize;
         this.pool = pool ?? MemoryPool<byte>.Shared;
     }
 
@@ -45,7 +44,7 @@ public sealed class ZMechanismContext : IDisposable
     public ReadOnlyMemory<byte> LocalReadyBody { get; }
 
     /// <summary>Command-frame size limit shared with the traffic parser (0008 Slice B).</summary>
-    public int MaxCommandSize => maxCommandSize;
+    public int MaxCommandSize { get; }
 
     /// <summary>Writes one command frame (header + body) during the exclusive handshake phase.</summary>
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
@@ -80,8 +79,8 @@ public sealed class ZMechanismContext : IDisposable
             ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
             : headerBuffer[1];
         if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
-        if (size > maxCommandSize)
-            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {maxCommandSize} bytes");
+        if (size > MaxCommandSize)
+            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
         if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
         var length = (int)size;

@@ -18,7 +18,6 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     private readonly object? owner;
     private readonly int offset;
     private readonly int length;
-    private readonly bool isBorrowed;
 
     internal ZSegment(object owner, int offset, int length)
         : this(owner, offset, length, false) { }
@@ -30,7 +29,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         this.owner = owner;
         this.offset = offset;
         this.length = length;
-        this.isBorrowed = isBorrowed;
+        IsBorrowed = isBorrowed;
     }
 
     /// <summary>
@@ -85,15 +84,15 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     }
 
     /// <summary>True when the segment is owned (backed by a caller byte[]).</summary>
-    public bool IsOwned => !isBorrowed && owner is byte[];
+    public bool IsOwned => !IsBorrowed && owner is byte[];
 
     /// <summary>True when the segment is a borrowed view (parser scratch source).</summary>
-    internal bool IsBorrowed => isBorrowed;
+    internal bool IsBorrowed { get; }
 
     /// <summary>Returns the backing array when owned; false otherwise.</summary>
     public bool GetOwnedArray(out byte[] array)
     {
-        if (!isBorrowed && owner is byte[] owned)
+        if (!IsBorrowed && owner is byte[] owned)
         {
             array = owned;
             return true;
@@ -124,27 +123,18 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator()
-    {
-        return new Enumerator(this);
-    }
+    public Enumerator GetEnumerator() => new(this);
 
-    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator() => GetEnumerator();
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public void Dispose()
     {
         // A pooled owner is released; a borrowed segment must never release
         // the parser's scratch. Owner-specific behavior after disposal is
         // neither caught nor normalized (0005 section 2.1).
-        if (!isBorrowed && owner is IMemoryOwner<byte> memoryOwner) memoryOwner.Dispose();
+        if (!IsBorrowed && owner is IMemoryOwner<byte> memoryOwner) memoryOwner.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZSegment>
