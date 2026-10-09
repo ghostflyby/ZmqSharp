@@ -563,7 +563,7 @@ internal sealed class SocketRuntime : IZSocket
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(record.Registration.Token);
         if (handshakeTimeoutMs > 0) timeout.CancelAfter(handshakeTimeoutMs);
-        using var abort = timeout.Token.UnsafeRegister(static state =>
+        await using var abort = timeout.Token.UnsafeRegister(static state =>
         {
             if (state is IZConnection connection) connection.Abort();
         }, record.Connection);
