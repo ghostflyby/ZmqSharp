@@ -11,19 +11,21 @@ namespace ZmqSharp.Tests.Sockets;
 
 public sealed class ReceiveComponentsTests
 {
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task WakeGate_CompletesCapturedSignalAndRearms()
     {
+        var token = TestContext.Current.CancellationToken;
         var wake = new WakeGate();
         var first = wake.Capture();
         wake.Wake();
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        await first.WaitAsync(token);
         wake.Capture().IsCompleted.Should().BeFalse();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task AggregateReader_CapturesWakeBeforeInspectingQueues()
     {
+        var token = TestContext.Current.CancellationToken;
         var wake = new WakeGate();
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var inspections = 0;
@@ -33,11 +35,11 @@ public sealed class ReceiveComponentsTests
             if (++inspections == 1) wake.Wake();
             return [];
         }, wake, finished.Task);
-        (await reader.WaitToReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue();
-        var waiting = reader.WaitToReadAsync().AsTask();
+        (await reader.WaitToReadAsync(token).AsTask()).Should().BeTrue();
+        var waiting = reader.WaitToReadAsync(token).AsTask();
         waiting.IsCompleted.Should().BeFalse();
         finished.TrySetResult();
-        (await waiting.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeFalse();
+        (await waiting.WaitAsync(token)).Should().BeFalse();
     }
 
     [Fact]
@@ -68,9 +70,10 @@ public sealed class ReceiveComponentsTests
         await registration.FinishAsync();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task QueueReader_AndReclaim_TransferEachOwnerExactlyOnce()
     {
+        var token = TestContext.Current.CancellationToken;
         await using var runtime = new SocketRuntime(new ZSocketOptions(),
             new ZSinglePeerDispatch(), ZSocketTypes.Pair, supportsQueue: true);
         var surface = runtime.QueueSurface ?? throw new InvalidOperationException();
@@ -79,13 +82,13 @@ public sealed class ReceiveComponentsTests
         var record = new PeerRecord(connection, registration, false) { Phase = PeerPhase.Established };
         lock (runtime.StateLock) surface.Add(record);
         var owners = Enumerable.Range(0, 8).Select(_ => new OnceOwner()).ToArray();
-        foreach (var owner in owners) await surface.DeliverAsync(record, ZMessage.FromPooled(owner), default);
+        foreach (var owner in owners) await surface.DeliverAsync(record, ZMessage.FromPooled(owner), token);
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reading = Task.Run(async () =>
         {
             await start.Task;
             while (surface.Messages.TryRead(out var message)) message.Dispose();
-        });
+        }, token);
         var reclaiming = Task.Run(async () =>
         {
             await start.Task;
@@ -96,9 +99,9 @@ public sealed class ReceiveComponentsTests
             }
 
             surface.Reclaim(record, null);
-        });
+        }, token);
         start.TrySetResult();
-        await Task.WhenAll(reading, reclaiming).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(reading, reclaiming).WaitAsync(token);
         owners.Should().OnlyContain(owner => owner.Disposals == 1);
         surface.Messages.TryRead(out _).Should().BeFalse();
         await registration.FinishAsync();
@@ -118,11 +121,12 @@ public sealed class ReceiveComponentsTests
     [Fact]
     public async Task Parser_ReadFailureAfterMaterialization_ReclaimsTheUntransferredFrame()
     {
+        var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
         using var parser = new ZmtpParser(new HeaderThenFailure(), (_, _) =>
             throw new InvalidOperationException("frame must not be delivered"), materializer.CreateAllocator(), pool);
-        await FluentActions.Awaiting(() => parser.ParseAsync().AsTask()).Should().ThrowAsync<IOException>();
+        await FluentActions.Awaiting(() => parser.ParseAsync(token).AsTask()).Should().ThrowAsync<IOException>();
         pool.Outstanding.Should().Be(0);
     }
 

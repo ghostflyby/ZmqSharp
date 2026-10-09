@@ -16,13 +16,14 @@ namespace ZmqSharp.Security.Curve.Tests;
 /// </summary>
 public sealed class CurveEndToEndTests
 {
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
     public async Task CurveClient_AndServer_AuthenticateAndExchangeMessages(bool reversed, bool ipc)
     {
+        var token = TestContext.Current.CancellationToken;
         var crypto = new BouncyCastleCurveCrypto();
         crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
         crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
@@ -43,29 +44,27 @@ public sealed class CurveEndToEndTests
             },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-
         var path = Path.Combine(Path.GetTempPath(), $"zmq-curve-{Guid.NewGuid().ToString("N")[..12]}.sock");
         var address = ipc ? $"ipc://{path}" : $"tcp://127.0.0.1:{GetFreePort()}";
-        await (reversed ? client : server).BindAsync(address, cts.Token);
-        await (reversed ? server : client).ConnectAsync(address, cts.Token);
+        await (reversed ? client : server).BindAsync(address, token);
+        await (reversed ? server : client).ConnectAsync(address, token);
 
         // Client -> server.
-        await client.SendAsync(ZMessage.FromOwned([.. "hello-secret"u8]), cts.Token);
-        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hello-secret"u8]), token);
+        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         message.Should().NotBeNull();
         message.Value[0].ToSequence().ToArray().Should().Equal([.. "hello-secret"u8]);
         message.Value.Dispose();
 
         // Server -> client (two frames; multipart construction is an internal
         // concern, so separate single-frame messages exercise the same seal path).
-        await server.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
-        await server.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
-        var first = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), cts.Token);
+        await server.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
+        await server.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
+        var first = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), token);
         first.Should().NotBeNull();
         first.Value[0].ToSequence().ToArray().Should().Equal([.. "a"u8]);
         first.Value.Dispose();
-        var second = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), cts.Token);
+        var second = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), token);
         second.Should().NotBeNull();
         second.Value[0].ToSequence().ToArray().Should().Equal([.. "b"u8]);
         second.Value.Dispose();
@@ -74,6 +73,7 @@ public sealed class CurveEndToEndTests
     [Fact]
     public async Task CurveClient_WithWrongServerKey_FailsHandshake()
     {
+        var token = TestContext.Current.CancellationToken;
         var crypto = new BouncyCastleCurveCrypto();
         crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
         crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
@@ -97,13 +97,13 @@ public sealed class CurveEndToEndTests
         });
 
         var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         // The client seals HELLO under the wrong server public key, so the
         // server's HELLO box never opens and it tears the connection down;
         // the client surfaces either the protocol failure or the peer close
         // (the same teardown race the socket layer documents).
-        var act = async () => await client.ConnectAsync($"tcp://127.0.0.1:{port}");
+        var act = async () => await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
         var failure = await Record.ExceptionAsync(act);
         failure.Should().NotBeNull();
         (failure is ZMechanismException or IOException).Should().BeTrue();
@@ -129,7 +129,7 @@ public sealed class CurveEndToEndTests
         {
             return await reader.ReadAsync(cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
             return null;
         }

@@ -16,7 +16,7 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class ReqRepInteropTests
 {
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task ZmqSharpReq_NetMQRep_RoundTrips()
     {
         using var rep = new ResponseSocket();
@@ -25,14 +25,14 @@ public sealed class ReqRepInteropTests
         rep.Bind($"tcp://127.0.0.1:{port}");
 
         await using var req = new ZReqSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await req.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await req.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         for (var i = 0; i < 5; i++)
         {
             // Our request is framed [empty, payload]; NetMQ REP strips the
             // delimiter and delivers the payload, echoing it re-framed.
-            var pending = req.RequestAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"req-{i}")), cts.Token);
+            var pending = req.RequestAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"req-{i}")), token);
 
             var received = new NetMQMessage();
             rep.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref received).Should().BeTrue();
@@ -52,11 +52,12 @@ public sealed class ReqRepInteropTests
     {
         await using var rep = new ZRepSocket();
         var port = InteropHelpers.GetFreePort();
-        await rep.BindAsync($"tcp://127.0.0.1:{port}");
-        rep.BindRequestHandler((context, token) =>
+        var token = TestContext.Current.CancellationToken;
+        await rep.BindAsync($"tcp://127.0.0.1:{port}", token);
+        rep.BindRequestHandler((context, replyToken) =>
         {
             var payload = context[0].ToSequence().ToArray();
-            return rep.SendReplyAsync(context, ZMessage.FromOwned(payload), token);
+            return rep.SendReplyAsync(context, ZMessage.FromOwned(payload), replyToken);
         });
 
         using var req = new RequestSocket();
@@ -75,7 +76,7 @@ public sealed class ReqRepInteropTests
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ZmqSharpPair_NetMQDealer_HandshakeRejected()
     {
         using var dealer = new DealerSocket();
@@ -84,14 +85,14 @@ public sealed class ReqRepInteropTests
         dealer.Bind($"tcp://127.0.0.1:{port}");
 
         await using var pair = new ZPairSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         // PAIR <-> DEALER is incompatible: establishment must fail. The
         // surfaced type is OS-dependent - the handshake rejection raises
         // ZeroMqProtocolException, but the peer's abortive close after our
         // ERROR can surface as IOException/SocketException on Windows and
         // Ubuntu (the documented teardown race in ZSocketBase).
-        var failure = await Record.ExceptionAsync(() => pair.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token));
+        var failure = await Record.ExceptionAsync(() => pair.ConnectAsync($"tcp://127.0.0.1:{port}", token));
         failure.Should().NotBeNull();
         (failure is ZeroMqProtocolException or IOException or SocketException).Should().BeTrue();
     }

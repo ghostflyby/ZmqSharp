@@ -21,37 +21,39 @@ namespace ZmqSharp.Tests.Transports;
 /// </summary>
 public sealed class ZSocketConnectionTests
 {
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task SendFrameAsync_ReachesPeerAsExactFrame()
     {
-        var (client, server) = await OpenPairAsync();
+        var token = TestContext.Current.CancellationToken;
+        var (client, server) = await OpenPairAsync(token);
         using (client)
         using (server)
         {
             var recorder = new FrameRecorder();
-            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder));
+            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
             using var sender = new ZmtpSession(client);
 
-            await sender.SendFrameAsync("hello"u8.ToArray(), more: false);
+            await sender.SendFrameAsync("hello"u8.ToArray(), more: false, token: token);
 
-            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(token);
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().Equal([.. "hello"u8]);
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task SegmentedMessage_RoundTripsAsOneFrame_OverScatterWrite()
     {
-        var (client, server) = await OpenPairAsync();
+        var token = TestContext.Current.CancellationToken;
+        var (client, server) = await OpenPairAsync(token);
         using (client)
         using (server)
         {
             var recorder = new FrameRecorder();
-            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder));
+            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
@@ -60,32 +62,33 @@ public sealed class ZSocketConnectionTests
             // A multi-segment frame exercises the buffer-list scatter write:
             // header + each segment, sent with one SendAsync call.
             using var message = MessageFactory.SegmentedFrame([.. "hel"u8], [.. "lo"u8], [.. "!"u8]);
-            await sender.SendAsync(message);
+            await sender.SendAsync(message, token);
 
-            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(token);
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().Equal([.. "hello!"u8]);
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task LongFrame_OverRawSocketPair_UsesLongEncoding()
     {
-        var (client, server) = await OpenPairAsync();
+        var token = TestContext.Current.CancellationToken;
+        var (client, server) = await OpenPairAsync(token);
         using (client)
         using (server)
         {
             var recorder = new FrameRecorder();
-            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder));
+            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
             using var sender = new ZmtpSession(client);
 
             var payload = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
-            await sender.SendFrameAsync(payload, more: false);
+            await sender.SendFrameAsync(payload, more: false, token: token);
 
-            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(token);
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().Equal(payload);
         }
@@ -94,50 +97,53 @@ public sealed class ZSocketConnectionTests
     [Fact]
     public async Task ReadAsync_ReturnsPeerBytes_WithoutAStreamWrapper()
     {
-        var (client, server) = await OpenPairAsync();
+        var token = TestContext.Current.CancellationToken;
+        var (client, server) = await OpenPairAsync(token);
         using (client)
         using (server)
         {
             // Write raw bytes on the client socket and read them through the
             // connection's direct Socket.ReceiveAsync path.
-            await client.WriteAsync("direct"u8.ToArray());
+            await client.WriteAsync("direct"u8.ToArray(), token);
 
             var buffer = new byte[6];
-            var read = await server.ReadAsync(buffer);
+            var read = await server.ReadAsync(buffer, token);
             read.Should().Be(6);
             buffer.Should().Equal([.. "direct"u8]);
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task EmptyBodyFrame_RoundTrips_OverSingleSegmentFastPath()
     {
         // An empty frame body falls back to the single-segment sequence form,
         // exercising the socket sink's single-buffer fast path (no scatter).
-        var (client, server) = await OpenPairAsync();
+        var token = TestContext.Current.CancellationToken;
+        var (client, server) = await OpenPairAsync(token);
         using (client)
         using (server)
         {
             var recorder = new FrameRecorder();
-            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder));
+            _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             session.Should().NotBeNull();
             using var sender = new ZmtpSession(client);
 
-            await sender.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false);
+            await sender.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false, token);
 
-            await recorder.FirstFrameAsync.WaitAsync(TimeSpan.FromSeconds(5));
+            await recorder.FirstFrameAsync.WaitAsync(token);
             recorder.Frames.Should().HaveCount(1);
             recorder.Frames[0].Should().BeEmpty();
         }
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task LargeScatterWrite_WithSmallSocketBuffer_WritesTheCompleteFrame(bool ipc)
     {
+        var token = TestContext.Current.CancellationToken;
         var path = TestTransports.IpcSocketPath("zmq-scatter-");
         EndPoint endpoint = ipc ? new UnixDomainSocketEndPoint(path) : new IPEndPoint(IPAddress.Loopback, 0);
         using var listener = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
@@ -145,11 +151,10 @@ public sealed class ZSocketConnectionTests
         listener.Listen();
         using var client = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
         client.SendBufferSize = 4096;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try
         {
-            await client.ConnectAsync(listener.LocalEndPoint ?? endpoint, timeout.Token);
-            using var server = await listener.AcceptAsync(timeout.Token);
+            await client.ConnectAsync(listener.LocalEndPoint ?? endpoint, token);
+            using var server = await listener.AcceptAsync(token);
             using var writer = new ZSocketConnection(client);
             using var reader = new ZSocketConnection(server);
             using var session = new ZmtpSession(writer);
@@ -166,10 +171,10 @@ public sealed class ZSocketConnectionTests
                 delivered++;
                 return ValueTask.FromResult(true);
             });
-            var receiving = parser.ParseAsync(timeout.Token).AsTask();
-            await session.SendAsync(message, timeout.Token);
+            var receiving = parser.ParseAsync(token).AsTask();
+            await session.SendAsync(message, token);
             writer.Abort();
-            await receiving.WaitAsync(timeout.Token);
+            await receiving.WaitAsync(token);
             delivered.Should().Be(1);
         }
         finally
@@ -179,13 +184,13 @@ public sealed class ZSocketConnectionTests
     }
 
     /// <summary>Opens a connected raw-socket pair wrapped in ZSocketConnection.</summary>
-    private static async Task<(ZSocketConnection Client, ZSocketConnection Server)> OpenPairAsync()
+    private static async Task<(ZSocketConnection Client, ZSocketConnection Server)> OpenPairAsync(CancellationToken token)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await clientSocket.ConnectAsync(listener.LocalEndpoint);
-        var serverSocket = await listener.AcceptSocketAsync();
+        await clientSocket.ConnectAsync(listener.LocalEndpoint, token);
+        var serverSocket = await listener.AcceptSocketAsync(token);
         listener.Stop();
         return (new ZSocketConnection(clientSocket), new ZSocketConnection(serverSocket));
     }

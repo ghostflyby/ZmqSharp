@@ -16,7 +16,7 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class PushPullInteropTests
 {
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task ZmqSharpPush_NetMQPull_Delivers()
     {
         using var pull = new PullSocket();
@@ -25,12 +25,12 @@ public sealed class PushPullInteropTests
         pull.Bind($"tcp://127.0.0.1:{port}");
 
         await using var push = new ZPushSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await push.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await push.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         for (var i = 0; i < 5; i++)
         {
-            await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"msg-{i}")), cts.Token);
+            await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"msg-{i}")), token);
             var received = InteropHelpers.ReceiveFrame(pull, TimeSpan.FromSeconds(5));
             received.Should().Equal(Encoding.ASCII.GetBytes($"msg-{i}"));
         }
@@ -40,8 +40,9 @@ public sealed class PushPullInteropTests
     public async Task NetMQPush_ZmqSharpPull_Delivers()
     {
         await using var pull = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
+        var token = TestContext.Current.CancellationToken;
         var port = InteropHelpers.GetFreePort();
-        await pull.BindAsync($"tcp://127.0.0.1:{port}");
+        await pull.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var push = new PushSocket();
         push.Options.Linger = TimeSpan.Zero;
@@ -50,14 +51,14 @@ public sealed class PushPullInteropTests
         for (var i = 0; i < 5; i++)
         {
             push.SendFrame(Encoding.ASCII.GetBytes($"push-{i}"));
-            var message = await ReadMessageAsync(pull.Messages, TimeSpan.FromSeconds(5));
+            var message = await ReadMessageAsync(pull.Messages, TimeSpan.FromSeconds(5), token);
             message.Should().NotBeNull();
             message.Value[0].ToSequence().ToArray().Should().Equal(Encoding.ASCII.GetBytes($"push-{i}"));
             message.Value.Dispose();
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task ZmqSharpPush_RoundRobinsAcrossTwoPulls()
     {
         using var pullA = new PullSocket();
@@ -70,13 +71,13 @@ public sealed class PushPullInteropTests
         pullB.Bind($"tcp://127.0.0.1:{portB}");
 
         await using var push = new ZPushSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await push.ConnectAsync($"tcp://127.0.0.1:{portA}", cts.Token);
-        await push.ConnectAsync($"tcp://127.0.0.1:{portB}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await push.ConnectAsync($"tcp://127.0.0.1:{portA}", token);
+        await push.ConnectAsync($"tcp://127.0.0.1:{portB}", token);
 
         // Distinct payloads per turn make cross-peer reordering detectable.
         for (var i = 0; i < 8; i++)
-            await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"turn-{i}")), cts.Token);
+            await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"turn-{i}")), token);
 
         // Drain both pulls until all eight turns arrive or the overall window
         // expires: the messages may still be in flight on a slow runner, so a
@@ -89,7 +90,7 @@ public sealed class PushPullInteropTests
         {
             turnsA.AddRange(DrainAvailable(pullA));
             turnsB.AddRange(DrainAvailable(pullB));
-            await Task.Delay(20, cts.Token);
+            await Task.Delay(20, token);
         }
 
         turnsA.Should().HaveCount(4);
@@ -104,14 +105,18 @@ public sealed class PushPullInteropTests
             yield return Encoding.ASCII.GetString(frame);
     }
 
-    private static async Task<ZMessage?> ReadMessageAsync(ChannelReader<ZMessage> reader, TimeSpan timeout)
+    private static async Task<ZMessage?> ReadMessageAsync(
+        ChannelReader<ZMessage> reader,
+        TimeSpan timeout,
+        CancellationToken token)
     {
-        using var cts = new CancellationTokenSource(timeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(timeout);
         try
         {
             return await reader.ReadAsync(cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
             return null;
         }

@@ -11,9 +11,7 @@ namespace ZmqSharp.Tests.Sockets;
 
 public sealed class RuntimeLifecycleTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
-
-    [Theory]
+    [Theory(Timeout = 20_000)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Disconnect_WaitsForTrackedSendAndCleansBeforePublicEvent(bool throwFromEvent)
@@ -36,27 +34,28 @@ public sealed class RuntimeLifecycleTests
             observed = true;
             if (throwFromEvent) throw new InvalidOperationException("event failed");
         };
+        var token = TestContext.Current.CancellationToken;
         try
         {
-            await runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint);
+            await runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint, token);
             endpoint.Peer = runtime.PeerSnapshot.Single();
-            await endpoint.Connection.ReadWaiting.Task.WaitAsync(Timeout);
+            await endpoint.Connection.ReadWaiting.Task.WaitAsync(token);
             endpoint.Connection.BlockWrites = true;
             runtime.SendTracked(endpoint.Peer, ZMessage.FromPooled(pool.Rent(8)));
-            await endpoint.Connection.WriteStarted.Task.WaitAsync(Timeout);
-            var stopping = runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint).AsTask();
-            await endpoint.Connection.Aborted.Task.WaitAsync(Timeout);
+            await endpoint.Connection.WriteStarted.Task.WaitAsync(token);
+            var stopping = runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint, token).AsTask();
+            await endpoint.Connection.Aborted.Task.WaitAsync(token);
             stopping.IsCompleted.Should().BeFalse();
             endpoint.Connection.Disposals.Should().Be(0);
             codec.Disposals.Should().Be(0);
             pool.Outstanding.Should().Be(1);
             endpoint.Connection.ReleaseWrite.TrySetResult();
             if (throwFromEvent)
-                await FluentActions.Awaiting(() => stopping.WaitAsync(Timeout)).Should().ThrowAsync<InvalidOperationException>()
+                await FluentActions.Awaiting(() => stopping.WaitAsync(token)).Should().ThrowAsync<InvalidOperationException>()
                     .WithMessage("event failed");
-            else await stopping.WaitAsync(Timeout);
+            else await stopping.WaitAsync(token);
             observed.Should().BeTrue();
-            await runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint);
+            await runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint, token);
         }
         finally
         {
@@ -67,26 +66,27 @@ public sealed class RuntimeLifecycleTests
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task WriteFailure_RetiresPeerAndPreservesFailureForTerminationEvent()
     {
         var endpoint = new ByteEndpoint();
         await using var runtime = new SocketRuntime(new ZSocketOptions(), new ZSinglePeerDispatch(), ZSocketTypes.Pair);
         var ended = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         runtime.PeerEnded += (_, failure) => ended.TrySetResult(failure);
-        await runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint);
+        var token = TestContext.Current.CancellationToken;
+        await runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint, token);
         endpoint.Connection.BlockWrites = true;
         endpoint.Connection.FailWrite = true;
         var peer = runtime.PeerSnapshot.Single();
         using var borrowed = ZMessage.Copy("write-failure"u8.ToArray());
-        var sending = runtime.SendRequestToAsync(peer, borrowed, default).AsTask();
+        var sending = runtime.SendRequestToAsync(peer, borrowed, token).AsTask();
         try
         {
-            await endpoint.Connection.WriteStarted.Task.WaitAsync(Timeout);
+            await endpoint.Connection.WriteStarted.Task.WaitAsync(token);
             endpoint.Connection.ReleaseWrite.TrySetResult();
-            await FluentActions.Awaiting(() => sending.WaitAsync(Timeout)).Should().ThrowAsync<IOException>()
+            await FluentActions.Awaiting(() => sending.WaitAsync(token)).Should().ThrowAsync<IOException>()
                 .WithMessage("write failed");
-            (await ended.Task.WaitAsync(Timeout)).Should().BeOfType<IOException>();
+            (await ended.Task.WaitAsync(token)).Should().BeOfType<IOException>();
             runtime.PeerSnapshot.Should().BeEmpty();
             endpoint.Connection.Disposals.Should().Be(1);
         }
@@ -106,13 +106,14 @@ public sealed class RuntimeLifecycleTests
         var endpoint = new ClosingEndpoint();
         await using var runtime = new SocketRuntime(new ZSocketOptions(), new ZSinglePeerDispatch(),
             ZSocketType.ForCustom("FOO"));
+        var token = TestContext.Current.CancellationToken;
 
-        await FluentActions.Awaiting(() => runtime.ConnectAsync<ClosingEndpoint, ClosingTransport>(endpoint))
+        await FluentActions.Awaiting(() => runtime.ConnectAsync<ClosingEndpoint, ClosingTransport>(endpoint, token))
             .Should().ThrowAsync<IOException>().WithMessage("peer closed before the ERROR write");
         runtime.PeerSnapshot.Should().BeEmpty();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task DisconnectDuringHandshake_WaitsForActualMechanismTaskBeforeReleasingContext()
     {
         using var pool = new CountingMemoryPool();
@@ -120,15 +121,16 @@ public sealed class RuntimeLifecycleTests
         var entered = Gate();
         var cancelled = Gate();
         var release = Gate();
-        var mechanism = new TestMechanism(null, async (context, token) =>
+        var token = TestContext.Current.CancellationToken;
+        var mechanism = new TestMechanism(null, async (context, mechanismToken) =>
         {
-            await ZNullMechanism.Instance.CreateSession().RunAsync(context, token);
+            await ZNullMechanism.Instance.CreateSession().RunAsync(context, mechanismToken);
             entered.TrySetResult();
             try
             {
-                await Task.Delay(System.Threading.Timeout.Infinite, token);
+                await Task.Delay(Timeout.Infinite, mechanismToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {
                 cancelled.TrySetResult();
                 await release.Task;
@@ -143,18 +145,19 @@ public sealed class RuntimeLifecycleTests
             HandshakeTimeoutMs = 0,
             Security = new ZSecurityOptions { Mechanism = mechanism }
         }, new ZSinglePeerDispatch(), ZSocketTypes.Pair);
-        var connecting = runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint);
+        var connecting = runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint, token);
         try
         {
-            await entered.Task.WaitAsync(Timeout);
-            var stopping = runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint).AsTask();
-            await cancelled.Task.WaitAsync(Timeout);
+            await entered.Task.WaitAsync(token);
+            var stopping = runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint, token).AsTask();
+            await cancelled.Task.WaitAsync(token);
             stopping.IsCompleted.Should().BeFalse();
             endpoint.Connection.Disposals.Should().Be(0);
             pool.Outstanding.Should().Be(1);
             release.TrySetResult();
-            await stopping.WaitAsync(Timeout);
-            await FluentActions.Awaiting(() => connecting).Should().ThrowAsync<OperationCanceledException>();
+            await stopping.WaitAsync(token);
+            await FluentActions.Awaiting(() => connecting).Should().ThrowAsync<OperationCanceledException>()
+                .Where(failure => !token.IsCancellationRequested);
             pool.Outstanding.Should().Be(0);
             endpoint.Connection.Disposals.Should().Be(1);
         }

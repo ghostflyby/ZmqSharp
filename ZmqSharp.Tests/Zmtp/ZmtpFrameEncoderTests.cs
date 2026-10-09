@@ -13,7 +13,7 @@ public sealed class ZmtpFrameEncoderTests
         using var message = MessageFactory.Multipart([.. "A"u8], [.. "B"u8], [.. "C"u8]);
         using var encodeTarget = new MemoryStream();
         var encoder = new ZmtpFrameEncoder(encodeTarget);
-        await encoder.WriteMessageAsync(message);
+        await encoder.WriteMessageAsync(message, TestContext.Current.CancellationToken);
 
         // The handshake's local writes are discarded by the read-only stream;
         // the fixture greeting + READY + the encoded message are all consumed
@@ -37,7 +37,7 @@ public sealed class ZmtpFrameEncoderTests
         using var message = MessageFactory.Multipart(payload);
         using var encodeTarget = new MemoryStream();
         var encoder = new ZmtpFrameEncoder(encodeTarget);
-        await encoder.WriteMessageAsync(message);
+        await encoder.WriteMessageAsync(message, TestContext.Current.CancellationToken);
 
         var wire = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready(), encodeTarget.ToArray());
         using var connection = new ZConnection(new ChunkedMemoryStream(wire));
@@ -54,7 +54,7 @@ public sealed class ZmtpFrameEncoderTests
         using var message = MessageFactory.SegmentedFrame([.. "hel"u8], [.. "lo"u8], [.. "!"u8]);
         using var encodeTarget = new MemoryStream();
         var encoder = new ZmtpFrameEncoder(encodeTarget);
-        await encoder.WriteMessageAsync(message);
+        await encoder.WriteMessageAsync(message, TestContext.Current.CancellationToken);
 
         var wire = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready(), encodeTarget.ToArray());
         using var connection = new ZConnection(new ChunkedMemoryStream(wire));
@@ -73,9 +73,9 @@ public sealed class ZmtpFrameEncoderTests
         var sink = new CaptureSink();
         var encoder = new ZmtpFrameEncoder(sink);
 
-        await encoder.WriteCommandAsync("READY"u8.ToArray());
+        await encoder.WriteCommandAsync("READY"u8.ToArray(), TestContext.Current.CancellationToken);
         var longBody = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
-        await encoder.WriteCommandAsync(longBody);
+        await encoder.WriteCommandAsync(longBody, TestContext.Current.CancellationToken);
 
         sink.Writes.Should().HaveCount(2);
         sink.Writes[0].SelectMany(segment => segment.ToArray())
@@ -95,7 +95,7 @@ public sealed class ZmtpFrameEncoderTests
 
         using var message = MessageFactory.Multipart(
             [.. "AAA"u8], [.. "BBBB"u8], [.. "C"u8], [.. "DDDDDDD"u8]);
-        await encoder.WriteMessageAsync(message);
+        await encoder.WriteMessageAsync(message, TestContext.Current.CancellationToken);
 
         var expected = new (byte[] Frame, bool More)[]
         {
@@ -127,7 +127,7 @@ public sealed class ZmtpFrameEncoderTests
         var encoder = new ZmtpFrameEncoder(sink);
 
         using var message = MessageFactory.SegmentedFrame([.. "hel"u8], [.. "lo"u8], [.. "!"u8]);
-        await encoder.WriteMessageAsync(message);
+        await encoder.WriteMessageAsync(message, TestContext.Current.CancellationToken);
 
         // One write per frame, one segment per original segment, with the
         // 2-byte short header first and the original MORE-less flags.

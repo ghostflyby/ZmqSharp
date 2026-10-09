@@ -16,9 +16,10 @@ public sealed class InboundPolicyTests
     [Fact]
     public async Task PassThrough_DeliversUnchanged()
     {
+        var token = TestContext.Current.CancellationToken;
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        var decision = await ZInboundPolicy.PassThrough.DecideAsync(new ZPeer(), message, CancellationToken.None);
+        var decision = await ZInboundPolicy.PassThrough.DecideAsync(new ZPeer(), message, token);
 
         decision.Action.Should().Be(ZInboundAction.Deliver);
         decision.Message.Should().BeNull();
@@ -28,6 +29,7 @@ public sealed class InboundPolicyTests
     [Fact]
     public async Task Delegate_Drop_DisposesTheMessage()
     {
+        var token = TestContext.Current.CancellationToken;
         var message = ZMessage.FromOwned([.. "x"u8]);
         var policy = new ZDelegateInboundPolicy((_, incoming, _) =>
         {
@@ -35,7 +37,7 @@ public sealed class InboundPolicyTests
             return ValueTask.FromResult(new ZInboundDecision { Action = ZInboundAction.Drop });
         });
 
-        var decision = await policy.DecideAsync(new ZPeer(), message, CancellationToken.None);
+        var decision = await policy.DecideAsync(new ZPeer(), message, token);
 
         decision.Action.Should().Be(ZInboundAction.Drop);
     }
@@ -43,6 +45,7 @@ public sealed class InboundPolicyTests
     [Fact]
     public async Task Delegate_Consumed_OwnsTheMessage()
     {
+        var token = TestContext.Current.CancellationToken;
         var message = ZMessage.FromOwned([.. "x"u8]);
         var policy = new ZDelegateInboundPolicy((_, incoming, _) =>
         {
@@ -50,7 +53,7 @@ public sealed class InboundPolicyTests
             return ValueTask.FromResult(new ZInboundDecision { Action = ZInboundAction.Consumed });
         });
 
-        var decision = await policy.DecideAsync(new ZPeer(), message, CancellationToken.None);
+        var decision = await policy.DecideAsync(new ZPeer(), message, token);
 
         decision.Action.Should().Be(ZInboundAction.Consumed);
     }
@@ -65,7 +68,7 @@ public sealed class InboundPolicyTests
         type.AcceptsPeer("PAIR").Should().BeFalse();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task CustomTransformInbound_DeliversReplacedMessage(TransportKind kind)
     {
@@ -76,13 +79,13 @@ public sealed class InboundPolicyTests
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new CustomTransformSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
         await using var client = new ZPairSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
+        await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), token);
 
-        var message = await received.Task.WaitAsync(cts.Token);
+        var message = await received.Task.WaitAsync(token);
         message.Count.Should().Be(2);
         byte[] prefix = [.. "!"u8];
         byte[] payload = [.. "ping"u8];
@@ -91,7 +94,7 @@ public sealed class InboundPolicyTests
         message.Dispose();
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task CustomConsumeInbound_ConsumesWithoutASink(TransportKind kind)
     {
@@ -102,15 +105,15 @@ public sealed class InboundPolicyTests
         var inbound = new ConsumeInbound();
         await using var server = new ConsumeSocket(inbound);
         await using var client = new ZPairSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
+        await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
+        await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
 
         // The consume policy signals the state directly instead of polling.
-        await inbound.ReachedTwoAsync.WaitAsync(TimeSpan.FromSeconds(5));
+        await inbound.ReachedTwoAsync.WaitAsync(token);
     }
 
     [Fact]
@@ -149,7 +152,7 @@ public sealed class InboundPolicyTests
             {
                 new(new ZSegment((byte[])[.. "!"u8], 0, 1))
             };
-            for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
+            frames.AddRange(message);
 
             return ValueTask.FromResult(new ZInboundDecision
             {
@@ -193,17 +196,6 @@ public sealed class InboundPolicyTests
         {
             onMessage(message);
             return ValueTask.CompletedTask;
-        }
-    }
-
-
-    private static async Task WaitUntilAsync<T>(Func<T> getValue, Func<T, bool> condition, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        while (!condition(getValue()))
-        {
-            await Task.Delay(10, cts.Token);
-            cts.Token.ThrowIfCancellationRequested();
         }
     }
 }

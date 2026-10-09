@@ -13,28 +13,29 @@ namespace ZmqSharp.Tests.Sockets;
 
 public sealed class ZSocketTests
 {
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task PairSocket_RoundTripsMultipartOverTcp(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var server = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
+        using var pump = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         var serverMessages = server.Messages;
         var clientMessages = client.Messages;
-        var echoTask = EchoAsync(server, serverMessages, cts.Token);
+        var echoTask = EchoAsync(server, serverMessages, pump.Token);
         byte[][] frames = [[.. "ping"u8], [.. "pong"u8]];
 
         ZMessage? echo = null;
         for (var attempt = 0; attempt < 50 && echo is null; attempt++)
         {
-            await client.SendAsync(MessageFactory.Multipart([.. frames]), cts.Token);
-            echo = await TryReadAsync(clientMessages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(MessageFactory.Multipart([.. frames]), token);
+            echo = await TryReadAsync(clientMessages, TimeSpan.FromMilliseconds(200), token);
         }
 
         var received = echo ?? throw new InvalidOperationException("no echo received within timeout");
@@ -43,15 +44,15 @@ public sealed class ZSocketTests
         received[1].ToSequence().ToArray().Should().Equal(frames[1]);
         received.Dispose();
 
-        await cts.CancelAsync();
+        await pump.CancelAsync();
         try
         {
             await echoTask;
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task DealerSocket_FairDispatch_ReachesBothPeers(TransportKind kind)
     {
@@ -60,18 +61,19 @@ public sealed class ZSocketTests
         await using var serverA = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var serverB = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var dealer = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
+        using var pump = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-        await serverA.BindAsync(endpointA, cts.Token);
-        await serverB.BindAsync(endpointB, cts.Token);
-        await dealer.ConnectAsync(endpointA, cts.Token);
-        await dealer.ConnectAsync(endpointB, cts.Token);
+        await serverA.BindAsync(endpointA, token);
+        await serverB.BindAsync(endpointB, token);
+        await dealer.ConnectAsync(endpointA, token);
+        await dealer.ConnectAsync(endpointB, token);
 
         var countA = 0;
         var countB = 0;
         var bothReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var drainA = DrainAsync(serverA, () => OnPeerMessage(true), cts.Token);
-        var drainB = DrainAsync(serverB, () => OnPeerMessage(false), cts.Token);
+        var drainA = DrainAsync(serverA, () => OnPeerMessage(true), pump.Token);
+        var drainB = DrainAsync(serverB, () => OnPeerMessage(false), pump.Token);
 
         // The dealer drops sends to peers that have not finished the handshake,
         // so keep sending until both drains report a message. The drains signal
@@ -80,11 +82,11 @@ public sealed class ZSocketTests
         // fixed window.
         for (var attempt = 0; attempt < 100 && !bothReached.Task.IsCompleted; attempt++)
         {
-            await dealer.SendAsync(ZMessage.FromOwned([1]), cts.Token);
-            if (await Task.WhenAny(bothReached.Task, Task.Delay(25, cts.Token)) == bothReached.Task) break;
+            await dealer.SendAsync(ZMessage.FromOwned([1]), token);
+            if (await Task.WhenAny(bothReached.Task, Task.Delay(25, token)) == bothReached.Task) break;
         }
 
-        await bothReached.Task.WaitAsync(cts.Token);
+        await bothReached.Task.WaitAsync(token);
 
         countA.Should().BeGreaterThanOrEqualTo(1);
         countB.Should().BeGreaterThanOrEqualTo(1);
@@ -99,15 +101,15 @@ public sealed class ZSocketTests
             if (Volatile.Read(ref countA) >= 1 && Volatile.Read(ref countB) >= 1) bothReached.TrySetResult();
         }
 
-        await cts.CancelAsync();
+        await pump.CancelAsync();
         try
         {
             await Task.WhenAll(drainA, drainB);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task DealerSocket_ReceivesFromBothPeers(TransportKind kind)
     {
@@ -116,24 +118,24 @@ public sealed class ZSocketTests
         await using var serverA = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var serverB = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var dealer = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
-        await serverA.BindAsync(endpointA, cts.Token);
-        await serverB.BindAsync(endpointB, cts.Token);
-        await dealer.ConnectAsync(endpointA, cts.Token);
-        await dealer.ConnectAsync(endpointB, cts.Token);
+        await serverA.BindAsync(endpointA, token);
+        await serverB.BindAsync(endpointB, token);
+        await dealer.ConnectAsync(endpointA, token);
+        await dealer.ConnectAsync(endpointB, token);
 
         var messages = dealer.Messages;
         var hasA = false;
         var hasB = false;
         for (var attempt = 0; attempt < 50 && (!hasA || !hasB); attempt++)
         {
-            await serverA.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
-            await serverB.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
+            await serverA.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
+            await serverB.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
 
             for (var i = 0; i < 2; i++)
             {
-                var message = await TryReadAsync(messages, TimeSpan.FromMilliseconds(200), cts.Token);
+                var message = await TryReadAsync(messages, TimeSpan.FromMilliseconds(200), token);
                 if (message is null) break;
 
                 var payload = message.Value[0].ToSequence().ToArray();
@@ -152,16 +154,17 @@ public sealed class ZSocketTests
     [Fact]
     public async Task SendAsync_DisposesMessageAfterRouting()
     {
+        var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         await using var socket = new ZPairSocket(new ZSocketOptions { Pool = pool });
         var message = MessageFactory.PooledSingleFrame(pool, [.. "hello"u8]);
 
-        await socket.SendAsync(message);
+        await socket.SendAsync(message, token);
 
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ReceivePolicy_DecideOwned_NeverTouchesPool(TransportKind kind)
     {
@@ -173,17 +176,17 @@ public sealed class ZSocketTests
             ReceivePolicy = new ZDelegateReceivePolicy(_ => new ZReceiveAllocation { Mode = ZReceiveMode.Owned })
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
-            await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
-            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
         received.Should().NotBeNull();
@@ -195,7 +198,7 @@ public sealed class ZSocketTests
         pool.Outstanding.Should().Be(outstandingBeforeDispose);
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ReceivePolicy_DecidePerFrame_SplitsModesWithinMessage(TransportKind kind)
     {
@@ -209,17 +212,17 @@ public sealed class ZSocketTests
                 : new ZReceiveAllocation { Mode = ZReceiveMode.Owned })
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
-            await client.SendAsync(MessageFactory.Multipart([.. "a"u8], [.. "b"u8]), cts.Token);
-            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(MessageFactory.Multipart([.. "a"u8], [.. "b"u8]), token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
         received.Should().NotBeNull();
@@ -231,7 +234,7 @@ public sealed class ZSocketTests
         received.Value.Dispose();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task SegmentedMaterialization_SplitsLargeFrameIntoSegments(TransportKind kind)
     {
@@ -244,17 +247,17 @@ public sealed class ZSocketTests
             ReceivePolicy = new ZReceiveOptions { ContiguousFrameLimit = 100 }
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
-            await client.SendAsync(ZMessage.FromOwned(payload), cts.Token);
-            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(ZMessage.FromOwned(payload), token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
         received.Should().NotBeNull();
@@ -263,7 +266,7 @@ public sealed class ZSocketTests
         received.Value.Dispose();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task SegmentedMaterialization_MultipartFramesStayIndependent(TransportKind kind)
     {
@@ -281,17 +284,17 @@ public sealed class ZSocketTests
             ReceivePolicy = new ZReceiveOptions { ContiguousFrameLimit = 100 }
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
-            await client.SendAsync(MessageFactory.Multipart(first, second), cts.Token);
-            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(MessageFactory.Multipart(first, second), token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
         received.Should().NotBeNull();
@@ -317,7 +320,7 @@ public sealed class ZSocketTests
         large.Segmented.Should().BeTrue();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ReceivePolicy_DecideByFrameLength_MixesModes(TransportKind kind)
     {
@@ -331,23 +334,23 @@ public sealed class ZSocketTests
                 : new ZReceiveAllocation { Mode = ZReceiveMode.Pooled })
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         var small = new byte[10];
         var large = new byte[200];
         var received = new List<ZMessage>();
         for (var attempt = 0; attempt < 50 && received.Count < 2; attempt++)
         {
-            await client.SendAsync(ZMessage.FromOwned(small), cts.Token);
-            await client.SendAsync(ZMessage.FromOwned(large), cts.Token);
+            await client.SendAsync(ZMessage.FromOwned(small), token);
+            await client.SendAsync(ZMessage.FromOwned(large), token);
 
             for (var i = 0; i < 2; i++)
             {
-                var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+                var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
                 if (message is null) break;
 
                 received.Add(message.Value);
@@ -364,7 +367,7 @@ public sealed class ZSocketTests
         largeMessage.Dispose();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ReceivePolicy_DefaultModeOwned_NeverTouchesPool(TransportKind kind)
     {
@@ -379,17 +382,17 @@ public sealed class ZSocketTests
             }
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         ZMessage? received = null;
         for (var attempt = 0; attempt < 50 && received is null; attempt++)
         {
-            await client.SendAsync(ZMessage.FromOwned([.. "x"u8]), cts.Token);
-            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(ZMessage.FromOwned([.. "x"u8]), token);
+            received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
         received.Should().NotBeNull();
@@ -408,118 +411,123 @@ public sealed class ZSocketTests
         socket.Messages.Completion.IsCompleted.Should().BeTrue();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ProtocolError_EndsPeerWithoutCompletingChannel()
     {
         var port = GetFreePort();
+        var token = TestContext.Current.CancellationToken;
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var raw = new TcpClient();
-        await raw.ConnectAsync(IPAddress.Loopback, port);
+        await raw.ConnectAsync(IPAddress.Loopback, port, token);
         var stream = raw.GetStream();
         var badGreeting = new byte[64];
-        await stream.WriteAsync(badGreeting);
-        await stream.FlushAsync();
+        await stream.WriteAsync(badGreeting, token);
+        await stream.FlushAsync(token);
 
         var messages = server.Messages;
-        (await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeOfType<ZeroMqProtocolException>();
+        (await peerEnded.Task.WaitAsync(token)).Should().BeOfType<ZeroMqProtocolException>();
         messages.Completion.IsCompleted.Should().BeFalse();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task HandshakeTimeout_FaultsEstablishment()
     {
         // A peer that never answers the greeting/READY exchange exceeds the
         // configured handshake timeout and faults its establishment (0006 3.2).
+        var token = TestContext.Current.CancellationToken;
         using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var acceptTask = listener.AcceptTcpClientAsync(token);
 
         await using var client = new ZPairSocket(new ZSocketOptions { HandshakeTimeoutMs = 200 });
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
 
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         // Read the client's greeting but never respond.
-        await raw.GetStream().ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await raw.GetStream().ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
 
-        var failure = await Record.ExceptionAsync(() => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        var failure = await Record.ExceptionAsync(() => connectTask.WaitAsync(token));
         failure.Should().NotBeNull();
         (failure is TimeoutException or OperationCanceledException).Should().BeTrue();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task MaxIncompleteHandshakes_DropsExcessInboundPeers()
     {
         // The inbound surface caps concurrent incomplete handshakes; a second
         // slow-connecting peer is dropped with cancellation (0006 3.2).
+        var token = TestContext.Current.CancellationToken;
         await using var server = new ZPairSocket(new ZSocketOptions { MaxIncompleteHandshakes = 1 });
         var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var first = new TcpClient();
-        await first.ConnectAsync(IPAddress.Loopback, port);
+        await first.ConnectAsync(IPAddress.Loopback, port, token);
         var firstStream = first.GetStream();
-        await firstStream.WriteAsync(ZmtpTestData.Greeting());
-        await firstStream.FlushAsync();
+        await firstStream.WriteAsync(ZmtpTestData.Greeting(), token);
+        await firstStream.FlushAsync(token);
 
         // The second accepted connection exceeds the cap and is dropped. The
         // rejection is observable as the server closing the connection, so
         // wait for that state (the read returns 0 / EOF) instead of a fixed
         // delay - the server's rejection is the state, not elapsed time.
         using var second = new TcpClient();
-        await second.ConnectAsync(IPAddress.Loopback, port);
+        await second.ConnectAsync(IPAddress.Loopback, port, token);
         var secondStream = second.GetStream();
-        var probe = await secondStream.ReadAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        var probe = await secondStream.ReadAsync(new byte[64], token).AsTask().WaitAsync(token);
         probe.Should().Be(0);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task LegacyZmtp2_Greeting_RejectedWithClearError()
     {
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ZPairSocket();
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var raw = new TcpClient();
-        await raw.ConnectAsync(IPAddress.Loopback, port);
+        await raw.ConnectAsync(IPAddress.Loopback, port, token);
         var stream = raw.GetStream();
 
         // ZMTP 2.0 greeting: signature plus revision byte 0x01.
         var v2Greeting = ZmtpTestData.Greeting();
         v2Greeting[10] = 1;
-        await stream.WriteAsync(v2Greeting);
-        await stream.FlushAsync();
+        await stream.WriteAsync(v2Greeting, token);
+        await stream.FlushAsync(token);
 
-        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await peerEnded.Task.WaitAsync(token);
         failure.Should().BeOfType<ZeroMqProtocolException>();
         failure.Message.Should().Contain("ZMTP 2.0 peers are not supported");
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task OversizedCommand_WithSmallMaxCommandSize_RejectsPeer()
     {
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ZPairSocket(new ZSocketOptions { MaxCommandSize = 256 });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var raw = new TcpClient();
-        await raw.ConnectAsync(IPAddress.Loopback, port);
+        await raw.ConnectAsync(IPAddress.Loopback, port, token);
         var stream = raw.GetStream();
 
         // An oversized command frame during the handshake exceeds the
         // configured command-size limit and rejects the peer (0008 Slice B).
         var oversizedCommand = ZmtpTestData.Frame(new byte[300], command: true);
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), oversizedCommand));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), oversizedCommand), token);
+        await stream.FlushAsync(token);
 
-        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await peerEnded.Task.WaitAsync(token);
         failure.Should().BeOfType<ZeroMqProtocolException>();
     }
 
@@ -580,24 +588,24 @@ public sealed class ZSocketTests
             .WithMessage("*never composes a queue*");
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task MessageSink_AggregatesMultipart_AndDeliversCompleteMessage(TransportKind kind)
     {
+        var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var sink = new TestMessageSink(message => received.TrySetResult(message));
-        await using var server = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
+        var server = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(MessageFactory.Multipart([.. "ping"u8], [.. "pong"u8]), cts.Token);
+        await client.SendAsync(MessageFactory.Multipart([.. "ping"u8], [.. "pong"u8]), token);
 
-        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await received.Task.WaitAsync(token);
         message.Count.Should().Be(2);
         message[0].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
         message[1].ToSequence().ToArray().Should().Equal([.. "pong"u8]);
@@ -611,7 +619,7 @@ public sealed class ZSocketTests
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task MessageLimit_ResetsPerMessage_AcrossManyMessages(TransportKind kind)
     {
@@ -619,25 +627,25 @@ public sealed class ZSocketTests
         // many small messages under a tight MaxMessageLength must not
         // accumulate a total across messages and falsely reject (the counters
         // live in the transport core's per-peer materializer).
+        var token = TestContext.Current.CancellationToken;
         await using var server = new ZPairSocket(new ZSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
             MaxMessageLength = 10
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         const int count = 20;
-        for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([.. "ab"u8]), cts.Token);
+        for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([.. "ab"u8]), token);
 
         var received = 0;
         for (var attempt = 0; attempt < 50 && received < count; attempt++)
         {
-            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
             if (message is not null)
             {
                 message.Value.Dispose();
@@ -659,17 +667,17 @@ public sealed class ZSocketTests
         act.Should().Throw<InvalidOperationException>();
     }
 
-    [Theory]
+    [Theory(Timeout = 20_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ConcurrentSends_DoNotInterleaveMultipartFrames(TransportKind kind)
     {
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var server = new ZPairSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(64) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         var received = new ConcurrentQueue<byte[][]>();
         var allReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -687,15 +695,15 @@ public sealed class ZSocketTests
             return true;
         };
 
-        var senderA = SendLoopAsync(client, 0x61, cts.Token);
-        var senderB = SendLoopAsync(client, 0x62, cts.Token);
+        var senderA = SendLoopAsync(client, 0x61, token);
+        var senderB = SendLoopAsync(client, 0x62, token);
         await Task.WhenAll(senderA, senderB);
 
         // SendAsync completes once the frames are handed to the socket, not
         // when the peer's parser has delivered them; await the delivery
         // signal from OnFrame instead of polling, so the assert runs after
         // every message actually arrived.
-        await allReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await allReceived.Task.WaitAsync(token);
 
         received.Should().HaveCount(100);
         foreach (var message in received)
@@ -713,13 +721,14 @@ public sealed class ZSocketTests
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ZPairSocket();
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var raw = new TcpClient();
-        await raw.ConnectAsync(IPAddress.Loopback, port);
+        await raw.ConnectAsync(IPAddress.Loopback, port, token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()), token);
+        await stream.FlushAsync(token);
 
         // Abortive close: force a reset to end the peer abruptly.
         raw.Client.LingerState = new LingerOption(true, 0);
@@ -727,30 +736,30 @@ public sealed class ZSocketTests
         // The reset may surface as an IO error (Windows/macOS), a clean EOF
         // (Linux), or be dropped before the connection is set up (macOS);
         // in every case the socket must dispose without faulting.
-        var ended = await Task.WhenAny(peerEnded.Task, Task.Delay(TimeSpan.FromSeconds(1)));
+        var ended = await Task.WhenAny(peerEnded.Task, Task.Delay(TimeSpan.FromSeconds(1), token));
         if (ended == peerEnded.Task) (await peerEnded.Task is null or IOException).Should().BeTrue();
     }
 
-    [Theory]
+    [Theory(Timeout = 30_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task SendRacingHandshake_DoesNotCorruptPeerHandshake(TransportKind kind)
     {
+        var token = TestContext.Current.CancellationToken;
         for (var attempt = 0; attempt < 40; attempt++)
         {
             var endpoint = TestTransports.GetEndpoint(kind);
             await using var server = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
             await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await server.BindAsync(endpoint, cts.Token);
-            await client.ConnectAsync(endpoint, cts.Token);
+            await server.BindAsync(endpoint, token);
+            await client.ConnectAsync(endpoint, token);
 
             // A send before the peer is routable is dropped; resend until the
             // message flows, which also proves the handshake was not corrupted.
             var received = false;
             for (var retry = 0; retry < 20 && !received; retry++)
             {
-                await server.SendAsync(ZMessage.FromOwned([.. "x"u8]), cts.Token);
-                var message = await TryReadAsync(client.Messages, TimeSpan.FromMilliseconds(20), cts.Token);
+                await server.SendAsync(ZMessage.FromOwned([.. "x"u8]), token);
+                var message = await TryReadAsync(client.Messages, TimeSpan.FromMilliseconds(20), token);
                 if (message is not null)
                 {
                     received = true;
@@ -759,21 +768,21 @@ public sealed class ZSocketTests
             }
 
             received.Should().BeTrue();
-            await cts.CancelAsync();
         }
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_PeerClosesDuringHandshake_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        var raw = await acceptTask.AsTask().WaitAsync(token);
         raw.Dispose();
 
         Exception? caught = null;
@@ -790,121 +799,127 @@ public sealed class ZSocketTests
         (caught is IOException or SocketException).Should().BeTrue();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_PeerSendsMalformedGreeting_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(new byte[64]);
-        await stream.FlushAsync();
+        await stream.WriteAsync(new byte[64], token);
+        await stream.FlushAsync(token);
 
         var act = () => connectTask;
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task ConnectAsync_PeerSocketTypeMismatch_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")), token);
+        await stream.FlushAsync(token);
 
         var act = () => connectTask;
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
 
         // RFC 23: the peer must receive an ERROR command before the disconnect.
         var received = new MemoryStream();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
+        window.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
             var chunk = new byte[256];
             while (true)
             {
-                var count = await stream.ReadAsync(chunk, timeout.Token);
+                var count = await stream.ReadAsync(chunk, window.Token);
                 if (count == 0) break;
 
                 received.Write(chunk, 0, count);
                 if (received.ToArray().AsSpan().IndexOf("ERROR"u8) >= 0) break;
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
 
         received.ToArray().AsSpan().IndexOf("ERROR"u8).Should().BeGreaterThanOrEqualTo(0);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_PeerSocketTypeMatch_Completes()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()), token);
+        await stream.FlushAsync(token);
 
-        await connectTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await connectTask.WaitAsync(token);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_CancellationDuringHandshake_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
-        using var cts = new CancellationTokenSource();
+        using var cancellation = new CancellationTokenSource();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
-        await cts.CancelAsync();
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", cancellation.Token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
+        await cancellation.CancelAsync();
 
         var act = () => connectTask;
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task ConnectAsync_DisconnectDuringHandshake_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
 
         // Wait for the client's handshake bytes so the peer is registered before
         // disconnecting; otherwise DisconnectAsync races connection registration.
-        await stream.ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-        await client.DisconnectAsync<EndPoint, SocketTransport>(new IPEndPoint(IPAddress.Loopback, port));
+        await stream.ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
+        await client.DisconnectAsync<EndPoint, SocketTransport>(new IPEndPoint(IPAddress.Loopback, port), token);
 
         Exception? caught = null;
         try
         {
-            await connectTask.WaitAsync(TimeSpan.FromSeconds(5));
+            await connectTask.WaitAsync(token);
         }
         catch (Exception ex)
         {
@@ -917,38 +932,40 @@ public sealed class ZSocketTests
             .BeTrue();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_DealerPeerRep_Completes()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZDealerSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("REP")));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("REP")), token);
+        await stream.FlushAsync(token);
 
-        await connectTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await connectTask.WaitAsync(token);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_DealerPeerReq_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZDealerSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("REQ")));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("REQ")), token);
+        await stream.FlushAsync(token);
 
         var act = () => connectTask;
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
@@ -957,6 +974,7 @@ public sealed class ZSocketTests
     [Fact]
     public async Task ConnectAsync_SynchronousHandshakeFailure_LeavesNoRoutablePeer()
     {
+        var token = TestContext.Current.CancellationToken;
         await using var client = new ZPairSocket();
 
         var act = () => client.ConnectAsync<EndPoint, SynchronousEofTransport>(
@@ -965,10 +983,10 @@ public sealed class ZSocketTests
 
         // A failed attempt must not leave a dead peer routable: sending with no
         // established peers drops the message instead of faulting the socket.
-        await client.SendAsync("x"u8.ToArray());
+        await client.SendAsync("x"u8.ToArray(), token);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task CallbackException_StillRaisesPeerEndedAndReclaimsPool()
     {
         using var pool = new CountingMemoryPool();
@@ -976,23 +994,24 @@ public sealed class ZSocketTests
         var peerEnded = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
         server.OnFrame += (_, _) => throw new InvalidOperationException("callback failed");
 
         using var raw = new TcpClient();
-        await raw.ConnectAsync(IPAddress.Loopback, port);
+        await raw.ConnectAsync(IPAddress.Loopback, port, token);
         var stream = raw.GetStream();
         await stream.WriteAsync(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([.. "boom"u8])));
-        await stream.FlushAsync();
+            ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([.. "boom"u8])), token);
+        await stream.FlushAsync(token);
 
-        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await peerEnded.Task.WaitAsync(token);
         failure.Should().BeOfType<InvalidOperationException>();
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task OversizedFrame_RejectsPeerAndReclaimsPool(TransportKind kind)
     {
@@ -1006,15 +1025,15 @@ public sealed class ZSocketTests
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
-        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await peerEnded.Task.WaitAsync(token);
         var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
         rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
         rejected.Rejection.Limit.Should().Be(4);
@@ -1023,7 +1042,7 @@ public sealed class ZSocketTests
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task OversizedMessage_RejectsBeforeDeliveringAnyFrame(TransportKind kind)
     {
@@ -1037,15 +1056,15 @@ public sealed class ZSocketTests
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(MessageFactory.Multipart([.. "aaaaaa"u8], [.. "bbbbbb"u8]), cts.Token);
+        await client.SendAsync(MessageFactory.Multipart([.. "aaaaaa"u8], [.. "bbbbbb"u8]), token);
 
-        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await peerEnded.Task.WaitAsync(token);
         var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
         rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
         rejected.Rejection.Limit.Should().Be(10);
@@ -1054,7 +1073,7 @@ public sealed class ZSocketTests
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task RejectedPeer_IsNotRoutable_NoFurtherMessages(TransportKind kind)
     {
@@ -1064,18 +1083,18 @@ public sealed class ZSocketTests
             MaxFrameLength = 4
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         // A message below the limit establishes and flows first.
         var first = false;
         for (var attempt = 0; attempt < 50 && !first; attempt++)
         {
-            await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), cts.Token);
-            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), token);
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
             if (message is not null)
             {
                 message.Value.Dispose();
@@ -1087,14 +1106,14 @@ public sealed class ZSocketTests
 
         // The oversized message rejects the peer; later sends must not be
         // delivered to the server.
-        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
+        await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), token);
 
-        var extra = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), cts.Token);
+        var extra = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), token);
         extra.Should().BeNull();
     }
 
-    [Theory]
+    [Theory(Timeout = 25_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task RejectedPeer_EndsWithClose_NotWithPeerError(TransportKind kind)
     {
@@ -1106,23 +1125,23 @@ public sealed class ZSocketTests
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         client.PeerEnded += (_, failure) => clientEnded.TrySetResult(failure);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
         // Traffic-phase rejection is a plain close, never an ERROR command
         // (0008 D5): the client sees EOF/IO, not a peer protocol error. The
         // close propagation is OS-dependent (Windows/Ubuntu runners can lag),
         // so the wait window is generous.
-        var failure = await clientEnded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var failure = await clientEnded.Task.WaitAsync(token);
         (failure is null or IOException or SocketException).Should().BeTrue();
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task OverLimitFrame_DoesNotRentFromPool(TransportKind kind)
     {
@@ -1135,15 +1154,15 @@ public sealed class ZSocketTests
         });
         await using var server = inner;
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         // Prove the probe works for in-limit frames.
-        await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), cts.Token);
-        var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), token);
+        var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), token);
         message.Should().NotBeNull();
         message.Value.Dispose();
         pool.Rentals.Should().BeGreaterThan(0);
@@ -1155,12 +1174,12 @@ public sealed class ZSocketTests
         var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         inner.MaterializerRejected += () => rejected.TrySetResult();
         pool.Reset();
-        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
-        await rejected.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
+        await rejected.Task.WaitAsync(token);
         pool.Rentals.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task Limits_EnforcedOutsidePolicy_CustomPolicyCannotBypass(TransportKind kind)
     {
@@ -1176,21 +1195,21 @@ public sealed class ZSocketTests
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
-        var failure = await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var failure = await peerEnded.Task.WaitAsync(token);
         var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
         rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
         server.ReceiveRejections.Should().Be(1);
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task WaitMode_DoesNotLoseMessages(TransportKind kind)
     {
@@ -1198,19 +1217,19 @@ public sealed class ZSocketTests
         // WriteAsync; the messages are not dropped and all arrive once read.
         await using var server = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         const int count = 20;
-        for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
 
         var received = new List<byte>();
         while (received.Count < count)
         {
-            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), cts.Token);
+            var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), token);
             message.Should().NotBeNull();
             received.Add(message.Value[0].ToSequence().ToArray()[0]);
             message.Value.Dispose();
@@ -1220,7 +1239,7 @@ public sealed class ZSocketTests
         received.Should().Equal(Enumerable.Range(0, count).Select(i => (byte)i));
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task WaitMode_SlowPeer_DoesNotBlockOtherPeer(TransportKind kind)
     {
@@ -1229,24 +1248,25 @@ public sealed class ZSocketTests
         await using var serverA = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         await using var serverB = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         await using var dealer = new ZDealerSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
+        using var pump = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-        await serverA.BindAsync(endpointA, cts.Token);
-        await serverB.BindAsync(endpointB, cts.Token);
-        await dealer.ConnectAsync(endpointA, cts.Token);
-        await dealer.ConnectAsync(endpointB, cts.Token);
+        await serverA.BindAsync(endpointA, token);
+        await serverB.BindAsync(endpointB, token);
+        await dealer.ConnectAsync(endpointA, token);
+        await dealer.ConnectAsync(endpointB, token);
 
         var received = new List<byte>();
-        var drainB = DrainAsync(serverB, () => { }, cts.Token);
+        var drainB = DrainAsync(serverB, () => { }, pump.Token);
 
         // Saturate peer A (capacity 2, nobody reads it), then send to peer B.
-        for (var i = 0; i < 100; i++) await dealer.SendAsync(ZMessage.FromOwned([1]), cts.Token);
+        for (var i = 0; i < 100; i++) await dealer.SendAsync(ZMessage.FromOwned([1]), token);
 
         var reachedB = false;
         for (var attempt = 0; attempt < 100 && !reachedB; attempt++)
         {
-            await dealer.SendAsync(ZMessage.FromOwned([2]), cts.Token);
-            var message = await TryReadAsync(serverB.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+            await dealer.SendAsync(ZMessage.FromOwned([2]), token);
+            var message = await TryReadAsync(serverB.Messages, TimeSpan.FromMilliseconds(200), token);
             if (message is not null)
             {
                 received.Add(message.Value[0].ToSequence().ToArray()[0]);
@@ -1256,31 +1276,31 @@ public sealed class ZSocketTests
         }
 
         reachedB.Should().BeTrue("a full queue on peer A must not pause peer B's delivery");
-        await cts.CancelAsync();
+        await pump.CancelAsync();
         try
         {
             await drainB;
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
     }
 
-    [Theory]
+    [Theory(Timeout = 25_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task DropWriteMode_KeepsFirstMessages_AndReturnsPoolOnDispose(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
         var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropWrite);
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = dropTracking,
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         // Ten messages against a capacity-2 queue: the first two stay, the
         // rest are dropped and reclaimed by the channel's item-dropped hook.
@@ -1288,11 +1308,11 @@ public sealed class ZSocketTests
         // waiting for all eight drops is the deterministic completion - no
         // settling on a pool counter that transiently dips during the drop
         // path (0006 section 2.2).
-        for (var i = 0; i < 10; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        for (var i = 0; i < 10; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
 
         await dropTracking.WaitForDropsAsync(8, TimeSpan.FromSeconds(5));
 
-        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         received.Should().Equal(0, 1);
 
         // The eight dropped messages were disposed by the library, never seen
@@ -1303,85 +1323,85 @@ public sealed class ZSocketTests
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 20_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task DropNewestMode_KeepsOldestAndIncoming(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
         var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropNewest);
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = dropTracking,
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         // Drain the queue so each later step starts from empty.
-        await SendAndReadBackAsync(client, server.Messages, [0, 1], cts.Token);
+        await SendAndReadBackAsync(client, server.Messages, [0, 1], token);
 
         // Fill it; nothing consumes and nothing drops, so the two frames are
         // materialized and the pool count climbs monotonically to 2.
-        await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([2]), token);
+        await client.SendAsync(ZMessage.FromOwned([3]), token);
         await pool.WaitForOutstandingAtLeastAsync(2, TimeSpan.FromSeconds(5));
 
         // A full queue in DropNewest mode discards the newest buffered item
         // (3) and keeps the incoming one (4) (0006 section 3.5). The drop
         // callback is the deterministic signal that the discard ran before
         // any read frees a slot.
-        await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([4]), token);
         await dropTracking.WaitForDropsAsync(1, TimeSpan.FromSeconds(5));
 
-        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         received.Should().Equal(2, 4);
 
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 20_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task DropOldestMode_KeepsNewestMessages(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
         var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropOldest);
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = dropTracking,
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await SendAndReadBackAsync(client, server.Messages, [0, 1], cts.Token);
+        await SendAndReadBackAsync(client, server.Messages, [0, 1], token);
 
-        await client.SendAsync(ZMessage.FromOwned([2]), cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([3]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([2]), token);
+        await client.SendAsync(ZMessage.FromOwned([3]), token);
         await pool.WaitForOutstandingAtLeastAsync(2, TimeSpan.FromSeconds(5));
 
         // A full queue in DropOldest mode discards the oldest buffered item
         // (2) and keeps the incoming one (4); the drop callback signals the
         // discard deterministically.
-        await client.SendAsync(ZMessage.FromOwned([4]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([4]), token);
         await dropTracking.WaitForDropsAsync(1, TimeSpan.FromSeconds(5));
 
-        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), cts.Token);
+        var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         received.Should().Equal(3, 4);
 
         await server.DisposeAsync();
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 25_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task PeerEnd_DrainsBufferedMessages_ReturnsPool(TransportKind kind)
     {
@@ -1393,21 +1413,21 @@ public sealed class ZSocketTests
             ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropWrite },
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        for (var i = 0; i < 4; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        for (var i = 0; i < 4; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
 
         // The two buffered items are rented (the materializer allocates each
         // frame's buffer directly; there is no persistent parser scratch).
         await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         await client.DisposeAsync();
-        await peerEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await peerEnded.Task.WaitAsync(token);
 
         // OnPeerEnded drained the buffered messages through the same Dispose
         // path a drop uses; nothing leaks (0006 section 2.2).
@@ -1417,25 +1437,25 @@ public sealed class ZSocketTests
         pool.Outstanding.Should().Be(0);
     }
 
-    [Theory]
+    [Theory(Timeout = 20_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task SocketDispose_WithUnreadBufferedMessages_ReturnsPool(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true },
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), cts.Token);
-        await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
+        await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
         await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
 
         // Disposing with unread buffered messages reclaims them; PeerEnded is
@@ -1444,13 +1464,14 @@ public sealed class ZSocketTests
         await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Dispose_DrainsBufferedOutboundMessages()
     {
         using var pool = new CountingMemoryPool();
         using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
 
         var client = new ZPairSocket(new ZSocketOptions
         {
@@ -1460,14 +1481,14 @@ public sealed class ZSocketTests
 
         // The raw peer never answers READY, so the send pump blocks on the
         // establishment gate and the outbound channel backs up.
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await stream.ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
 
         var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
-        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [.. "a"u8]));
-        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [.. "b"u8]));
+        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [.. "a"u8]), token);
+        await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [.. "b"u8]), token);
 
         // The two outbound messages are rented; the pump is blocked on the
         // establishment gate and has dequeued nothing. The handshake's pool
@@ -1482,7 +1503,7 @@ public sealed class ZSocketTests
         await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
-    [Theory]
+    [Theory(Timeout = 30_000)]
     [InlineData(BoundedChannelFullMode.DropWrite)]
     [InlineData(BoundedChannelFullMode.DropNewest)]
     [InlineData(BoundedChannelFullMode.DropOldest)]
@@ -1491,7 +1512,8 @@ public sealed class ZSocketTests
         using var pool = new CountingMemoryPool();
         using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
 
         var client = new ZPairSocket(new ZSocketOptions
         {
@@ -1501,26 +1523,25 @@ public sealed class ZSocketTests
 
         // The raw peer never answers READY, so the send pump dequeues the
         // first message and blocks on the establishment gate.
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.ReadExactlyAsync(new byte[64]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await stream.ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
 
         var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
 
         // Ten producers against a capacity-2 channel: the first three stay
         // (pump-held + 2 buffered), the rest are dropped and reclaimed. The
-        // per-write timeout proves a drop mode never blocks a producer.
+        // per-write budget proves a drop mode never blocks a producer.
         for (var i = 0; i < 10; i++)
-            await outbound.WriteAsync(MessageFactory.PooledSingleFrame(pool, [(byte)i]))
-                .AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(2));
+            await WriteWithinBudgetAsync(outbound, MessageFactory.PooledSingleFrame(pool, [(byte)i]),
+                TimeSpan.FromSeconds(2), token);
 
         // The pump holds one message (blocked on the establishment gate) and
         // the channel buffers up to capacity; the dropped messages are already
         // disposed via the item-dropped hook. The pump's take timing varies
         // with scheduling, so only the bounded range is asserted - never above
-        // 3 - and the per-write timeout above proves a drop mode never blocks
+        // 3 - and the per-write budget above proves a drop mode never blocks
         // a producer (0006 3.5). The handshake's pool rents are transient
         // (released once establishment completes), so no persistent scratch
         // is counted.
@@ -1532,13 +1553,14 @@ public sealed class ZSocketTests
         await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task SendPumpFailure_CompletesOutboundWithFailure()
     {
         using var pool = new CountingMemoryPool();
         using var listener = new TcpListener(IPAddress.Loopback, GetFreePort());
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
 
         var client = new ZPairSocket(new ZSocketOptions
         {
@@ -1549,11 +1571,11 @@ public sealed class ZSocketTests
         // The peer completes the handshake as a DEALER, which is incompatible
         // with a PAIR: the establishment gate faults deterministically, so the
         // pump's first send fails with a protocol error - no TCP timing races.
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
-        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")));
-        await stream.FlushAsync();
+        await stream.WriteAsync(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")), token);
+        await stream.FlushAsync(token);
 
         var outbound = client.Outbound ?? throw new InvalidOperationException("send channel is not configured");
 
@@ -1565,7 +1587,7 @@ public sealed class ZSocketTests
         foreach (var payload in new[] { "a"u8.ToArray(), "b"u8.ToArray() })
         {
             var message = MessageFactory.PooledSingleFrame(pool, payload);
-            var writeFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(message).AsTask());
+            var writeFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(message, token).AsTask());
             if (writeFailure is not null)
             {
                 writeFailure.Should().BeOfType<ChannelClosedException>();
@@ -1581,16 +1603,16 @@ public sealed class ZSocketTests
         // once the last peer ends. WaitToWriteAsync is the deterministic
         // completion signal: on a completed channel it resolves immediately,
         // surfacing the completion error (0006 3.5).
-        var connectFailure = await Record.ExceptionAsync(() => connectTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        var connectFailure = await Record.ExceptionAsync(() => connectTask.WaitAsync(token));
         connectFailure.Should().BeOfType<ZeroMqProtocolException>();
 
-        var waitFailure = await Record.ExceptionAsync(() => outbound.WaitToWriteAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        var waitFailure = await Record.ExceptionAsync(() => outbound.WaitToWriteAsync(token).AsTask());
         waitFailure.Should().BeOfType<ZeroMqProtocolException>();
 
         // The completion is a terminal state, so a single write now fails
         // deterministically with the channel-closed failure.
         var probe = MessageFactory.PooledSingleFrame(pool, [.. "probe"u8]);
-        var completedWriteFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe).AsTask());
+        var completedWriteFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe, token).AsTask());
         completedWriteFailure.Should().BeOfType<ChannelClosedException>();
         completedWriteFailure.As<ChannelClosedException>().InnerException.Should().BeOfType<ZeroMqProtocolException>();
         probe.Dispose(); // never accepted: the channel is completed, so it must not leak
@@ -1605,22 +1627,22 @@ public sealed class ZSocketTests
         // The send hot path must not allocate per message: a copy-on-write
         // snapshot read (0006 3.6), a span-based single-target route, the
         // established gate fast path, and a no-op fake write.
+        var token = TestContext.Current.CancellationToken;
         await using var socket = new ZPairSocket();
-        await socket.ConnectAsync<EndPoint, EstablishedFakeTransport>(
-            new IPEndPoint(IPAddress.Loopback, 0));
+        await socket.ConnectAsync<EndPoint, EstablishedFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
 
         var messages = new ZMessage[1000];
         for (var i = 0; i < messages.Length; i++) messages[i] = ZMessage.FromOwned([(byte)i]);
 
         // Warm up: the first sends may trigger one-time costs (delegate
         // caches, tiered JIT), which would pollute the measurement.
-        for (var i = 0; i < 16; i++) await socket.SendAsync(messages[i]);
+        for (var i = 0; i < 16; i++) await socket.SendAsync(messages[i], token);
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 16; i < messages.Length; i++) await socket.SendAsync(messages[i]);
+        for (var i = 16; i < messages.Length; i++) await socket.SendAsync(messages[i], token);
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 #if !DEBUG
@@ -1638,7 +1660,7 @@ public sealed class ZSocketTests
         foreach (var message in messages) message.Dispose();
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ReceivePath_AggregateDrain_DoesNotAllocatePerMessage(TransportKind kind)
     {
@@ -1656,14 +1678,14 @@ public sealed class ZSocketTests
             ReceiveQueueFactory = new BoundedChannelOptions(1024) { SingleWriter = true },
         });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(1024) { SingleWriter = true } });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
         const int count = 1000;
-        for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+        for (var i = 0; i < count; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
 
         // Capacity comfortably exceeds the send count and nothing consumes,
         // so Outstanding climbs monotonically to count; wait for it directly
@@ -1687,7 +1709,7 @@ public sealed class ZSocketTests
         received.Should().Be(count);
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task PeerChurn_ConcurrentSendReadDispose_NoLeaksOrFaults()
     {
         // Tcp-only: under the full-suite concurrency pressure this churn
@@ -1702,9 +1724,10 @@ public sealed class ZSocketTests
             Pool = pool,
             ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
         });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = TestContext.Current.CancellationToken;
+        using var pump = CancellationTokenSource.CreateLinkedTokenSource(token);
         var port = GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         var failures = new ConcurrentQueue<Exception>();
 
@@ -1712,28 +1735,28 @@ public sealed class ZSocketTests
         {
             try
             {
-                for (var i = 0; i < 300; i++) await server.SendAsync(ZMessage.FromOwned([1]), cts.Token);
+                for (var i = 0; i < 300; i++) await server.SendAsync(ZMessage.FromOwned([1]), pump.Token);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 failures.Enqueue(ex);
             }
-        });
+        }, token);
 
         var drainer = Task.Run(async () =>
         {
             try
             {
                 var messages = server.Messages;
-                await foreach (var message in messages.ReadAllAsync(cts.Token)) message.Dispose();
+                await foreach (var message in messages.ReadAllAsync(pump.Token)) message.Dispose();
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 failures.Enqueue(ex);
             }
-        });
+        }, token);
 
         // Churn: repeatedly connect a short-lived client, exchange messages,
         // and disconnect - each teardown reclaims that peer's buffers and
@@ -1741,17 +1764,17 @@ public sealed class ZSocketTests
         for (var round = 0; round < 4; round++)
         {
             await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
-            await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
-            for (var i = 0; i < 20; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), cts.Token);
+            await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+            for (var i = 0; i < 20; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
         }
 
         await sender;
-        await cts.CancelAsync();
+        await pump.CancelAsync();
         try
         {
             await drainer;
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
 
         failures.Should().BeEmpty();
 
@@ -1761,7 +1784,7 @@ public sealed class ZSocketTests
 
     // ---- Security mechanism boundary (0016) ----
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_ReadyMissingSocketType_Throws()
     {
         // READY Socket-Type metadata validation moved to the socket layer with
@@ -1770,41 +1793,43 @@ public sealed class ZSocketTests
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
         await stream.WriteAsync(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Identity", "abc"))));
-        await stream.FlushAsync();
+            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Identity", "abc"))), token);
+        await stream.FlushAsync(token);
 
         var act = () => connectTask;
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ConnectAsync_ReadyInvalidSocketType_Throws()
     {
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket();
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
         await stream.WriteAsync(ZmtpTestData.Concat(
-            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Socket-Type", "FOO"))));
-        await stream.FlushAsync();
+            ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Socket-Type", "FOO"))), token);
+        await stream.FlushAsync(token);
 
         var act = () => connectTask;
         await act.Should().ThrowAsync<ZeroMqProtocolException>();
     }
 
-    [Fact]
+    [Fact(Timeout = 30_000)]
     public async Task ConnectAsync_CustomMechanism_ExchangesBeforeReady_AndCompletes()
     {
         // The replaceability gate (0006 section 4 / 0016 section 10): a test
@@ -1813,36 +1838,37 @@ public sealed class ZSocketTests
         var port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        var acceptTask = listener.AcceptTcpClientAsync();
+        var token = TestContext.Current.CancellationToken;
+        var acceptTask = listener.AcceptTcpClientAsync(token);
         await using var client = new ZPairSocket(new ZSocketOptions { Security = new ZSecurityOptions { Mechanism = new TestPingPongMechanism() } });
 
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}");
-        using var raw = await acceptTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
+        using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
 
         // Server side of the TEST mechanism: complete the greeting (reading the
         // client's TEST greeting) and answer the mechanism's command sequence.
         var greeting = new byte[64];
-        await stream.ReadExactlyAsync(greeting).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-        await stream.WriteAsync(ZmtpTestData.Greeting("TEST"));
-        await stream.FlushAsync();
+        await stream.ReadExactlyAsync(greeting, token).AsTask().WaitAsync(token);
+        await stream.WriteAsync(ZmtpTestData.Greeting("TEST"), token);
+        await stream.FlushAsync(token);
 
         var serverPong = ZmtpTestData.Frame([4, (byte)'P', (byte)'O', (byte)'N', (byte)'G'], command: true);
         var serverReady = ZmtpTestData.Ready();
 
         // Client sends PING (2-byte header + 5-byte body), expects PONG, then
         // exchanges READY; the server mirror responds in the same order.
-        await stream.ReadExactlyAsync(new byte[2 + 5]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-        await stream.WriteAsync(serverPong);
-        await stream.FlushAsync();
+        await stream.ReadExactlyAsync(new byte[2 + 5], token).AsTask().WaitAsync(token);
+        await stream.WriteAsync(serverPong, token);
+        await stream.FlushAsync(token);
 
         // The client's READY frame: 2-byte header + 26-byte body (READY name,
         // Socket-Type property, PAIR value).
-        await stream.ReadExactlyAsync(new byte[2 + 26]).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-        await stream.WriteAsync(serverReady);
-        await stream.FlushAsync();
+        await stream.ReadExactlyAsync(new byte[2 + 26], token).AsTask().WaitAsync(token);
+        await stream.WriteAsync(serverReady, token);
+        await stream.FlushAsync(token);
 
-        await connectTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await connectTask.WaitAsync(token);
     }
 
     private static async Task EchoAsync(ZPairSocket server, ChannelReader<ZMessage> messages,
@@ -1880,19 +1906,6 @@ public sealed class ZSocketTests
     private static Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         return WaitUntilAsync(condition, value => value, timeout);
-    }
-
-    private static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan timeout)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        while (true)
-        {
-            if (await condition()) return;
-
-            if (stopwatch.Elapsed >= timeout) throw new TimeoutException("condition not met within timeout");
-
-            await Task.Delay(20);
-        }
     }
 
     /// <summary>
@@ -1955,16 +1968,61 @@ public sealed class ZSocketTests
         TimeSpan timeout,
         CancellationToken token)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        cts.CancelAfter(timeout);
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
+        window.CancelAfter(timeout);
         try
         {
-            return await reader.ReadAsync(cts.Token);
+            return await reader.ReadAsync(window.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Writes one message and asserts the write completes within
+    /// <paramref name="budget" />. A drop-mode producer surface must never
+    /// block, so a write that overruns the budget fails this assertion rather
+    /// than only aborting the test through its declared Timeout; the budget is
+    /// per write, so it also bounds each individual producer, not just the loop.
+    /// The budget timer stops as soon as the write wins, and a write that loses
+    /// the race is observed before the failure unwinds, so neither side of the
+    /// race is left dangling: the channel still owns the message, and a later
+    /// fault on the blocked producer cannot surface as an unobserved exception.
+    /// </summary>
+    private static async Task WriteWithinBudgetAsync(
+        ChannelWriter<ZMessage> outbound,
+        ZMessage message,
+        TimeSpan budget,
+        CancellationToken token)
+    {
+        var write = outbound.WriteAsync(message, token).AsTask();
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var overdue = Task.Delay(budget, window.Token);
+        var finished = await Task.WhenAny(write, overdue);
+
+        if (finished == write)
+        {
+            window.Cancel();
+        }
+        else
+        {
+            // Observe the losing write before the cancellation path below
+            // throws: a later fault on the blocked producer must not surface
+            // as an unobserved exception.
+            _ = write.ContinueWith(
+                static task => _ = task.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
+            // A canceled test is not a blocked producer: surface cancellation
+            // as cancellation and keep the budget failure for a real overrun.
+            token.ThrowIfCancellationRequested();
+        }
+
+        finished.Should().BeSameAs(write, "a drop-mode producer must not block; the write budget was {0}", budget);
+        await write;
     }
 
     private static async Task SendLoopAsync(ZPairSocket client, byte tag, CancellationToken token)

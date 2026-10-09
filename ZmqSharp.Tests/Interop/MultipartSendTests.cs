@@ -15,7 +15,7 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class MultipartSendTests
 {
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Dealer_SendsMultipart_CopyEnumerable_And_RoundTripsThroughNetMQRouter()
     {
         using var router = new RouterSocket();
@@ -24,8 +24,8 @@ public sealed class MultipartSendTests
         router.Bind($"tcp://127.0.0.1:{port}");
 
         await using var dealer = new ZDealerSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await dealer.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         // Jupyter-shaped five-frame message, one frame per element; a
         // byte[][] binds the IEnumerable<byte[]> overload directly.
@@ -37,7 +37,7 @@ public sealed class MultipartSendTests
             "parent"u8.ToArray(),
             "content"u8.ToArray(),
         ];
-        await dealer.SendAsync(frames, cts.Token);
+        await dealer.SendAsync(frames, token);
 
         var message = new NetMQMessage();
         router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
@@ -53,16 +53,16 @@ public sealed class MultipartSendTests
         message[5].ToByteArray().Should().Equal([.. "content"u8]);
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Pair_SendsReadOnlySequence_AsSingleFrame()
     {
+        var token = TestContext.Current.CancellationToken;
         await using var server = new ZPairSocket();
         await using var client = new ZPairSocket();
         var port = InteropHelpers.GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         // A two-segment sequence is one frame with non-contiguous content.
         var first = "abc"u8.ToArray();
@@ -72,41 +72,41 @@ public sealed class MultipartSendTests
         seg1.Link = seg2;
         var sequence = new ReadOnlySequence<byte>(seg1, 0, seg2, seg2.Memory.Length);
 
-        await client.SendAsync(sequence, cts.Token);
+        await client.SendAsync(sequence, token);
 
-        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5));
+        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         message.Should().NotBeNull();
         message.Value.Count.Should().Be(1);
         message.Value[0].ToSequence().ToArray().Should().Equal([.. "abcdef"u8]);
         message.Value.Dispose();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task ReqRep_MultipartRequestAndReply()
     {
+        var token = TestContext.Current.CancellationToken;
         await using var rep = new ZRepSocket();
         await using var req = new ZReqSocket();
         var port = InteropHelpers.GetFreePort();
-        await rep.BindAsync($"tcp://127.0.0.1:{port}");
+        await rep.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        rep.BindRequestHandler((context, token) => rep.SendReplyAsync(context, [new ReadOnlyMemory<byte>("reply"u8.ToArray())], token));
+        rep.BindRequestHandler((context, replyToken) => rep.SendReplyAsync(context, [new ReadOnlyMemory<byte>("reply"u8.ToArray())], replyToken));
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await req.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await req.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         ReadOnlyMemory<byte>[] request =
         [
             "part-1"u8.ToArray(),
             "part-2"u8.ToArray(),
         ];
-        var reply = await req.RequestAsync(request, cts.Token);
+        var reply = await req.RequestAsync(request, token);
 
         reply.Count.Should().Be(1);
         reply[0].ToSequence().ToArray().Should().Equal([.. "reply"u8]);
         reply.Dispose();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Router_SendsMultipart_ByIdentity()
     {
         using var dealer = new DealerSocket();
@@ -119,17 +119,17 @@ public sealed class MultipartSendTests
         {
             MessageSink = new TestSink(message => routedMessage.TrySetResult(message))
         });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await router.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await router.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         dealer.SendFrame([.. "ping"u8]);
-        var routed = await routedMessage.Task.WaitAsync(cts.Token);
+        var routed = await routedMessage.Task.WaitAsync(token);
         var identity = routed[0].ToSequence().ToArray();
         routed.Dispose();
 
         // Multipart reply addressed by the peer's routing identity.
         ReadOnlyMemory<byte>[] replyFrames = ["part-1"u8.ToArray(), "part-2"u8.ToArray()];
-        await router.SendAsync(identity, replyFrames, cts.Token);
+        await router.SendAsync(identity, replyFrames, token);
         var message = new NetMQMessage();
         dealer.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
         message.Should().NotBeNull();
@@ -138,14 +138,18 @@ public sealed class MultipartSendTests
         message[1].ToByteArray().Should().Equal([.. "part-2"u8]);
     }
 
-    private static async Task<ZMessage?> ReadMessageAsync(ChannelReader<ZMessage> reader, TimeSpan timeout)
+    private static async Task<ZMessage?> ReadMessageAsync(
+        ChannelReader<ZMessage> reader,
+        TimeSpan timeout,
+        CancellationToken token)
     {
-        using var cts = new CancellationTokenSource(timeout);
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
+        window.CancelAfter(timeout);
         try
         {
-            return await reader.ReadAsync(cts.Token);
+            return await reader.ReadAsync(window.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
             return null;
         }

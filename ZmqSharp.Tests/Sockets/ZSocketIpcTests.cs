@@ -20,8 +20,9 @@ public sealed class ZSocketIpcTests
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Bind_UnlinksPath_OnSocketDispose(string path)
     {
+        var token = TestContext.Current.CancellationToken;
         var socket = new ZPairSocket();
-        await socket.BindAsync($"ipc://{path}");
+        await socket.BindAsync($"ipc://{path}", token);
 
         File.Exists(path).Should().BeTrue("binding an ipc endpoint creates the filesystem entry");
 
@@ -33,24 +34,26 @@ public sealed class ZSocketIpcTests
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Bind_AfterDispose_SamePathSucceeds(string path)
     {
+        var token = TestContext.Current.CancellationToken;
         await using (var first = new ZPairSocket())
         {
-            await first.BindAsync($"ipc://{path}");
+            await first.BindAsync($"ipc://{path}", token);
         }
 
         // The unlink on dispose freed the path, so a later bind of the same
         // path must succeed instead of failing with EADDRINUSE.
         await using var second = new ZPairSocket();
-        await FluentActions.Awaiting(() => second.BindAsync($"ipc://{path}")).Should().NotThrowAsync();
+        await FluentActions.Awaiting(() => second.BindAsync($"ipc://{path}", token)).Should().NotThrowAsync();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Connect_MissingPath_ThrowsCleanly(string path)
     {
+        var token = TestContext.Current.CancellationToken;
         await using var client = new ZPairSocket();
 
-        var failure = await Record.ExceptionAsync(() => client.ConnectAsync($"ipc://{path}").WaitAsync(TimeSpan.FromSeconds(5)));
+        var failure = await Record.ExceptionAsync(() => client.ConnectAsync($"ipc://{path}", token).WaitAsync(token));
         failure.Should().NotBeNull();
         (failure is SocketException or IOException).Should().BeTrue();
     }
@@ -62,8 +65,9 @@ public sealed class ZSocketIpcTests
         // host slot; it must resolve against the system temp directory instead
         // of the filesystem root (0020 section 3).
         var name = $"zmqsharp-rel-{Guid.NewGuid().ToString("N")[..8]}.sock";
+        var token = TestContext.Current.CancellationToken;
         var socket = new ZPairSocket();
-        await socket.BindAsync($"ipc://{name}");
+        await socket.BindAsync($"ipc://{name}", token);
         try
         {
             File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeTrue(
@@ -75,7 +79,7 @@ public sealed class ZSocketIpcTests
         }
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.IpcPaths), MemberType = typeof(TestTransports))]
     public async Task Push_FansOutToMultiplePullPeers(string pathA)
     {
@@ -84,28 +88,29 @@ public sealed class ZSocketIpcTests
         await using var pullA = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var pullB = new ZPullSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true } });
         await using var push = new ZPushSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
+        using var pump = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-        await pullA.BindAsync(endpointA, cts.Token);
-        await pullB.BindAsync(endpointB, cts.Token);
-        await push.ConnectAsync(endpointA, cts.Token);
-        await push.ConnectAsync(endpointB, cts.Token);
+        await pullA.BindAsync(endpointA, token);
+        await pullB.BindAsync(endpointB, token);
+        await push.ConnectAsync(endpointA, token);
+        await push.ConnectAsync(endpointB, token);
 
         var countA = 0;
         var countB = 0;
         var bothReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var drainA = DrainAsync(pullA, () => OnPeerMessage(true), cts.Token);
-        var drainB = DrainAsync(pullB, () => OnPeerMessage(false), cts.Token);
+        var drainA = DrainAsync(pullA, () => OnPeerMessage(true), pump.Token);
+        var drainB = DrainAsync(pullB, () => OnPeerMessage(false), pump.Token);
 
         // The push drops sends to peers that have not finished the handshake,
         // so keep sending until both drains report a message.
         for (var attempt = 0; attempt < 100 && !bothReached.Task.IsCompleted; attempt++)
         {
-            await push.SendAsync(ZMessage.FromOwned([.. "work"u8]), cts.Token);
-            if (await Task.WhenAny(bothReached.Task, Task.Delay(25, cts.Token)) == bothReached.Task) break;
+            await push.SendAsync(ZMessage.FromOwned([.. "work"u8]), token);
+            if (await Task.WhenAny(bothReached.Task, Task.Delay(25, token)) == bothReached.Task) break;
         }
 
-        await bothReached.Task.WaitAsync(cts.Token);
+        await bothReached.Task.WaitAsync(token);
         countA.Should().BeGreaterThanOrEqualTo(1);
         countB.Should().BeGreaterThanOrEqualTo(1);
 
@@ -119,15 +124,15 @@ public sealed class ZSocketIpcTests
             if (Volatile.Read(ref countA) >= 1 && Volatile.Read(ref countB) >= 1) bothReached.TrySetResult();
         }
 
-        await cts.CancelAsync();
+        await pump.CancelAsync();
         try
         {
             await Task.WhenAll(drainA, drainB);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.AbstractNames), MemberType = typeof(TestTransports))]
     public async Task AbstractNamespace_RoundTripsWithoutFilesystemEntry(string name)
     {
@@ -139,18 +144,19 @@ public sealed class ZSocketIpcTests
         if (!OperatingSystem.IsLinux()) return;
 
         var endpoint = $"ipc://@{name}";
+        var token = TestContext.Current.CancellationToken;
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ZPairSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
-        await server.BindAsync(endpoint);
+        await server.BindAsync(endpoint, token);
 
         File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeFalse(
             "an abstract namespace bind creates no filesystem entry");
 
         await using var client = new ZPairSocket();
-        await client.ConnectAsync(endpoint);
-        await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]));
+        await client.ConnectAsync(endpoint, token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]), token);
 
-        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await received.Task.WaitAsync(token);
         message[0].ToSequence().ToArray().Should().Equal([.. "hi"u8]);
         message.Dispose();
 

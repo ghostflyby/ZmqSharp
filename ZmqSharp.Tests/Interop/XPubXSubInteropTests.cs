@@ -16,7 +16,7 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class XPubXSubInteropTests
 {
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task ZmqSharpXPub_NetMQXSub_ObservesAndBroadcasts()
     {
         // NetMQ XSub -> ZmqSharp XPub: the subscription frame must reach our
@@ -28,13 +28,13 @@ public sealed class XPubXSubInteropTests
 
         var subscriptions = Channel.CreateUnbounded<ZMessage>();
         await using var xpub = new ZXPubSocket(new ZSocketOptions { MessageSink = new TestSink(message => subscriptions.Writer.TryWrite(message)) });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await xpub.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await xpub.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         // The NetMQ XSub announces its subscription via the wire frame;
         // our XPub observes it (0x01 + topic) and forwards it upstream.
         xsub.SendFrame([0x01, .. "news"u8]);
-        var observed = await subscriptions.Reader.ReadAsync(cts.Token).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        var observed = await subscriptions.Reader.ReadAsync(token);
         var observedFrame = observed[0].ToSequence().ToArray();
         observedFrame[0].Should().Be(0x01);
         observedFrame.AsSpan(1).SequenceEqual("news"u8).Should().BeTrue();
@@ -42,31 +42,31 @@ public sealed class XPubXSubInteropTests
 
         // Publish a topic; the NetMQ XSub receives it (single frame).
         var payload = Encoding.ASCII.GetBytes("news").Concat(Encoding.ASCII.GetBytes("!")).ToArray();
-        await xpub.SendAsync(ZMessage.FromOwned(payload), cts.Token);
+        await xpub.SendAsync(ZMessage.FromOwned(payload), token);
         var received = InteropHelpers.ReceiveFrame(xsub, TimeSpan.FromSeconds(5));
         received.Should().Equal(payload);
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task NetMQXPub_ZmqSharpXSub_ReceivesUnfiltered()
     {
         var received = Channel.CreateUnbounded<ZMessage>();
         await using var xsub = new ZXSubSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.Writer.TryWrite(message)) });
         xsub.Subscribe([.. "any"u8]);
         var port = InteropHelpers.GetFreePort();
-        await xsub.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await xsub.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var xpub = new XPublisherSocket();
         xpub.Options.Linger = TimeSpan.Zero;
         xpub.Connect($"tcp://127.0.0.1:{port}");
-        await Task.Delay(500); // let the subscription frame reach NetMQ
+        await Task.Delay(500, token); // let the subscription frame reach NetMQ
 
         // NetMQ's XPublisherSocket (like PUB) only forwards data matching a
         // received subscription; our XSUB delivers the frame unfiltered.
         var payload = Encoding.ASCII.GetBytes("any-thing");
         xpub.SendFrame(payload);
-        var message = await received.Reader.ReadAsync(CancellationToken.None).AsTask()
-            .WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await received.Reader.ReadAsync(token);
         message[0].ToSequence().ToArray().Should().Equal(payload);
         message.Dispose();
     }

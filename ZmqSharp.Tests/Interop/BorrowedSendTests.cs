@@ -18,27 +18,27 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class BorrowedSendTests
 {
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Pair_SendAsync_BorrowsByteArray_ZeroRent_DeliversExactBytes()
     {
         await using var server = new ZPairSocket();
         await using var client = new ZPairSocket();
         var port = InteropHelpers.GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         var payload = "borrowed"u8.ToArray();
-        await client.SendAsync(payload, cts.Token);
+        await client.SendAsync(payload, token);
 
-        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5));
+        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         message.Should().NotBeNull();
         message.Value[0].ToSequence().ToArray().Should().Equal(payload);
         message.Value.Dispose();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Pair_SendAsync_BorrowsCustomMemoryManagerBacking()
     {
         // A custom MemoryManager backing is neither byte[] nor string; the
@@ -47,21 +47,21 @@ public sealed class BorrowedSendTests
         await using var server = new ZPairSocket();
         await using var client = new ZPairSocket();
         var port = InteropHelpers.GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         using var manager = new FixedMemoryManager("manager-backed"u8.ToArray());
-        await client.SendAsync(manager.Memory, cts.Token);
+        await client.SendAsync(manager.Memory, token);
 
-        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5));
+        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         message.Should().NotBeNull();
         message.Value[0].ToSequence().ToArray().Should().Equal([.. "manager-backed"u8]);
         message.Value.Dispose();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task BorrowedSend_AfterAwait_CallerBufferIsFreeAgain()
     {
         // The BCL write contract: the buffer may be reused once the awaited
@@ -70,22 +70,22 @@ public sealed class BorrowedSendTests
         await using var server = new ZPairSocket();
         await using var client = new ZPairSocket();
         var port = InteropHelpers.GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         var payload = "before"u8.ToArray();
-        await client.SendAsync(payload, cts.Token);
+        await client.SendAsync(payload, token);
         payload[0] = (byte)'X';
 
-        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5));
+        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         message.Should().NotBeNull();
         message.Value[0].ToSequence().ToArray().Should().Equal([.. "before"u8]);
         message.Value.Dispose();
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task Dealer_SendAsync_BorrowsAndRoundTripsThroughNetMQRouter()
     {
         using var router = new RouterSocket();
@@ -94,10 +94,10 @@ public sealed class BorrowedSendTests
         router.Bind($"tcp://127.0.0.1:{port}");
 
         await using var dealer = new ZDealerSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await dealer.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await dealer.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
-        await dealer.SendAsync("hello"u8.ToArray(), cts.Token);
+        await dealer.SendAsync("hello"u8.ToArray(), token);
 
         var message = new NetMQMessage();
         router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
@@ -106,7 +106,7 @@ public sealed class BorrowedSendTests
         message[1].ToByteArray().Should().Equal([.. "hello"u8]);
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task BorrowedSend_RentsNothingFromThePool()
     {
         // The client's pool is the send-side pool; a borrowed send must not
@@ -116,17 +116,17 @@ public sealed class BorrowedSendTests
         await using var server = new ZPairSocket();
         await using var client = new ZPairSocket(new ZSocketOptions { Pool = pool });
         var port = InteropHelpers.GetFreePort();
-        await server.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await client.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         // The handshake rents the mechanism scratch from the pool; record that
         // baseline and assert the borrowed send adds nothing.
         var baseline = pool.Rentals;
-        await client.SendAsync("borrowed"u8.ToArray(), cts.Token);
+        await client.SendAsync("borrowed"u8.ToArray(), token);
 
-        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5));
+        var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         message.Should().NotBeNull();
         message.Value.Dispose();
 
@@ -134,14 +134,18 @@ public sealed class BorrowedSendTests
         pool.Rentals.Should().Be(baseline);
     }
 
-    private static async Task<ZMessage?> ReadMessageAsync(ChannelReader<ZMessage> reader, TimeSpan timeout)
+    private static async Task<ZMessage?> ReadMessageAsync(
+        ChannelReader<ZMessage> reader,
+        TimeSpan timeout,
+        CancellationToken token)
     {
-        using var cts = new CancellationTokenSource(timeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(timeout);
         try
         {
             return await reader.ReadAsync(cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
             return null;
         }

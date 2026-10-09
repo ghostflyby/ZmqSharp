@@ -32,7 +32,7 @@ public sealed class CustomSocketTypeTests
             .WithMessage("*never composes a queue*");
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task CustomType_Pair_HandshakeCompletesAndMessagesRoundTrip(TransportKind kind)
     {
@@ -40,14 +40,14 @@ public sealed class CustomSocketTypeTests
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new CustomTypeSocket(CustomName, new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
         await using var client = new CustomTypeSocket(CustomName);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
-        await server.BindAsync(endpoint, cts.Token);
-        await client.ConnectAsync(endpoint, cts.Token);
+        await server.BindAsync(endpoint, token);
+        await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
-        var message = await received.Task.WaitAsync(cts.Token);
+        var message = await received.Task.WaitAsync(token);
         byte[] expected = [.. "hello"u8];
         message[0].ToSequence().ToArray().Should().Equal(expected);
         message.Dispose();
@@ -65,8 +65,9 @@ public sealed class CustomSocketTypeTests
         await using var server = new ZPairSocket();
         await using var client = new CustomTypeSocket(CustomName);
 
-        await server.BindAsync(endpoint);
-        var failure = await Record.ExceptionAsync(() => client.ConnectAsync(endpoint));
+        var token = TestContext.Current.CancellationToken;
+        await server.BindAsync(endpoint, token);
+        var failure = await Record.ExceptionAsync(() => client.ConnectAsync(endpoint, token));
 
         failure.Should().NotBeNull();
         // Both peers reject each other. Either the local rejection surfaces as
@@ -93,11 +94,6 @@ public sealed class CustomSocketTypeTests
         public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
         {
             return SendAsyncCore(message, token);
-        }
-
-        public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-        {
-            return SendAsyncCore(bytes, token);
         }
     }
 

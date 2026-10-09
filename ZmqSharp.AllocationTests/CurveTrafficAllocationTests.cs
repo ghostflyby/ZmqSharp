@@ -16,10 +16,10 @@ public class CurveTrafficAllocationTests
         using var raw = new RecordingByteConnection(capacity: (count + warmup) * 64);
         using var session = new ZmtpSession(raw, CurveSessionTrafficTests.NewCodec());
         using var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed("hello-curve"u8.ToArray()))));
-        for (var i = 0; i < warmup; i++) await session.SendAsync(message);
+        for (var i = 0; i < warmup; i++) await session.SendAsync(message, TestContext.Current.CancellationToken);
         var thread = Environment.CurrentManagedThreadId;
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < count; i++) await session.SendAsync(message);
+        for (var i = 0; i < count; i++) await session.SendAsync(message, TestContext.Current.CancellationToken);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Environment.CurrentManagedThreadId.Should().Be(thread);
 #if !DEBUG
@@ -57,7 +57,7 @@ public class CurveTrafficAllocationTests
         using (var session = new ZmtpSession(recording, CurveSessionTrafficTests.NewCodec()))
         {
             using var message = ZMessage.FromOwned([.. "parser-curve"u8]);
-            for (var i = 0; i < count + warmup; i++) await session.SendAsync(message);
+            for (var i = 0; i < count + warmup; i++) await session.SendAsync(message, TestContext.Current.CancellationToken);
         }
 
         using var input = new RecordingByteConnection(recording.Recorded);
@@ -72,7 +72,7 @@ public class CurveTrafficAllocationTests
             if (seen == count + warmup) allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             return ValueTask.FromResult(true);
         }, codec);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
         seen.Should().Be(count + warmup);
         Environment.CurrentManagedThreadId.Should().Be(thread);
 #if !DEBUG

@@ -166,7 +166,7 @@ public sealed class DispatchPolicyTests
         policy.TryResolve(identity, out resolved).Should().BeFalse();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task CustomMultiSelectPolicy_DeliversToEverySelectedPeer(TransportKind kind)
     {
@@ -181,17 +181,17 @@ public sealed class DispatchPolicyTests
         var receivedB = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var receiverA = new ZPairSocket(new ZSocketOptions { MessageSink = new TestSink(message => receivedA.TrySetResult(message)) });
         await using var receiverB = new ZPairSocket(new ZSocketOptions { MessageSink = new TestSink(message => receivedB.TrySetResult(message)) });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
 
-        await receiverA.BindAsync(endpointA, cts.Token);
-        await receiverB.BindAsync(endpointB, cts.Token);
-        await sender.ConnectAsync(endpointA, cts.Token);
-        await sender.ConnectAsync(endpointB, cts.Token);
+        await receiverA.BindAsync(endpointA, token);
+        await receiverB.BindAsync(endpointB, token);
+        await sender.ConnectAsync(endpointA, token);
+        await sender.ConnectAsync(endpointB, token);
 
         // The custom policy selects both established peers.
-        await sender.SendAsync(ZMessage.FromOwned([.. "both"u8]), cts.Token);
-        (await receivedA.Task.WaitAsync(cts.Token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
-        (await receivedB.Task.WaitAsync(cts.Token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
+        await sender.SendAsync(ZMessage.FromOwned([.. "both"u8]), token);
+        (await receivedA.Task.WaitAsync(token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
+        (await receivedB.Task.WaitAsync(token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
     }
 
     private static ZPeer? SelectOnly(IZDispatchPolicy policy, ZMessage message, ZPeer[] peers)

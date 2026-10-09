@@ -171,7 +171,7 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
             if (Volatile.Read(ref outstanding) <= count) return Task.CompletedTask;
 
             released = CreateReleasedGate();
-            return released.Task.WaitAsync(timeout);
+            return released.Task.WaitAsync(timeout, TestContext.Current.CancellationToken);
         }
     }
 
@@ -183,7 +183,8 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
     /// </summary>
     public async Task WaitForOutstandingAtLeastAsync(int count, TimeSpan timeout)
     {
-        using var cts = new CancellationTokenSource(timeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(timeout);
         while (true)
         {
             Task signal;
@@ -287,7 +288,8 @@ internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullM
     /// <summary>Completes when at least <paramref name="count"/> frames have been dropped.</summary>
     public async Task WaitForDropsAsync(int count, TimeSpan timeout)
     {
-        using var cts = new CancellationTokenSource(timeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(timeout);
         while (true)
         {
             Task signal;
@@ -404,7 +406,8 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
     public List<bool> MoreFlags { get; } = [];
 
     /// <summary>Completes when the first frame arrives, so tests wait on the
-    /// state instead of polling the frame count.</summary>
+    /// state instead of polling the frame count. The awaiting test supplies its
+    /// own cancellation token; the recorder holds no ambient test context.</summary>
     public Task FirstFrameAsync => firstFrame.Task;
 
     public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
@@ -456,7 +459,7 @@ internal static class ZmtpTestRunner
             ZNullMechanism.Instance,
             ZmtpCommands.BuildReady(socketType),
             ZmtpParser.DefaultMaxCommandSize);
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
         return result is not null ? connection : null;
     }
 
@@ -472,13 +475,13 @@ internal static class ZmtpTestRunner
         if (session is null) return;
 
         using var parser = CreateParser(session, sink);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>Runs an already-configured parser to completion.</summary>
     public static async Task RunParserAsync(ZmtpParser parser)
     {
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
     }
 }
 
@@ -651,9 +654,11 @@ internal sealed class EstablishedFakeConnection : IZConnection
 
         // Park the pump on a read that only cancellation completes, so the
         // peer stays established and routable for the duration of the test.
+        // The wait is wired to the test's token as well: a test timeout wakes
+        // the parked pump instead of leaving it in the background.
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         token.Register(static state => (state as TaskCompletionSource<int>)?.TrySetCanceled(), tcs);
-        return new ValueTask<int>(tcs.Task);
+        return new ValueTask<int>(tcs.Task.WaitAsync(TestContext.Current.CancellationToken));
     }
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
