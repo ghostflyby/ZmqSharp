@@ -134,9 +134,8 @@ public sealed class ZmtpParser : IDisposable
                 {
                     decodedFrame = allocate(decodedLength, decodedMore);
                     var remaining = decoded.Body;
-                    for (var i = 0; i < decodedFrame.Count; i++)
+                    foreach (var segment in decodedFrame)
                     {
-                        var segment = decodedFrame[i];
                         remaining.Slice(0, segment.Memory.Length).CopyTo(segment.Writable.Span);
                         remaining = remaining.Slice(segment.Memory.Length);
                     }
@@ -179,8 +178,8 @@ public sealed class ZmtpParser : IDisposable
                 try
                 {
                     complete = true;
-                    for (var i = 0; i < materialized.Count; i++)
-                        if (!await TryReadExactlyAsync(materialized[i].Writable, token))
+                    foreach (var segment in materialized)
+                        if (!await TryReadExactlyAsync(segment.Writable, token))
                         {
                             complete = false;
                             break;

@@ -27,20 +27,11 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
         }
     }
 
-    public Enumerator GetEnumerator()
-    {
-        return new Enumerator(segments);
-    }
+    public Enumerator GetEnumerator() => new(segments);
 
-    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator() => GetEnumerator();
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public void Dispose()
     {

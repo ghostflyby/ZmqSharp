@@ -1,7 +1,5 @@
 using System.Buffers;
 using ZmqSharp.Patterns;
-using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp;
 
@@ -109,7 +107,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
             {
                 new(new ZSegment(identity, 0, identity.Length))
             };
-            for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
+            frames.AddRange(message);
 
             return ValueTask.FromResult(ZInboundDecision.Deliver(
                 new ZMessage(new ZMultiMessage([.. frames]))));

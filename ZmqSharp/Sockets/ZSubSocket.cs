@@ -1,6 +1,5 @@
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp;
 

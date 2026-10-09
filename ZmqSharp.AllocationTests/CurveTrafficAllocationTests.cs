@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using FluentAssertions;
 using Xunit;

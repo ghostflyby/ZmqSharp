@@ -2,7 +2,6 @@ using System.Buffers;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Sockets;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Tests.Sockets;
 

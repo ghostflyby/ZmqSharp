@@ -24,7 +24,7 @@ internal sealed class AggregateReader(Func<PeerRecord[]> snapshot, WakeGate wake
         if (completion.IsCompleted) return false;
         var captured = wake.Capture();
         foreach (var record in snapshot())
-            if (record.Phase == PeerPhase.Established && record.Queue is { } queue && queue.Reader.Count > 0)
+            if (record is { Phase: PeerPhase.Established, Queue: { Reader.Count: > 0 } })
                 return true;
         var done = await Task.WhenAny(captured, completion).WaitAsync(cancellationToken);
         return done == captured && !completion.IsCompleted;

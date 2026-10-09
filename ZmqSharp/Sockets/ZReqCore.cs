@@ -3,7 +3,10 @@ using ZmqSharp.Patterns;
 namespace ZmqSharp.Sockets;
 
 /// <summary>Coordinates one request at a time without depending on a socket implementation.</summary>
-internal sealed class ZReqCore : IZInboundPolicy
+internal sealed class ZReqCore(
+    Func<ZPeer[]> peers,
+    Func<ZPeer, ZMessage, CancellationToken, ValueTask> send,
+    Action<ZPeer> retire) : IZInboundPolicy
 {
     private sealed class Request(ZPeer peer, CancellationToken token)
     {
@@ -18,18 +21,7 @@ internal sealed class ZReqCore : IZInboundPolicy
     private readonly Lock gate = new();
     private readonly ZRoundRobinDispatch selection = new();
     private readonly ZPeer[] target = new ZPeer[1];
-    private readonly Func<ZPeer[]> peers;
-    private readonly Func<ZPeer, ZMessage, CancellationToken, ValueTask> send;
-    private readonly Action<ZPeer> retire;
     private Request? pending;
-
-    public ZReqCore(Func<ZPeer[]> peers,
-        Func<ZPeer, ZMessage, CancellationToken, ValueTask> send, Action<ZPeer> retire)
-    {
-        this.peers = peers;
-        this.send = send;
-        this.retire = retire;
-    }
 
     /// <summary>Transfers the message only after preconditions succeed; completion ends all buffer borrowing.</summary>
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token)

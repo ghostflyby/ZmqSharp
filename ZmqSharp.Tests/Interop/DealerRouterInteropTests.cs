@@ -4,7 +4,6 @@ using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Tests.Interop;
 

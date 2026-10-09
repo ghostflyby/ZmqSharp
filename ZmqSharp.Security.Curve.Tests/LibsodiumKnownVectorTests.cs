@@ -93,9 +93,9 @@ public sealed class LibsodiumKnownVectorTests
         var libsodium = Convert.FromHexString(
             "3a21ccb5a9a6b2fde7ed08bdd6a863d23cc41f4b3e536cebb1600e539fa2c2480b99c91523d0fa");
 
-        var sealed_ = new byte[16 + "secret box test message"u8.Length];
-        bc.SecretBox("secret box test message"u8, nonce, key, sealed_);
-        sealed_.Should().Equal(libsodium);
+        var sealedMessage = new byte[16 + "secret box test message"u8.Length];
+        bc.SecretBox("secret box test message"u8, nonce, key, sealedMessage);
+        sealedMessage.Should().Equal(libsodium);
 
         var opened = new byte["secret box test message"u8.Length];
         bc.TrySecretBoxOpen(libsodium, nonce, key, opened, out var written).Should().BeTrue();

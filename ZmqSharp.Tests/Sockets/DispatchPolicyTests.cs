@@ -2,7 +2,6 @@ using System.Buffers;
 using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
-using ZmqSharp.Transports;
 
 namespace ZmqSharp.Tests.Sockets;
 
@@ -212,11 +211,8 @@ public sealed class DispatchPolicyTests
     }
 
     /// <summary>A test composition root with a pair-shaped socket type and a multi-select policy.</summary>
-    private sealed class MultiSelectSocket : ZSocketBase
+    private sealed class MultiSelectSocket() : ZSocketBase(new ZSocketOptions(), new SelectAllDispatch(), ZSocketTypes.Pair)
     {
-        public MultiSelectSocket()
-            : base(new ZSocketOptions(), new SelectAllDispatch(), ZSocketTypes.Pair) { }
-
         public ValueTask SendAsync(ZMessage message, CancellationToken token = default)
         {
             return SendAsyncCore(message, token);

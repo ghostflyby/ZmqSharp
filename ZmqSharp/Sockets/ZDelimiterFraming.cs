@@ -12,7 +12,7 @@ internal static class ZDelimiterFraming
     public static ZMessage Encode(ZMessage message)
     {
         var frames = new List<ZFrame>(message.Count + 1) { EmptyFrame };
-        for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
+        frames.AddRange(message);
 
         return new ZMessage(new ZMultiMessage([.. frames]));
     }

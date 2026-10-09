@@ -48,7 +48,9 @@ internal sealed class FrameSequence
     public ReadOnlySequence<byte> FromFrame(ZFrame frame)
     {
         Clear();
-        for (var i = 0; i < frame.Count; i++) Add(frame[i].Memory);
+        foreach (var segment in frame)
+            Add(segment.Memory);
+
         return Sequence;
     }
 }
