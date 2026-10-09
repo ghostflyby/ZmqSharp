@@ -1,3 +1,5 @@
+using Xunit;
+
 namespace ZmqSharp.AllocationTests;
 
 /// <summary>
@@ -38,7 +40,7 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             pending.Add((count, tcs));
-            return tcs.Task;
+            return tcs.Task.WaitAsync(TestContext.Current.CancellationToken);
         }
     }
 

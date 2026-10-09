@@ -17,7 +17,7 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class IOPubXPubSubCompatTests
 {
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task NetMQXPub_ZmqSharpSub_HandshakesAndDelivers()
     {
         // Kernel side: XPUB over TCP (Jupyter IOPub shape). Client side:
@@ -30,42 +30,42 @@ public sealed class IOPubXPubSubCompatTests
         var received = Channel.CreateUnbounded<ZMessage>();
         await using var sub = new ZSubSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.Writer.TryWrite(message)) });
         sub.Subscribe([.. "news"u8]);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await sub.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await sub.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         // Let the subscription frame propagate to NetMQ (it drops until subscribed).
-        await Task.Delay(500);
+        await Task.Delay(500, token);
 
         // The XPUB publishes the topic; the SUB client must receive it.
         xpub.SendFrame(Concat("news", "headline"));
-        var message = await received.Reader.ReadAsync(CancellationToken.None).AsTask()
-            .WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await received.Reader.ReadAsync(token);
         message[0].ToSequence().ToArray().Should().Equal(Concat("news", "headline"));
         message.Dispose();
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task NetMQSub_ZmqSharpXPub_HandshakesAndBroadcasts()
     {
         // The reverse direction: ZmqSharp XPUB with a NetMQ SUB client
         // (libzmq XPUB accepts SUB peers).
+        var token = TestContext.Current.CancellationToken;
         var subscriptions = Channel.CreateUnbounded<ZMessage>();
         await using var xpub = new ZXPubSocket(new ZSocketOptions { MessageSink = new TestSink(message => subscriptions.Writer.TryWrite(message)) });
         var port = InteropHelpers.GetFreePort();
-        await xpub.BindAsync($"tcp://127.0.0.1:{port}");
+        await xpub.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var sub = new SubscriberSocket();
         sub.Options.Linger = TimeSpan.Zero;
         sub.Subscribe([.. "news"u8]);
         sub.Connect($"tcp://127.0.0.1:{port}");
-        await Task.Delay(500); // let the subscription propagate
+        await Task.Delay(500, token); // let the subscription propagate
 
-        await xpub.SendAsync(ZMessage.FromOwned(Concat("news", "headline")), new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
+        await xpub.SendAsync(ZMessage.FromOwned(Concat("news", "headline")), token);
         var received = InteropHelpers.ReceiveFrame(sub, TimeSpan.FromSeconds(5));
         received.Should().Equal(Concat("news", "headline"));
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task NetMQXPub_ZmqSharpXSub_HandshakesAndDelivers()
     {
         // XSUB client against the kernel's XPUB: libzmq accepts XSUB on XPUB
@@ -74,16 +74,16 @@ public sealed class IOPubXPubSubCompatTests
         await using var xsub = new ZXSubSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.Writer.TryWrite(message)) });
         xsub.Subscribe([.. "news"u8]);
         var port = InteropHelpers.GetFreePort();
-        await xsub.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await xsub.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var xpub = new XPublisherSocket();
         xpub.Options.Linger = TimeSpan.Zero;
         xpub.Connect($"tcp://127.0.0.1:{port}");
-        await Task.Delay(500);
+        await Task.Delay(500, token);
 
         xpub.SendFrame(Concat("news", "x"));
-        var message = await received.Reader.ReadAsync(CancellationToken.None).AsTask()
-            .WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await received.Reader.ReadAsync(token);
         message[0].ToSequence().ToArray().Should().Equal(Concat("news", "x"));
         message.Dispose();
     }

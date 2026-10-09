@@ -34,7 +34,7 @@ public sealed class ZmtpHandshakeTests
         using var connection = NewConnection(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready()));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
         result.Value.Codec.Should().BeNull();
@@ -48,7 +48,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready("DEALER")));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("DEALER");
@@ -65,7 +65,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready("CUSTOM")));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("CUSTOM");
@@ -88,7 +88,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.ReadyWithProperties(("Socket-Type", "PAIR"), ("Identity", "abc"))));
         using var handshake = NewHandshake(connection);
 
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
     }
@@ -219,7 +219,7 @@ public sealed class ZmtpHandshakeTests
 
         // No body follows the header, so the handshake ends at EOF; the size
         // check must not reject the boundary value itself.
-        (await handshake.EstablishAsync()).Should().BeNull();
+        (await handshake.EstablishAsync(TestContext.Current.CancellationToken)).Should().BeNull();
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public sealed class ZmtpHandshakeTests
         using var connection = NewConnection(ZmtpTestData.Greeting());
         using var handshake = NewHandshake(connection);
 
-        (await handshake.EstablishAsync()).Should().BeNull();
+        (await handshake.EstablishAsync(TestContext.Current.CancellationToken)).Should().BeNull();
     }
 
     private static ZConnection NewConnection(byte[] peerBytes)

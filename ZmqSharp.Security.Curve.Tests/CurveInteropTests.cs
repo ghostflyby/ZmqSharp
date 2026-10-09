@@ -10,7 +10,7 @@ namespace ZmqSharp.Security.Curve.Tests;
 
 public sealed class CurveInteropTests
 {
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -36,7 +36,7 @@ public sealed class CurveInteropTests
         listener.Start();
         var endpoint = $"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
         listener.Stop();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
         var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         void SendHello(object? sender, NetMQSocketEventArgs args)
@@ -55,7 +55,7 @@ public sealed class CurveInteropTests
         };
         if (localBinds)
         {
-            await local.BindAsync(endpoint, timeout.Token);
+            await local.BindAsync(endpoint, token);
             reference.Connect(endpoint);
         }
         else reference.Bind(endpoint);
@@ -63,12 +63,12 @@ public sealed class CurveInteropTests
         using var poller = new NetMQPoller();
         poller.Add(reference);
         poller.RunAsync();
-        if (!localBinds) await local.ConnectAsync(endpoint, timeout.Token);
-        using (var hello = await local.Messages.ReadAsync(timeout.Token))
+        if (!localBinds) await local.ConnectAsync(endpoint, token);
+        using (var hello = await local.Messages.ReadAsync(token))
             hello[0].ToSequence().ToArray().Should().Equal("reference-hello"u8.ToArray());
-        await local.SendAsync("authenticated"u8.ToArray(), timeout.Token);
-        (await received.Task.WaitAsync(timeout.Token)).Should().Equal("authenticated"u8.ToArray());
-        using var reply = await local.Messages.ReadAsync(timeout.Token);
+        await local.SendAsync("authenticated"u8.ToArray(), token);
+        (await received.Task.WaitAsync(token)).Should().Equal("authenticated"u8.ToArray());
+        using var reply = await local.Messages.ReadAsync(token);
         reply[0].ToSequence().ToArray().Should().Equal("reference-reply"u8.ToArray());
         poller.StopAsync();
     }

@@ -7,11 +7,10 @@ namespace ZmqSharp.Tests.Sockets;
 
 public sealed class ZReqCoreTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-
-    [Fact]
+    [Fact(Timeout = 40_000)]
     public async Task Cancellation_WaitsForSendAndRetiresBeforeReopeningSlot()
     {
+        var token = TestContext.Current.CancellationToken;
         var first = new ZPeer();
         var next = new ZPeer();
         using var cancellation = new CancellationTokenSource();
@@ -31,60 +30,63 @@ public sealed class ZReqCoreTests
             retired.TrySetResult();
         });
         var request = core.RequestAsync(ZMessage.FromPooled(pool.Rent(8)), cancellation.Token);
-        await sendStarted.Task.WaitAsync(Timeout);
+        await sendStarted.Task.WaitAsync(token);
         await cancellation.CancelAsync();
-        await retired.Task.WaitAsync(Timeout);
+        await retired.Task.WaitAsync(token);
         request.IsCompleted.Should().BeFalse();
         pool.Outstanding.Should().Be(1);
         releaseSend.TrySetResult();
-        await FluentActions.Awaiting(() => request.WaitAsync(Timeout)).Should().ThrowAsync<OperationCanceledException>();
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<OperationCanceledException>();
         pool.Outstanding.Should().Be(0);
 
-        var second = core.RequestAsync(ZMessage.Copy("second"u8.ToArray()), default);
+        var second = core.RequestAsync(ZMessage.Copy("second"u8.ToArray()), token);
         var late = ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8)));
-        await core.DecideAsync(first, late, default);
+        await core.DecideAsync(first, late, token);
         pool.Outstanding.Should().Be(0);
         second.IsCompleted.Should().BeFalse();
-        await core.DecideAsync(next, ZDelimiterFraming.Encode(ZMessage.Copy("reply"u8.ToArray())), default);
-        using var reply = await second.WaitAsync(Timeout);
+        await core.DecideAsync(next, ZDelimiterFraming.Encode(ZMessage.Copy("reply"u8.ToArray())), token);
+        using var reply = await second.WaitAsync(token);
         reply[0].ToSequence().ToArray().Should().Equal("reply"u8.ToArray());
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task MalformedReply_FaultsOriginalRequestAndReleasesBuffers()
     {
+        var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         var core = CreateCore(peer);
-        var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), default);
+        var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), token);
         await FluentActions.Awaiting(async () =>
-                await core.DecideAsync(peer, ZMessage.FromPooled(pool.Rent(8)), default))
+                await core.DecideAsync(peer, ZMessage.FromPooled(pool.Rent(8)), token))
             .Should().ThrowAsync<ZeroMqProtocolException>();
-        await FluentActions.Awaiting(() => request.WaitAsync(Timeout)).Should().ThrowAsync<ZeroMqProtocolException>();
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<ZeroMqProtocolException>();
         pool.Outstanding.Should().Be(0);
-        var second = core.RequestAsync(ZMessage.Copy("next"u8.ToArray()), default);
+        var second = core.RequestAsync(ZMessage.Copy("next"u8.ToArray()), token);
         core.OnPeerEnded(peer);
-        await FluentActions.Awaiting(() => second.WaitAsync(Timeout)).Should().ThrowAsync<IOException>();
+        await FluentActions.Awaiting(() => second.WaitAsync(token)).Should().ThrowAsync<IOException>();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task ReplyBeforeSendFinishes_DoesNotEndBorrowOrAllowAnotherRequest()
     {
+        var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var core = new ZReqCore(() => [peer], async (_, message, _) => { await release.Task; }, _ => { });
-        var request = core.RequestAsync(ZMessage.Copy("first"u8.ToArray()), default);
-        await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.Copy("reply"u8.ToArray())), default);
+        var request = core.RequestAsync(ZMessage.Copy("first"u8.ToArray()), token);
+        await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.Copy("reply"u8.ToArray())), token);
         request.IsCompleted.Should().BeFalse();
         using var rejected = ZMessage.Copy("second"u8.ToArray());
-        FluentActions.Invoking(() => { core.RequestAsync(rejected, default); }).Should().Throw<InvalidOperationException>();
+        FluentActions.Invoking(() => { core.RequestAsync(rejected, token); }).Should().Throw<InvalidOperationException>();
         release.TrySetResult();
-        using var reply = await request.WaitAsync(Timeout);
+        using var reply = await request.WaitAsync(token);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task CancellationAfterSend_CompletesRequestAndDisposesLosingReply()
     {
+        var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         using var cancellation = new CancellationTokenSource();
@@ -92,35 +94,37 @@ public sealed class ZReqCoreTests
         var core = CreateCore(peer, () => retired = true);
         var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), cancellation.Token);
         await cancellation.CancelAsync();
-        await FluentActions.Awaiting(() => request.WaitAsync(Timeout)).Should().ThrowAsync<OperationCanceledException>();
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<OperationCanceledException>();
         retired.Should().BeTrue();
-        await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), default);
+        await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token);
         pool.Outstanding.Should().Be(0);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task PeerEndsDuringSend_RequestWaitsForBufferRelease()
     {
+        var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var core = new ZReqCore(() => [peer], async (_, message, _) => { await release.Task; }, _ => { });
-        var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), default);
+        var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), token);
         core.OnPeerEnded(peer);
         request.IsCompleted.Should().BeFalse();
         release.TrySetResult();
-        await FluentActions.Awaiting(() => request.WaitAsync(Timeout)).Should().ThrowAsync<IOException>();
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<IOException>();
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task SendFailure_ReclaimsMessageRetiresPeerAndFaultsRequest()
     {
+        var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         var retired = false;
         var core = new ZReqCore(() => [peer], (_, _, _) => throw new IOException("write failed"),
             _ => retired = true);
-        var request = core.RequestAsync(ZMessage.FromPooled(pool.Rent(8)), default);
-        await FluentActions.Awaiting(() => request.WaitAsync(Timeout)).Should().ThrowAsync<IOException>();
+        var request = core.RequestAsync(ZMessage.FromPooled(pool.Rent(8)), token);
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<IOException>();
         pool.Outstanding.Should().Be(0);
         retired.Should().BeTrue();
     }
@@ -138,9 +142,10 @@ public sealed class ZReqCoreTests
         pool.Outstanding.Should().Be(1);
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task ReplyAndCancellationRace_CompleteOnceAndReclaimLosingReply()
     {
+        var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         using var pool = new CountingMemoryPool();
         for (var iteration = 0; iteration < 32; iteration++)
@@ -153,14 +158,14 @@ public sealed class ZReqCoreTests
             var cancel = CancelAsync();
             var deliver = DeliverAsync();
             start.TrySetResult();
-            await Task.WhenAll(cancel, deliver).WaitAsync(Timeout);
+            await Task.WhenAll(cancel, deliver).WaitAsync(token);
             try
             {
-                using var reply = await request.WaitAsync(Timeout);
+                using var reply = await request.WaitAsync(token);
                 reply.Should().HaveCount(1);
                 retirements.Should().Be(0);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {
                 retirements.Should().Be(1);
             }
@@ -176,7 +181,7 @@ public sealed class ZReqCoreTests
             async Task DeliverAsync()
             {
                 await start.Task;
-                await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), default);
+                await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token);
             }
         }
     }

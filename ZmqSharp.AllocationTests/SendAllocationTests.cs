@@ -25,8 +25,7 @@ public class SendAllocationTests
     public async Task Send_SteadyState_IsAllocationFreePerMessage()
     {
         await using var socket = new ZPairSocket();
-        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
-            new IPEndPoint(IPAddress.Loopback, 0));
+        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), TestContext.Current.CancellationToken);
 
         const int count = 512;
         var messages = new ZMessage[count];
@@ -34,7 +33,7 @@ public class SendAllocationTests
 
         // Warm up: the first sends pay one-time costs (delegate caches,
         // tiered JIT), which would pollute the measurement.
-        for (var i = 0; i < 16; i++) await socket.SendAsync(messages[i]);
+        for (var i = 0; i < 16; i++) await socket.SendAsync(messages[i], TestContext.Current.CancellationToken);
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -48,7 +47,7 @@ public class SendAllocationTests
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 16; i < count; i++)
         {
-            await socket.SendAsync(messages[i]);
+            await socket.SendAsync(messages[i], TestContext.Current.CancellationToken);
             if (Environment.CurrentManagedThreadId != windowThread) windowThreadStable = false;
         }
 

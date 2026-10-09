@@ -7,42 +7,42 @@ namespace ZmqSharp.Tests.Sockets;
 
 public sealed class RequestLifecycleIntegrationTests
 {
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task CancelWaitingForReply_RetiresConnectionAndAllowsReconnect(TransportKind kind)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
         using var cancelRequest = new CancellationTokenSource();
         var address = TestTransports.GetEndpoint(kind);
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var respond = false;
         await using var responder = new ZRepSocket();
-        responder.BindRequestHandler((context, token) =>
+        responder.BindRequestHandler((context, replyToken) =>
         {
-            if (respond) return responder.SendReplyAsync(context, "reply"u8.ToArray(), token);
+            if (respond) return responder.SendReplyAsync(context, "reply"u8.ToArray(), replyToken);
             received.TrySetResult();
             return ValueTask.CompletedTask;
         });
-        await responder.BindAsync(address, timeout.Token);
+        await responder.BindAsync(address, token);
         await using var requester = new ZReqSocket();
-        await requester.ConnectAsync(address, timeout.Token);
+        await requester.ConnectAsync(address, token);
         var request = requester.RequestAsync("first"u8.ToArray(), cancelRequest.Token);
-        await received.Task.WaitAsync(timeout.Token);
+        await received.Task.WaitAsync(token);
         await cancelRequest.CancelAsync();
-        await FluentActions.Awaiting(() => request.WaitAsync(timeout.Token)).Should().ThrowAsync<OperationCanceledException>();
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<OperationCanceledException>();
         requester.PeerSnapshot.Should().BeEmpty();
-        await requester.DisconnectAsync(address, timeout.Token);
+        await requester.DisconnectAsync(address, token);
         respond = true;
-        await requester.ConnectAsync(address, timeout.Token);
-        using var reply = await requester.RequestAsync("second"u8.ToArray(), timeout.Token);
+        await requester.ConnectAsync(address, token);
+        using var reply = await requester.RequestAsync("second"u8.ToArray(), token);
         reply[0].ToSequence().ToArray().Should().Equal("reply"u8.ToArray());
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task MalformedReply_FaultsRequestAndEndsPeer(TransportKind kind)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var ended = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -53,14 +53,14 @@ public sealed class RequestLifecycleIntegrationTests
         });
         await using var requester = new ZReqSocket(new ZSocketOptions { Pool = pool });
         requester.PeerEnded += (_, failure) => ended.TrySetResult(failure);
-        await responder.BindAsync(address, timeout.Token);
-        await requester.ConnectAsync(address, timeout.Token);
-        var request = requester.RequestAsync("request"u8.ToArray(), timeout.Token);
-        using var incoming = await received.Task.WaitAsync(timeout.Token);
-        await responder.SendMalformedAsync(timeout.Token);
-        await FluentActions.Awaiting(() => request.WaitAsync(timeout.Token)).Should().ThrowAsync<ZeroMqProtocolException>();
-        (await ended.Task.WaitAsync(timeout.Token)).Should().BeOfType<ZeroMqProtocolException>();
-        await requester.DisconnectAsync(address, timeout.Token);
+        await responder.BindAsync(address, token);
+        await requester.ConnectAsync(address, token);
+        var request = requester.RequestAsync("request"u8.ToArray(), token);
+        using var incoming = await received.Task.WaitAsync(token);
+        await responder.SendMalformedAsync(token);
+        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<ZeroMqProtocolException>();
+        (await ended.Task.WaitAsync(token)).Should().BeOfType<ZeroMqProtocolException>();
+        await requester.DisconnectAsync(address, token);
         pool.Outstanding.Should().Be(0);
     }
 

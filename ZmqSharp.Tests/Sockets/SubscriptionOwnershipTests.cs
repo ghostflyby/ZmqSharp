@@ -24,31 +24,31 @@ public sealed class SubscriptionOwnershipTests
         filter.Matches(ReadOnlySequence<byte>.Empty).Should().BeFalse();
     }
 
-    [Theory]
+    [Theory(Timeout = 10_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ChangedInput_DoesNotChangeFilterOrReconnectSubscription(TransportKind kind)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var publisher = new ZXPubSocket();
         await using var subscriber = new ZSubSocket();
-        await publisher.BindAsync(endpoint, timeout.Token);
+        var token = TestContext.Current.CancellationToken;
+        await publisher.BindAsync(endpoint, token);
         byte[] prefix = [.. "news"u8];
         subscriber.Subscribe(prefix);
         prefix[0] = (byte)'x';
-        await subscriber.ConnectAsync(endpoint, timeout.Token);
-        using (var subscription = await publisher.Messages.ReadAsync(timeout.Token))
+        await subscriber.ConnectAsync(endpoint, token);
+        using (var subscription = await publisher.Messages.ReadAsync(token))
             subscription[0].ToSequence().ToArray().Should().Equal(new byte[] { 1, (byte)'n', (byte)'e', (byte)'w', (byte)'s' });
-        await publisher.SendAsync("news:1"u8.ToArray(), timeout.Token);
-        using (var received = await subscriber.Messages.ReadAsync(timeout.Token))
+        await publisher.SendAsync("news:1"u8.ToArray(), token);
+        using (var received = await subscriber.Messages.ReadAsync(token))
             received[0].ToSequence().ToArray().Should().Equal("news:1"u8.ToArray());
 
-        await subscriber.DisconnectAsync(endpoint, timeout.Token);
-        await subscriber.ConnectAsync(endpoint, timeout.Token);
-        using (var subscription = await publisher.Messages.ReadAsync(timeout.Token))
+        await subscriber.DisconnectAsync(endpoint, token);
+        await subscriber.ConnectAsync(endpoint, token);
+        using (var subscription = await publisher.Messages.ReadAsync(token))
             subscription[0].ToSequence().ToArray().Should().Equal(new byte[] { 1, (byte)'n', (byte)'e', (byte)'w', (byte)'s' });
         subscriber.Unsubscribe("news"u8);
-        using var unsubscription = await publisher.Messages.ReadAsync(timeout.Token);
+        using var unsubscription = await publisher.Messages.ReadAsync(token);
         unsubscription[0].ToSequence().ToArray().Should().Equal(new byte[] { 0, (byte)'n', (byte)'e', (byte)'w', (byte)'s' });
     }
 }

@@ -84,7 +84,7 @@ public sealed class ZmtpParserTests
         recorder.Frames[0].Should().Equal(payload);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task Backpressure_PausesAndResumes()
     {
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
@@ -111,18 +111,19 @@ public sealed class ZmtpParserTests
             ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"),
                 recorder);
 
-        var parseTask = parser.ParseAsync().AsTask();
-        await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var token = TestContext.Current.CancellationToken;
+        var parseTask = parser.ParseAsync(token).AsTask();
+        await firstDelivered.Task.WaitAsync(token);
         frames.Should().HaveCount(1);
         parseTask.IsCompleted.Should().BeFalse();
 
         parser.Resume();
-        await parseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await parseTask.WaitAsync(token);
         frames.Should().HaveCount(2);
         frames[1].Should().Equal([.. "two"u8]);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task AsyncSink_PendingTask_PausesPumpUntilReleased()
     {
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(
@@ -150,13 +151,14 @@ public sealed class ZmtpParserTests
             ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"),
                 sink);
 
-        var parseTask = parser.ParseAsync().AsTask();
-        await firstSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var token = TestContext.Current.CancellationToken;
+        var parseTask = parser.ParseAsync(token).AsTask();
+        await firstSeen.Task.WaitAsync(token);
         frames.Should().HaveCount(1);
         parseTask.IsCompleted.Should().BeFalse();
 
         release.SetResult();
-        await parseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await parseTask.WaitAsync(token);
         frames.Should().HaveCount(2);
         frames[1].Should().Equal([.. "two"u8]);
     }

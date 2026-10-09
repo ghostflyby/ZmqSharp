@@ -16,7 +16,7 @@ namespace ZmqSharp.Tests.Interop;
 [Trait(InteropHelpers.InteropCategory, "true")]
 public sealed class PubSubInteropTests
 {
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task ZmqSharpPub_NetMQSub_DeliversSubscribedTopics()
     {
         using var sub = new SubscriberSocket();
@@ -26,26 +26,27 @@ public sealed class PubSubInteropTests
         sub.Subscribe([.. "news"u8]);
 
         await using var pub = new ZPubSocket();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await pub.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await pub.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
-        await pub.SendAsync(ZMessage.FromOwned(Concat("news", "item-1")), cts.Token);
+        await pub.SendAsync(ZMessage.FromOwned(Concat("news", "item-1")), token);
         var received = InteropHelpers.ReceiveFrame(sub, TimeSpan.FromSeconds(5));
         received.Should().Equal(Concat("news", "item-1"));
 
         // A non-matching topic is not delivered.
-        await pub.SendAsync(ZMessage.FromOwned(Concat("sport", "item")), cts.Token);
+        await pub.SendAsync(ZMessage.FromOwned(Concat("sport", "item")), token);
         sub.TryReceiveFrameBytes(TimeSpan.FromMilliseconds(300), out _).Should().BeFalse();
     }
 
-    [Fact]
+    [Fact(Timeout = 20_000)]
     public async Task NetMQPub_ZmqSharpSub_FiltersBySubscription()
     {
         var channel = Channel.CreateUnbounded<ZMessage>();
         await using var sub = new ZSubSocket(new ZSocketOptions { MessageSink = new TestSink(message => channel.Writer.TryWrite(message)) });
         sub.Subscribe([.. "news"u8]);
         var port = InteropHelpers.GetFreePort();
-        await sub.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await sub.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         using var pub = new PublisherSocket();
         pub.Options.Linger = TimeSpan.Zero;
@@ -53,11 +54,10 @@ public sealed class PubSubInteropTests
 
         // The subscription frame must reach NetMQ before the publisher sends
         // anything (it drops until subscribed), so wait for propagation.
-        await Task.Delay(500);
+        await Task.Delay(500, token);
 
         pub.SendFrame(Concat("news", "headline"));
-        var message = await channel.Reader.ReadAsync(CancellationToken.None).AsTask()
-            .WaitAsync(TimeSpan.FromSeconds(5));
+        var message = await channel.Reader.ReadAsync(token);
         message.Count.Should().Be(1);
         message[0].ToSequence().ToArray().Should().Equal(Concat("news", "headline"));
         message.Dispose();
@@ -66,8 +66,8 @@ public sealed class PubSubInteropTests
         // topic and the publisher stops sending it.
         sub.Unsubscribe([.. "news"u8]);
         pub.SendFrame(Concat("sport", "score"));
-        var drainTask = channel.Reader.ReadAsync(CancellationToken.None).AsTask();
-        var idle = Task.Delay(300);
+        var drainTask = channel.Reader.ReadAsync(token).AsTask();
+        var idle = Task.Delay(300, token);
         var first = await Task.WhenAny(drainTask, idle);
         first.Should().Be(idle);
     }

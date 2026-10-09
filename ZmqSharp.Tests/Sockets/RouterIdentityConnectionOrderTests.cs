@@ -21,7 +21,7 @@ namespace ZmqSharp.Tests.Sockets;
 /// </summary>
 public sealed class RouterIdentityConnectionOrderTests
 {
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task SameClient_AcrossTwoRouters_GetsSameAdvertisedIdentity()
     {
         // Kernel: shell and stdin are independent ROUTER sockets, mirroring a
@@ -33,8 +33,9 @@ public sealed class RouterIdentityConnectionOrderTests
         await using var stdinRouter = new ZRouterSocket();
         var shellPort = GetFreePort();
         var stdinPort = GetFreePort();
-        await shellRouter.BindAsync($"tcp://127.0.0.1:{shellPort}");
-        await stdinRouter.BindAsync($"tcp://127.0.0.1:{stdinPort}");
+        var token = TestContext.Current.CancellationToken;
+        await shellRouter.BindAsync($"tcp://127.0.0.1:{shellPort}", token);
+        await stdinRouter.BindAsync($"tcp://127.0.0.1:{stdinPort}", token);
 
         var identityA = Guid.NewGuid().ToByteArray();
         var identityB = Guid.NewGuid().ToByteArray();
@@ -43,26 +44,25 @@ public sealed class RouterIdentityConnectionOrderTests
         await using var bShell = new ZDealerSocket(new ZSocketOptions { Identity = identityB });
         await using var bStdin = new ZDealerSocket(new ZSocketOptions { Identity = identityB });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await aShell.ConnectAsync($"tcp://127.0.0.1:{shellPort}", cts.Token);
-        await bShell.ConnectAsync($"tcp://127.0.0.1:{shellPort}", cts.Token);
-        await bStdin.ConnectAsync($"tcp://127.0.0.1:{stdinPort}", cts.Token);
-        await aStdin.ConnectAsync($"tcp://127.0.0.1:{stdinPort}", cts.Token);
+        await aShell.ConnectAsync($"tcp://127.0.0.1:{shellPort}", token);
+        await bShell.ConnectAsync($"tcp://127.0.0.1:{shellPort}", token);
+        await bStdin.ConnectAsync($"tcp://127.0.0.1:{stdinPort}", token);
+        await aStdin.ConnectAsync($"tcp://127.0.0.1:{stdinPort}", token);
 
         // Shell and stdin are separate ROUTER sockets, so local counter ids
         // would differ per router (0025 section 1 repro); the advertised
         // identity must be identical on both, independent of any arrival or
         // connection order. B speaks first on stdin to prove the mapping does
         // not depend on message order either.
-        await aShell.SendAsync(ZMessage.FromOwned([.. "from-A"u8]), cts.Token);
-        var shellA = await ReadMessageAsync(shellRouter.Messages, "from-A", cts.Token);
-        await bShell.SendAsync(ZMessage.FromOwned([.. "from-B"u8]), cts.Token);
-        var shellB = await ReadMessageAsync(shellRouter.Messages, "from-B", cts.Token);
+        await aShell.SendAsync(ZMessage.FromOwned([.. "from-A"u8]), token);
+        var shellA = await ReadMessageAsync(shellRouter.Messages, "from-A", token);
+        await bShell.SendAsync(ZMessage.FromOwned([.. "from-B"u8]), token);
+        var shellB = await ReadMessageAsync(shellRouter.Messages, "from-B", token);
 
-        await bStdin.SendAsync(ZMessage.FromOwned([.. "from-B"u8]), cts.Token);
-        var stdinB = await ReadMessageAsync(stdinRouter.Messages, "from-B", cts.Token);
-        await aStdin.SendAsync(ZMessage.FromOwned([.. "from-A"u8]), cts.Token);
-        var stdinA = await ReadMessageAsync(stdinRouter.Messages, "from-A", cts.Token);
+        await bStdin.SendAsync(ZMessage.FromOwned([.. "from-B"u8]), token);
+        var stdinB = await ReadMessageAsync(stdinRouter.Messages, "from-B", token);
+        await aStdin.SendAsync(ZMessage.FromOwned([.. "from-A"u8]), token);
+        var stdinA = await ReadMessageAsync(stdinRouter.Messages, "from-A", token);
 
         // A frontend's routing identity is its advertised identity on every
         // ROUTER, so the kernel can route stdin back to the frontend whose
@@ -74,7 +74,7 @@ public sealed class RouterIdentityConnectionOrderTests
         stdinB[0].ToSequence().ToArray().Should().Equal(identityB);
     }
 
-    [Fact]
+    [Fact(Timeout = 15_000)]
     public async Task PeerWithoutIdentity_StillGetsLocalId_AndSendAsyncRoutesToIt()
     {
         // A peer that advertises no identity keeps the local assignment, and
@@ -90,23 +90,23 @@ public sealed class RouterIdentityConnectionOrderTests
         {
             MessageSink = new TestSink(message => routedMessage.TrySetResult(message))
         });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await router.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        var token = TestContext.Current.CancellationToken;
+        await router.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         dealer.SendFrame([.. "ping"u8]);
-        var routed = await routedMessage.Task.WaitAsync(cts.Token);
+        var routed = await routedMessage.Task.WaitAsync(token);
         var identity = routed[0].ToSequence().ToArray();
         identity.Should().NotBeEmpty();
         routed[1].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
         routed.Dispose();
 
         // The local id addresses the peer on outbound, exactly as before.
-        await router.SendAsync(identity, ZMessage.FromOwned([.. "pong"u8]), cts.Token);
+        await router.SendAsync(identity, ZMessage.FromOwned([.. "pong"u8]), token);
         var reply = InteropHelpers.ReceiveFrame(dealer, TimeSpan.FromSeconds(5));
         reply.Should().Equal([.. "pong"u8]);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task SecondPeer_WithInUseIdentity_IsRefused()
     {
         // libzmq ROUTER behavior: a second peer claiming an in-use identity
@@ -117,7 +117,8 @@ public sealed class RouterIdentityConnectionOrderTests
         // later peer end, depending on the handshake race).
         await using var router = new ZRouterSocket();
         var port = GetFreePort();
-        await router.BindAsync($"tcp://127.0.0.1:{port}");
+        var token = TestContext.Current.CancellationToken;
+        await router.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         var rejected = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         router.PeerEnded += (_, failure) =>
@@ -126,14 +127,13 @@ public sealed class RouterIdentityConnectionOrderTests
         };
 
         var identity = new byte[] { 0xAA, 0xBB, 0xCC, 0xDD };
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var first = new ZDealerSocket(new ZSocketOptions { Identity = identity });
-        await first.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token);
+        await first.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         await using var second = new ZDealerSocket(new ZSocketOptions { Identity = identity });
-        await Record.ExceptionAsync(async () => await second.ConnectAsync($"tcp://127.0.0.1:{port}", cts.Token));
+        await Record.ExceptionAsync(async () => await second.ConnectAsync($"tcp://127.0.0.1:{port}", token));
 
-        var failure = await rejected.Task.WaitAsync(cts.Token);
+        var failure = await rejected.Task.WaitAsync(token);
         failure.Should().BeOfType<ZeroMqProtocolException>();
     }
 

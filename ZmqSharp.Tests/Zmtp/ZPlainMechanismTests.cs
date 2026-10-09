@@ -25,12 +25,13 @@ public sealed class ZPlainMechanismTests
     public async Task Client_CompletesHandshake_WithWelcomeThenReady()
     {
         // Server side of the wire: greeting + WELCOME + READY (no HELLO).
+        var token = TestContext.Current.CancellationToken;
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), WelcomeFrame(), ZmtpTestData.Ready("PAIR"));
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(token);
 
         result.Should().NotBeNull();
         result.Value.Codec.Should().BeNull();
@@ -41,13 +42,14 @@ public sealed class ZPlainMechanismTests
     public async Task Server_CompletesHandshake_WithAuthenticatedHello()
     {
         // Client side of the wire: greeting + HELLO(alice, secret) + INITIATE.
+        var token = TestContext.Current.CancellationToken;
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", "secret"), InitiateFrame());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) =>
             user == "alice" && pass.SequenceEqual("secret"u8)));
 
-        var result = await handshake.EstablishAsync();
+        var result = await handshake.EstablishAsync(token);
 
         result.Should().NotBeNull();
         ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
@@ -135,17 +137,23 @@ public sealed class ZPlainMechanismTests
         client.CreateSession().Should().NotBeNull();
     }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
-    public Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes(TransportKind kind)
-        => RunExchangeAsync(kind, false);
+    public async Task PlainMechanism_EndToEnd_CompletesHandshake_AndEchoes(TransportKind kind)
+    {
+        var token = TestContext.Current.CancellationToken;
+        await RunExchangeAsync(kind, reversed: false, token);
+    }
 
-    [Theory]
+    [Theory(Timeout = 15_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
-    public Task PlainMechanism_ClientBinds_ServerConnects(TransportKind kind)
-        => RunExchangeAsync(kind, true);
+    public async Task PlainMechanism_ClientBinds_ServerConnects(TransportKind kind)
+    {
+        var token = TestContext.Current.CancellationToken;
+        await RunExchangeAsync(kind, reversed: true, token);
+    }
 
-    private static async Task RunExchangeAsync(TransportKind kind, bool reversed)
+    private static async Task RunExchangeAsync(TransportKind kind, bool reversed, CancellationToken token)
     {
         await using var server = new ZPairSocket(new ZSocketOptions
         {
@@ -161,14 +169,13 @@ public sealed class ZPlainMechanismTests
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "secret"u8) },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await (reversed ? client : server).BindAsync(endpoint, cts.Token);
-        await (reversed ? server : client).ConnectAsync(endpoint, cts.Token);
+        await (reversed ? client : server).BindAsync(endpoint, token);
+        await (reversed ? server : client).ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), cts.Token);
-        var echo = await TryReadAsync(server.Messages, TimeSpan.FromSeconds(5), cts.Token);
+        await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), token);
+        var echo = await TryReadAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         echo.Should().NotBeNull();
         echo.Value[0].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
         echo.Value.Dispose();
@@ -178,6 +185,7 @@ public sealed class ZPlainMechanismTests
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task PlainMechanism_BadPassword_FaultsClientConnect(TransportKind kind)
     {
+        var token = TestContext.Current.CancellationToken;
         await using var server = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
@@ -194,15 +202,16 @@ public sealed class ZPlainMechanismTests
         });
 
         var endpoint = TestTransports.GetEndpoint(kind);
-        await server.BindAsync(endpoint);
+        await server.BindAsync(endpoint, token);
 
-        await FluentActions.Awaiting(() => client.ConnectAsync(endpoint)).Should().ThrowAsync<ZMechanismException>()
+        await FluentActions.Awaiting(() => client.ConnectAsync(endpoint, token)).Should().ThrowAsync<ZMechanismException>()
             .WithMessage("*Invalid username or password*");
     }
 
     [Fact]
     public async Task Server_PreservesBinaryPasswordBytes()
     {
+        var token = TestContext.Current.CancellationToken;
         byte[] helloBody = [5, .. "HELLO"u8, 5, .. "alice"u8, 3, 0, 255, 128];
         var input = ZmtpTestData.Concat(ZmtpTestData.Greeting("PLAIN"),
             ZmtpTestData.Frame(helloBody, command: true), InitiateFrame());
@@ -215,7 +224,7 @@ public sealed class ZPlainMechanismTests
             authenticated = true;
             return true;
         }));
-        (await handshake.EstablishAsync()).Should().NotBeNull();
+        (await handshake.EstablishAsync(token)).Should().NotBeNull();
         authenticated.Should().BeTrue();
     }
 
@@ -273,14 +282,15 @@ public sealed class ZPlainMechanismTests
         return ZmtpTestData.Frame(body, command: true);
     }
 
+    /// <summary>Reads within a bounded window; an expiry surfaces as cancellation.</summary>
     private static async Task<ZMessage?> TryReadAsync(
         ChannelReader<ZMessage> reader,
         TimeSpan timeout,
         CancellationToken token)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        cts.CancelAfter(timeout);
-        if (await reader.WaitToReadAsync(cts.Token)) return await reader.ReadAsync(cts.Token);
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(token);
+        window.CancelAfter(timeout);
+        if (await reader.WaitToReadAsync(window.Token)) return await reader.ReadAsync(window.Token);
 
         return null;
     }

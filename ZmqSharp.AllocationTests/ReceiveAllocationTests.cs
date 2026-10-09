@@ -53,10 +53,10 @@ public class ReceiveAllocationTests
     [Fact(Timeout = 15_000)]
     public async Task Receive_SteadyState_PerMessageCostIsBoundedOnPumpThread()
     {
+        var token = TestContext.Current.CancellationToken;
         var sink = new MeasuringSink(MessageCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = sink });
-        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
-            new IPEndPoint(IPAddress.Loopback, 0));
+        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
         var peer = AllocationFakeTransport.Current!;
 
         // Warm up: the first deliveries pay one-time costs (pool size-class
@@ -104,11 +104,11 @@ public class ReceiveAllocationTests
     [Fact(Timeout = 15_000)]
     public async Task Receive_EachMessage_RentsExactlyOnePooledBuffer()
     {
+        var token = TestContext.Current.CancellationToken;
         using var pool = new CountingRentPool();
         var sink = new MeasuringSink(MessageCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
-        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
-            new IPEndPoint(IPAddress.Loopback, 0));
+        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
         var peer = AllocationFakeTransport.Current!;
 
         const int count = 1000;
@@ -124,10 +124,10 @@ public class ReceiveAllocationTests
     [Fact(Timeout = 15_000)]
     public async Task Receive_FirstDelivery_AllocatesThenSteadies()
     {
+        var token = TestContext.Current.CancellationToken;
         var sink = new MeasuringSink(WarmupCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = sink });
-        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
-            new IPEndPoint(IPAddress.Loopback, 0));
+        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
         var peer = AllocationFakeTransport.Current!;
 
         peer.Enqueue(AllocationFrameData.Frame([.. "first"u8]));
@@ -152,10 +152,10 @@ public class ReceiveAllocationTests
     [Fact(Timeout = 15_000)]
     public async Task Receive_MultiFrameMessage_PerMessageCostIsBoundedOnPumpThread()
     {
+        var token = TestContext.Current.CancellationToken;
         var sink = new MeasuringSink(MessageCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = sink });
-        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(
-            new IPEndPoint(IPAddress.Loopback, 0));
+        await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
         var peer = AllocationFakeTransport.Current!;
 
         byte[] firstFrame = [.. "first-frame"u8];

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Threading.Channels;
+using Xunit;
 using ZmqSharp.Transports;
 
 namespace ZmqSharp.AllocationTests;
@@ -92,10 +93,14 @@ internal sealed class AllocationFakeConnection : IZConnection
         }
     }
 
-    /// <summary>Test seam: completes when the pump is parked at the window gate.</summary>
+    /// <summary>Test seam: completes when the pump is parked at the window gate.
+    /// Wired to the test's cancellation token so a test timeout wakes the wait
+    /// instead of leaving the test body parked on the gate.</summary>
     public Task WaitUntilPumpIdleAsync()
     {
-        lock (gateLock) return pumpIdle.Task;
+        Task idle;
+        lock (gateLock) idle = pumpIdle.Task;
+        return idle.WaitAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>Test seam: releases the parked pump; the buffered frames then drain synchronously.</summary>
@@ -140,7 +145,10 @@ internal sealed class AllocationFakeConnection : IZConnection
                 release = pumpRelease;
             }
 
-            await release.Task;
+            // Awaiting the gate under the test's token: a test timeout cancels
+            // that token, so the pump wakes with an OperationCanceledException
+            // instead of staying parked in the background.
+            await release.Task.WaitAsync(TestContext.Current.CancellationToken);
             current = await inbound.Reader.ReadAsync(token);
             currentPosition = 0;
         }
