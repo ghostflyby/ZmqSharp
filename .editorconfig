@@ -144,11 +144,3 @@ indent_size = 4
 # contents one level deeper, so without this the two formatters fight over
 # every such block.
 csharp_indent_case_contents_when_block = false
-
-# xUnit.net v3 ships analyzers that ask async tests to thread
-# TestContext.Current.CancellationToken through every awaited call (xUnit1051) and
-# to reference it in tests carrying a Timeout (xUnit1069). Adopting that guidance is
-# worthwhile but is a separate, test-wide change; kept at suggestion level so the
-# migration itself stays reviewable and `dotnet format --verify-no-changes` stays green.
-dotnet_diagnostic.xUnit1051.severity = suggestion
-dotnet_diagnostic.xUnit1069.severity = suggestion

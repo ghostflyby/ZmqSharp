@@ -194,7 +194,7 @@ public sealed class ZSocketTests
         received.Value.Dispose();
         pool.Outstanding.Should().Be(outstandingBeforeDispose);
     }
-
+    
     [Theory]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task ReceivePolicy_DecidePerFrame_SplitsModesWithinMessage(TransportKind kind)
@@ -587,7 +587,7 @@ public sealed class ZSocketTests
         using var pool = new CountingMemoryPool();
         var received = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var sink = new TestMessageSink(message => received.TrySetResult(message));
-        await using var server = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
+        var server = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
         await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
@@ -1270,7 +1270,7 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropWrite);
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = dropTracking,
@@ -1309,7 +1309,7 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropNewest);
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = dropTracking,
@@ -1350,7 +1350,7 @@ public sealed class ZSocketTests
     {
         using var pool = new CountingMemoryPool();
         var dropTracking = new DropTrackingQueueFactory(2, BoundedChannelFullMode.DropOldest);
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = dropTracking,
@@ -1393,7 +1393,7 @@ public sealed class ZSocketTests
             ReceiveQueueFactory = new BoundedChannelOptions(2) { FullMode = BoundedChannelFullMode.DropWrite },
         });
         server.PeerEnded += (_, failure) => peerEnded.TrySetResult(failure);
-        await using var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
+        var client = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true } });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -1422,7 +1422,7 @@ public sealed class ZSocketTests
     public async Task SocketDispose_WithUnreadBufferedMessages_ReturnsPool(TransportKind kind)
     {
         using var pool = new CountingMemoryPool();
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = new BoundedChannelOptions(2) { SingleWriter = true },
@@ -1880,19 +1880,6 @@ public sealed class ZSocketTests
     private static Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         return WaitUntilAsync(condition, value => value, timeout);
-    }
-
-    private static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan timeout)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        while (true)
-        {
-            if (await condition()) return;
-
-            if (stopwatch.Elapsed >= timeout) throw new TimeoutException("condition not met within timeout");
-
-            await Task.Delay(20);
-        }
     }
 
     /// <summary>

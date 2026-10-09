@@ -149,7 +149,7 @@ public sealed class InboundPolicyTests
             {
                 new(new ZSegment((byte[])[.. "!"u8], 0, 1))
             };
-            for (var i = 0; i < message.Count; i++) frames.Add(message[i]);
+            frames.AddRange(message);
 
             return ValueTask.FromResult(new ZInboundDecision
             {
@@ -193,17 +193,6 @@ public sealed class InboundPolicyTests
         {
             onMessage(message);
             return ValueTask.CompletedTask;
-        }
-    }
-
-
-    private static async Task WaitUntilAsync<T>(Func<T> getValue, Func<T, bool> condition, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        while (!condition(getValue()))
-        {
-            await Task.Delay(10, cts.Token);
-            cts.Token.ThrowIfCancellationRequested();
         }
     }
 }

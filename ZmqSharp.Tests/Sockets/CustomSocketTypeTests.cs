@@ -94,11 +94,6 @@ public sealed class CustomSocketTypeTests
         {
             return SendAsyncCore(message, token);
         }
-
-        public ValueTask SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
-        {
-            return SendAsyncCore(bytes, token);
-        }
     }
 
     private sealed class TestSink(Action<ZMessage> onMessage) : IPatternSink

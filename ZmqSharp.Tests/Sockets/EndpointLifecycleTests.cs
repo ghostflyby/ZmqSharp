@@ -155,7 +155,7 @@ public sealed class EndpointLifecycleTests
     public async Task FactoryReturnsAfterSocketCloses_ResourceIsReleasedWithoutStartingPump(bool listening)
     {
         var endpoint = new ControlledEndpoint { DelayFactory = true };
-        await using var socket = new ZPairSocket();
+        var socket = new ZPairSocket();
         using var cleanup = new ReleaseOnDispose(endpoint);
         var setup = listening
             ? socket.BindAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint)
@@ -281,7 +281,7 @@ public sealed class EndpointLifecycleTests
 
         public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
 
-        public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
         {
             foreach (var segment in bytes) await WriteAsync(segment, token);
         }
