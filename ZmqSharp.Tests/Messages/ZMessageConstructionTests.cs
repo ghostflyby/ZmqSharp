@@ -50,7 +50,7 @@ public sealed class ZMessageConstructionTests
     [Fact]
     public void Copy_SingleSegmentSequence_CollapsesToContiguous()
     {
-        var message = ZMessage.Copy(new ReadOnlySequence<byte>((byte[])[.. "payload"u8]));
+        var message = ZMessage.Copy(new ReadOnlySequence<byte>([.. "payload"u8]));
 
         Assert.True(message.TryGetValue(out ZSingleMessage single));
         Assert.True(single[0].TryGetValue(out ZSegment _));
