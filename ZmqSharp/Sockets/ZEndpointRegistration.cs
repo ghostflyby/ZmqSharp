@@ -30,7 +30,7 @@ internal sealed class ZEndpointRegistration(
         var canceled = cancellation.CancelAsync();
         try
         {
-            if (abort is { } stopIo) stopIo();
+            if (abort is not null) abort();
             else resource.Dispose();
         }
         finally

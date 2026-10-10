@@ -14,7 +14,7 @@ namespace ZmqSharp.Tests.Interop;
 /// ZmqSharp matrix must match for the migration (0025/0026 context).
 /// </summary>
 [Trait(InteropHelpers.InteropCategory, "true")]
-public sealed class IOPubXPubSubCompatTests
+public sealed class IoPubXPubSubCompatTests
 {
     [Fact(Timeout = 20_000)]
     public async Task NetMQXPub_ZmqSharpSub_HandshakesAndDelivers()

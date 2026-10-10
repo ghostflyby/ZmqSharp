@@ -130,9 +130,9 @@ public sealed class ZmtpParser : IDisposable
                 var decodedLength = checked((int)decoded.Body.Length);
                 var decodedMore = (decoded.Flags & ZmtpFrameFlags.More) != 0;
                 ZFrame decodedFrame;
-                if (allocator is { } allocate)
+                if (allocator is not null)
                 {
-                    decodedFrame = allocate(decodedLength, decodedMore);
+                    decodedFrame = allocator(decodedLength, decodedMore);
                     var remaining = decoded.Body;
                     foreach (var segment in decodedFrame)
                     {
@@ -266,9 +266,9 @@ public sealed class ZmtpParser : IDisposable
         var size = isLong
             ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
             : headerBuffer[1];
-        if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
-
-        return new FrameHeader(flags, size);
+        return size < 0
+            ? throw new ZeroMqProtocolException("negative ZMTP frame size")
+            : new FrameHeader(flags, size);
     }
 
     private async ValueTask<ReadOnlyMemory<byte>?> ReadBodyIntoScratchAsync(
@@ -308,12 +308,11 @@ public sealed class ZmtpParser : IDisposable
 
     private void MaybeShrinkScratch()
     {
-        if (scratch.Length > ScratchShrinkThreshold)
-        {
-            scratchOwner?.Dispose();
-            scratchOwner = null;
-            scratch = Memory<byte>.Empty;
-        }
+        if (scratch.Length <= ScratchShrinkThreshold) return;
+
+        scratchOwner?.Dispose();
+        scratchOwner = null;
+        scratch = Memory<byte>.Empty;
     }
 
     private async ValueTask WaitForResumeAsync(CancellationToken token)

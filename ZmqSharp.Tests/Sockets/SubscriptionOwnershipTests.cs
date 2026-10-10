@@ -13,10 +13,10 @@ public sealed class SubscriptionOwnershipTests
         var filter = new ZTopicFilter();
         filter.Add(input);
         input[0] = 9;
-        Assert.True(filter.Matches(new ReadOnlySequence<byte>(new byte[] { 1, 2, 3 })));
-        Assert.False(filter.Matches(new ReadOnlySequence<byte>(new byte[] { 9, 2, 3 })));
+        Assert.True(filter.Matches(new ReadOnlySequence<byte>([1, 2, 3])));
+        Assert.False(filter.Matches(new ReadOnlySequence<byte>([9, 2, 3])));
         filter.RemoveAll([1, 2]);
-        Assert.False(filter.Matches(new ReadOnlySequence<byte>(new byte[] { 1, 2, 3 })));
+        Assert.False(filter.Matches(new ReadOnlySequence<byte>([1, 2, 3])));
         filter.Add([]);
         Assert.True(filter.Matches(ReadOnlySequence<byte>.Empty));
         filter.RemoveAll([]);
@@ -48,6 +48,6 @@ public sealed class SubscriptionOwnershipTests
             Assert.Equal(new byte[] { 1, (byte)'n', (byte)'e', (byte)'w', (byte)'s' }, subscription[0].ToSequence().ToArray());
         subscriber.Unsubscribe("news"u8);
         using var unsubscription = await publisher.Messages.ReadAsync(token);
-        Assert.Equal(new byte[] { 0, (byte)'n', (byte)'e', (byte)'w', (byte)'s' }, unsubscription[0].ToSequence().ToArray());
+        Assert.Equal([.. "\0news"u8], unsubscription[0].ToSequence().ToArray());
     }
 }

@@ -157,8 +157,8 @@ public sealed class RuntimeLifecycleTests
             Assert.Equal(1, pool.Outstanding);
             release.TrySetResult();
             await stopping.WaitAsync(token);
-            var failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connecting);
-            Assert.True(!token.IsCancellationRequested,
+            _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connecting);
+            Assert.False(token.IsCancellationRequested,
                 $"token.IsCancellationRequested was {token.IsCancellationRequested} but expected the connect to fail independently of the test token");
             Assert.Equal(0, pool.Outstanding);
             Assert.Equal(1, endpoint.Connection.Disposals);
@@ -186,8 +186,8 @@ public sealed class RuntimeLifecycleTests
         private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int position;
         private int sequenceWrites;
-        public TaskCompletionSource Aborted { get; } = Gate();
-        public int Disposals;
+        private TaskCompletionSource Aborted { get; } = Gate();
+        private int disposals;
 
         public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
@@ -216,7 +216,7 @@ public sealed class RuntimeLifecycleTests
         public void Dispose()
         {
             Abort();
-            Interlocked.Increment(ref Disposals);
+            Interlocked.Increment(ref disposals);
         }
     }
 
@@ -327,7 +327,7 @@ public sealed class RuntimeLifecycleTests
         {
             public async ValueTask<ZMechanismResult?> RunAsync(ZMechanismContext context, CancellationToken token)
             {
-                if (run is { } custom) return await custom(context, token);
+                if (run is not null) return await run(context, token);
                 var result = await ZNullMechanism.Instance.CreateSession().RunAsync(context, token);
                 if (result is { } ready) return new ZMechanismResult(codec, ready.PeerReadyBody);
                 return null;

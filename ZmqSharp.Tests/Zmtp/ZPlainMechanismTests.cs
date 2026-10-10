@@ -158,12 +158,12 @@ public sealed class ZPlainMechanismTests
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("secret"u8))
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "secret"u8) },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -189,12 +189,12 @@ public sealed class ZPlainMechanismTests
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("secret"u8))
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "wrong"u8) },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -251,13 +251,14 @@ public sealed class ZPlainMechanismTests
         body.AddRange("HELLO"u8);
         body.Add((byte)user.Length);
         body.AddRange(user);
-        if (password is { } value)
+        if (password is not { } value)
         {
-            var bytes = Encoding.UTF8.GetBytes(value);
-            body.Add((byte)bytes.Length);
-            body.AddRange(bytes);
+            return ZmtpTestData.Frame([.. body], command: true);
         }
 
+        var bytes = Encoding.UTF8.GetBytes(value);
+        body.Add((byte)bytes.Length);
+        body.AddRange(bytes);
         return ZmtpTestData.Frame([.. body], command: true);
     }
 

@@ -20,19 +20,19 @@ public sealed class ZReqRepTests
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint, token);
-        rep.BindRequestHandler(async (context, token) =>
+        rep.BindRequestHandler(async (context, handlerToken) =>
         {
-            Assert.Single(context);
-            var payload = context[0].ToSequence().ToArray();
-            await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), token);
+            var frame = Assert.Single(context);
+            var payload = frame.ToSequence().ToArray();
+            await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), handlerToken);
         });
 
         await using var req = new ZReqSocket();
         await req.ConnectAsync(endpoint, token);
         var reply = await req.RequestAsync(ZMessage.FromOwned([.. "ping"u8]), token);
 
-        Assert.Single(reply);
-        Assert.Equal([.. "ping"u8], reply[0].ToSequence().ToArray());
+        var frame = Assert.Single(reply);
+        Assert.Equal([.. "ping"u8], frame.ToSequence().ToArray());
         reply.Dispose();
     }
 
@@ -44,10 +44,10 @@ public sealed class ZReqRepTests
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint, token);
-        rep.BindRequestHandler((context, token) =>
+        rep.BindRequestHandler((context, handlerToken) =>
         {
             Assert.Equal(2, context.Count);
-            return rep.SendReplyAsync(context, MessageFactory.Multipart([.. "x"u8], [.. "y"u8]), token);
+            return rep.SendReplyAsync(context, MessageFactory.Multipart([.. "x"u8], [.. "y"u8]), handlerToken);
         });
 
         await using var req = new ZReqSocket();
@@ -69,10 +69,10 @@ public sealed class ZReqRepTests
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint, token);
-        rep.BindRequestHandler(async (context, token) =>
+        rep.BindRequestHandler(async (context, handlerToken) =>
         {
-            await release.Task.WaitAsync(token);
-            await rep.SendReplyAsync(context, ZMessage.FromOwned([.. "ok"u8]), token);
+            await release.Task.WaitAsync(handlerToken);
+            await rep.SendReplyAsync(context, ZMessage.FromOwned([.. "ok"u8]), handlerToken);
         });
 
         await using var req = new ZReqSocket();
@@ -131,10 +131,10 @@ public sealed class ZReqRepTests
         var endpoint = TestTransports.GetEndpoint(kind);
         await using var rep = new ZRepSocket();
         await rep.BindAsync(endpoint, token);
-        rep.BindRequestHandler(async (context, token) =>
+        rep.BindRequestHandler(async (context, handlerToken) =>
         {
             var payload = context[0].ToSequence().ToArray();
-            await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), token);
+            await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), handlerToken);
         });
 
         await using var reqA = new ZReqSocket();
@@ -164,15 +164,15 @@ public sealed class ZReqRepTests
         await repB.BindAsync(endpointB, token);
         var countA = 0;
         var countB = 0;
-        repA.BindRequestHandler((context, token) =>
+        repA.BindRequestHandler((context, handlerToken) =>
         {
             Interlocked.Increment(ref countA);
-            return repA.SendReplyAsync(context, ZMessage.FromOwned([.. "a"u8]), token);
+            return repA.SendReplyAsync(context, ZMessage.FromOwned([.. "a"u8]), handlerToken);
         });
-        repB.BindRequestHandler((context, token) =>
+        repB.BindRequestHandler((context, handlerToken) =>
         {
             Interlocked.Increment(ref countB);
-            return repB.SendReplyAsync(context, ZMessage.FromOwned([.. "b"u8]), token);
+            return repB.SendReplyAsync(context, ZMessage.FromOwned([.. "b"u8]), handlerToken);
         });
 
         await using var req = new ZReqSocket();

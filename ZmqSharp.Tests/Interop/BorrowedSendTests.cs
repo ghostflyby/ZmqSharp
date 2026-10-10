@@ -51,7 +51,7 @@ public sealed class BorrowedSendTests
 
         await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
-        using var manager = new FixedMemoryManager("manager-backed"u8.ToArray());
+        using var manager = new FixedMemoryManager([.. "manager-backed"u8]);
         await client.SendAsync(manager.Memory, token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);

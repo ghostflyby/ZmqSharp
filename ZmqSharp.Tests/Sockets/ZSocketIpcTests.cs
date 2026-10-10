@@ -112,6 +112,15 @@ public sealed class ZSocketIpcTests
         Assert.True(countA >= 1, $"countA was {countA}, expected at least 1");
         Assert.True(countB >= 1, $"countB was {countB}, expected at least 1");
 
+        await pump.CancelAsync();
+        try
+        {
+            await Task.WhenAll(drainA, drainB);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+
+        return;
+
         void OnPeerMessage(bool peerA)
         {
             if (peerA)
@@ -121,13 +130,6 @@ public sealed class ZSocketIpcTests
 
             if (Volatile.Read(ref countA) >= 1 && Volatile.Read(ref countB) >= 1) bothReached.TrySetResult();
         }
-
-        await pump.CancelAsync();
-        try
-        {
-            await Task.WhenAll(drainA, drainB);
-        }
-        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
     }
 
     [Theory(Timeout = 10_000)]

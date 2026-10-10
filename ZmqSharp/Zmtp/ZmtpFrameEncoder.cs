@@ -21,7 +21,7 @@ public sealed class ZmtpFrameEncoder
     }
 
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-        => WriteFrameAsync(new ZmtpFrameData { Flags = ZmtpFrameFlags.Command, Body = new(body) }, token);
+        => WriteFrameAsync(new ZmtpFrameData { Flags = ZmtpFrameFlags.Command, Body = new ReadOnlySequence<byte>(body) }, token);
 
     public async ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
     {

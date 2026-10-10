@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Security.Cryptography;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Security.Curve;
@@ -93,13 +92,20 @@ public sealed class CurveFrameCodec : IZFrameCodec
             flags == (ZmtpFrameFlags.More | ZmtpFrameFlags.Command))
             throw new ZeroMqProtocolException("invalid CURVE logical flags");
         decodeNonce = tail;
-        return new ZmtpFrameData { Flags = flags, Body = new(output.AsMemory(1, plaintextLength - 1)) };
+        return new ZmtpFrameData { Flags = flags, Body = new ReadOnlySequence<byte>(output.AsMemory(1, plaintextLength - 1)) };
     }
 
     private static byte[] Ensure(ref byte[]? field, int length)
     {
-        if (field is { } existing && existing.Length >= length) return existing;
-        if (field is { } old) ArrayPool<byte>.Shared.Return(old, clearArray: true);
+        switch (field)
+        {
+            case { } existing when existing.Length >= length:
+                return existing;
+            case { } old:
+                ArrayPool<byte>.Shared.Return(old, clearArray: true);
+                break;
+        }
+
         var buffer = ArrayPool<byte>.Shared.Rent(Math.Max(256, length));
         field = buffer;
         return buffer;
@@ -107,7 +113,7 @@ public sealed class CurveFrameCodec : IZFrameCodec
 
     private static void Return(byte[]? buffer)
     {
-        if (buffer is { } owned) ArrayPool<byte>.Shared.Return(owned, clearArray: true);
+        if (buffer is not null) ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
     }
 
     public void Dispose()

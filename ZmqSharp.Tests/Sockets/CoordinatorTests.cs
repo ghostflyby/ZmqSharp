@@ -19,7 +19,7 @@ public sealed class CoordinatorTests
         var handled = new List<ZPeer>();
         var replies = new List<ZPeer>();
         ZRepCore? coordinator = null;
-        var core = new ZRepCore(async (context, token) =>
+        var core = new ZRepCore(async (context, handlerToken) =>
         {
             handled.Add(context.Peer);
             if (ReferenceEquals(context.Peer, first))
@@ -28,8 +28,8 @@ public sealed class CoordinatorTests
                 await release.Task;
             }
 
-            if (coordinator is { } replyCore)
-                await replyCore.SendReplyAsync(context, ZMessage.Copy("reply"u8.ToArray()), token);
+            if (coordinator is not null)
+                await coordinator.SendReplyAsync(context, ZMessage.Copy("reply"u8.ToArray()), handlerToken);
         }, (peer, message, _) =>
         {
             replies.Add(peer);

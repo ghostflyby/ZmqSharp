@@ -62,10 +62,9 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
             throw;
         }
 
-        if (message.Count == 0)
-            throw new ArgumentException("a message has at least one frame", nameof(frames));
-
-        return new ZMultiMessage([.. message]);
+        return message.Count == 0
+            ? throw new ArgumentException("a message has at least one frame", nameof(frames))
+            : new ZMultiMessage([.. message]);
     }
 
     /// <summary>
@@ -93,10 +92,9 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
             throw;
         }
 
-        if (message.Count == 0)
-            throw new ArgumentException("a message has at least one frame", nameof(frames));
-
-        return new ZMultiMessage([.. message]);
+        return message.Count == 0
+            ? throw new ArgumentException("a message has at least one frame", nameof(frames))
+            : new ZMultiMessage([.. message]);
     }
 
     public int Count => frames.Length;

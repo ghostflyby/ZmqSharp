@@ -32,7 +32,7 @@ public sealed class CurveEndToEndTests
         await using var server = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys.Secret) },
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
 
         await using var client = new ZPairSocket(new ZSocketOptions
@@ -41,7 +41,7 @@ public sealed class CurveEndToEndTests
             {
                 Mechanism = new CurveMechanism(crypto, clientKeys.Secret, serverKeys.Public)
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
         var path = Path.Combine(Path.GetTempPath(), $"zmq-curve-{Guid.NewGuid().ToString("N")[..12]}.sock");
         var address = ipc ? $"ipc://{path}" : $"tcp://127.0.0.1:{GetFreePort()}";
@@ -81,7 +81,7 @@ public sealed class CurveEndToEndTests
         await using var server = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverSecret) },
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
 
         await using var client = new ZPairSocket(new ZSocketOptions
@@ -92,7 +92,7 @@ public sealed class CurveEndToEndTests
                 // box never opens, and establishment must fault.
                 Mechanism = new CurveMechanism(crypto, clientSecret, wrongPublic)
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
 
         var port = GetFreePort();
@@ -106,7 +106,7 @@ public sealed class CurveEndToEndTests
         Assert.NotNull(failure);
         Assert.True(
             failure is ZMechanismException or IOException,
-            $"Expected ZMechanismException or IOException, but was: {failure?.GetType().FullName ?? "null"}");
+            $"Expected ZMechanismException or IOException, but was: {failure.GetType().FullName}");
     }
 
     private static int GetFreePort()

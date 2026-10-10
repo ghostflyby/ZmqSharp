@@ -130,10 +130,7 @@ public sealed class ZCurrentPeerDispatch : IZDispatchPolicy
     {
         lock (gateLock)
         {
-            if (current is null)
-                throw new InvalidOperationException("REQ sends through RequestAsync, not SendAsync");
-
-            targets[0] = current;
+            targets[0] = current ?? throw new InvalidOperationException("REQ sends through RequestAsync, not SendAsync");
             return 1;
         }
     }

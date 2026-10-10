@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Text;
 using System.Threading.Channels;
 using NetMQ;
 using NetMQ.Sockets;
@@ -40,7 +39,7 @@ public sealed class XPubXSubInteropTests
         observed.Dispose();
 
         // Publish a topic; the NetMQ XSub receives it (single frame).
-        var payload = Encoding.ASCII.GetBytes("news").Concat(Encoding.ASCII.GetBytes("!")).ToArray();
+        byte[] payload = [.. "news!"u8];
         await xpub.SendAsync(ZMessage.FromOwned(payload), token);
         var received = InteropHelpers.ReceiveFrame(xsub, TimeSpan.FromSeconds(5));
         Assert.Equal(payload, received);
@@ -63,7 +62,7 @@ public sealed class XPubXSubInteropTests
 
         // NetMQ's XPublisherSocket (like PUB) only forwards data matching a
         // received subscription; our XSUB delivers the frame unfiltered.
-        var payload = Encoding.ASCII.GetBytes("any-thing");
+        byte[] payload = [.. "any-thing"u8];
         xpub.SendFrame(payload);
         var message = await received.Reader.ReadAsync(token);
         Assert.Equal(payload, message[0].ToSequence().ToArray());

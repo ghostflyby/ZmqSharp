@@ -38,19 +38,12 @@ public sealed class CurveInteropTests
         var token = TestContext.Current.CancellationToken;
         var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        void SendHello(object? sender, NetMQSocketEventArgs args)
-        {
-            if (args.Socket.TrySendFrame("reference-hello")) args.Socket.SendReady -= SendHello;
-        }
-
         reference.SendReady += SendHello;
         reference.ReceiveReady += (_, args) =>
         {
-            if (args.Socket.TryReceiveFrameBytes(out var bytes))
-            {
-                received.TrySetResult(bytes);
-                Assert.True(args.Socket.TrySendFrame("reference-reply"));
-            }
+            if (!args.Socket.TryReceiveFrameBytes(out var bytes)) return;
+            received.TrySetResult(bytes);
+            Assert.True(args.Socket.TrySendFrame("reference-reply"));
         };
         if (localBinds)
         {
@@ -70,5 +63,11 @@ public sealed class CurveInteropTests
         using var reply = await local.Messages.ReadAsync(token);
         Assert.Equal("reference-reply"u8.ToArray(), reply[0].ToSequence().ToArray());
         poller.StopAsync();
+        return;
+
+        void SendHello(object? sender, NetMQSocketEventArgs args)
+        {
+            if (args.Socket.TrySendFrame("reference-hello")) args.Socket.SendReady -= SendHello;
+        }
     }
 }

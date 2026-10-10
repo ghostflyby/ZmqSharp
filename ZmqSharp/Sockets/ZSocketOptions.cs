@@ -196,11 +196,11 @@ public sealed class ZSocketOptions
     // configuration and reject it at construction instead of silently
     // ignoring it (0023). The public getters stay non-null and declarative
     // (0008 D2). ReceivePolicy caches its lazily-created default.
-    private ZQueueFactory? receiveQueueFactory;
-    private IZReceivePolicy? receivePolicy;
-    private long? maxFrameLength;
-    private long? maxMessageLength;
-    private int? maxFramesPerMessage;
+    private readonly ZQueueFactory? receiveQueueFactory;
+    private readonly IZReceivePolicy? receivePolicy;
+    private readonly long? maxFrameLength;
+    private readonly long? maxMessageLength;
+    private readonly int? maxFramesPerMessage;
 
     /// <summary>
     /// True when any queue-surface option was explicitly set (0023). A socket

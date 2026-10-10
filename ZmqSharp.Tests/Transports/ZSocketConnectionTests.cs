@@ -38,8 +38,8 @@ public sealed class ZSocketConnectionTests
             await sender.SendFrameAsync("hello"u8.ToArray(), more: false, token: token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            Assert.Single(recorder.Frames);
-            Assert.Equal([.. "hello"u8], recorder.Frames[0]);
+            var frame = Assert.Single(recorder.Frames);
+            Assert.Equal([.. "hello"u8], frame);
         }
     }
 
@@ -64,8 +64,8 @@ public sealed class ZSocketConnectionTests
             await sender.SendAsync(message, token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            Assert.Single(recorder.Frames);
-            Assert.Equal([.. "hello!"u8], recorder.Frames[0]);
+            var frame = Assert.Single(recorder.Frames);
+            Assert.Equal([.. "hello!"u8], frame);
         }
     }
 
@@ -88,8 +88,8 @@ public sealed class ZSocketConnectionTests
             await sender.SendFrameAsync(payload, more: false, token: token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            Assert.Single(recorder.Frames);
-            Assert.Equal(payload, recorder.Frames[0]);
+            var frame = Assert.Single(recorder.Frames);
+            Assert.Equal(payload, frame);
         }
     }
 
@@ -132,8 +132,8 @@ public sealed class ZSocketConnectionTests
             await sender.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false, token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            Assert.Single(recorder.Frames);
-            Assert.Empty(recorder.Frames[0]);
+            var frame = Assert.Single(recorder.Frames);
+            Assert.Empty(frame);
         }
     }
 

@@ -56,7 +56,7 @@ public class ReceiveAllocationTests
         var sink = new MeasuringSink(MessageCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = sink });
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
-        var peer = AllocationFakeTransport.Current!;
+        var peer = AllocationFakeTransport.Current ?? throw new InvalidOperationException("fake transport not initialised");
 
         // Warm up: the first deliveries pay one-time costs (pool size-class
         // caches, delegate caches, tiered JIT, scratch growth).
@@ -109,7 +109,7 @@ public class ReceiveAllocationTests
         var sink = new MeasuringSink(MessageCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { Pool = pool, MessageSink = sink });
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
-        var peer = AllocationFakeTransport.Current!;
+        var peer = AllocationFakeTransport.Current ?? throw new InvalidOperationException("fake transport not initialised");
 
         const int count = 1000;
         for (var i = 0; i < count; i++)
@@ -128,7 +128,7 @@ public class ReceiveAllocationTests
         var sink = new MeasuringSink(WarmupCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = sink });
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
-        var peer = AllocationFakeTransport.Current!;
+        var peer = AllocationFakeTransport.Current ?? throw new InvalidOperationException("fake transport not initialised");
 
         peer.Enqueue(AllocationFrameData.Frame([.. "first"u8]));
         await sink.WaitForAsync(1);
@@ -156,7 +156,7 @@ public class ReceiveAllocationTests
         var sink = new MeasuringSink(MessageCount);
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = sink });
         await socket.ConnectAsync<EndPoint, AllocationFakeTransport>(new IPEndPoint(IPAddress.Loopback, 0), token);
-        var peer = AllocationFakeTransport.Current!;
+        var peer = AllocationFakeTransport.Current ?? throw new InvalidOperationException("fake transport not initialised");
 
         byte[] firstFrame = [.. "first-frame"u8];
         byte[] secondFrame = [.. "second-frame"u8];

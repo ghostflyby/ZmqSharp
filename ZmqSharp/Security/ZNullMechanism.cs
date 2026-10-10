@@ -40,10 +40,8 @@ public sealed class ZNullMechanism : IZSecurityMechanism
                     return new ZMechanismResult(null, command.Value.Arguments.ToArray());
 
                 if (command.Value.Name.Span.SequenceEqual("ERROR"u8))
-                {
-                    var reason = ZmtpCommandCodec.ParseErrorReason(command.Value.Arguments.Span);
-                    throw new ZMechanismException($"peer sent ERROR: {reason}");
-                }
+                    throw new ZMechanismException(
+                        $"peer sent ERROR: {ZmtpCommandCodec.ParseErrorReason(command.Value.Arguments.Span)}");
 
                 throw new ZMechanismException(
                     $"unknown command '{Encoding.ASCII.GetString(command.Value.Name.Span)}' during handshake");

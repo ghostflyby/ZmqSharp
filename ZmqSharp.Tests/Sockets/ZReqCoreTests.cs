@@ -169,6 +169,8 @@ public sealed class ZReqCoreTests
 
             Assert.Equal(0, pool.Outstanding);
 
+            continue;
+
             async Task CancelAsync()
             {
                 await start.Task;
@@ -184,5 +186,5 @@ public sealed class ZReqCoreTests
     }
 
     private static ZReqCore CreateCore(ZPeer peer, Action? retired = null)
-        => new(() => [peer], (_, _, _) => { return ValueTask.CompletedTask; }, _ => retired?.Invoke());
+        => new(() => [peer], (_, _, _) => ValueTask.CompletedTask, _ => retired?.Invoke());
 }

@@ -60,12 +60,9 @@ internal sealed class ZTopicFilterPolicy(ZTopicFilter filter) : IZInboundPolicy
 {
     public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
-        if (!filter.Matches(message[0].ToSequence()))
-        {
-            message.Dispose();
-            return ValueTask.FromResult(ZInboundDecision.Drop());
-        }
+        if (filter.Matches(message[0].ToSequence())) return ValueTask.FromResult(ZInboundDecision.Deliver());
 
-        return ValueTask.FromResult(ZInboundDecision.Deliver());
+        message.Dispose();
+        return ValueTask.FromResult(ZInboundDecision.Drop());
     }
 }

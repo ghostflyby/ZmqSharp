@@ -74,28 +74,28 @@ public sealed class ZSocketTypeTests
     [Fact]
     public void Name_Empty_Throws()
     {
-        var act = () => new ZSocketType { Name = "", AcceptsPeer = _ => true };
-
-        var ex = Assert.Throws<ArgumentException>(act);
+        var ex = Assert.Throws<ArgumentException>(Act);
         Assert.Contains("not be empty", ex.Message);
+
+        ZSocketType Act() => new() { Name = "", AcceptsPeer = _ => true };
     }
 
     [Fact]
     public void Name_TooLong_Throws()
     {
-        var act = () => new ZSocketType { Name = new string('X', 256), AcceptsPeer = _ => true };
-
-        var ex = Assert.Throws<ArgumentException>(act);
+        var ex = Assert.Throws<ArgumentException>(Act);
         Assert.Contains("255", ex.Message);
+
+        ZSocketType Act() => new() { Name = new string('X', 256), AcceptsPeer = _ => true };
     }
 
     [Fact]
     public void Name_NonAscii_Throws()
     {
-        var act = () => new ZSocketType { Name = "FOÖ", AcceptsPeer = _ => true };
-
-        var ex = Assert.Throws<ArgumentException>(act);
+        var ex = Assert.Throws<ArgumentException>(Act);
         Assert.Contains("ASCII", ex.Message);
+
+        ZSocketType Act() => new() { Name = "FOÖ", AcceptsPeer = _ => true };
     }
 
     private static ZSocketType BuiltIn(string name) => name switch

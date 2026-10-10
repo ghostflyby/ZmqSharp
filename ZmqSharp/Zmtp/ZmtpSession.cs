@@ -36,7 +36,7 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
         }
         catch (Exception failure)
         {
-            if (retire is { } stop) stop(failure);
+            if (retire is not null) retire(failure);
             else connection.Abort();
             throw;
         }
@@ -51,12 +51,12 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
         await sendGate.WaitAsync(token);
         try
         {
-            var frame = new ZmtpFrameData { Flags = ZmtpFrameFlags.Command, Body = new(body) };
+            var frame = new ZmtpFrameData { Flags = ZmtpFrameFlags.Command, Body = new ReadOnlySequence<byte>(body) };
             await encoder.WriteFrameAsync(codec?.Encode(frame) ?? frame, token);
         }
         catch (Exception failure)
         {
-            if (retire is { } stop) stop(failure);
+            if (retire is not null) retire(failure);
             else connection.Abort();
             throw;
         }
@@ -71,12 +71,12 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
         await sendGate.WaitAsync(token);
         try
         {
-            var frame = new ZmtpFrameData { Flags = more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None, Body = new(body) };
+            var frame = new ZmtpFrameData { Flags = more ? ZmtpFrameFlags.More : ZmtpFrameFlags.None, Body = new ReadOnlySequence<byte>(body) };
             await encoder.WriteFrameAsync(codec?.Encode(frame) ?? frame, token);
         }
         catch (Exception failure)
         {
-            if (retire is { } stop) stop(failure);
+            if (retire is not null) retire(failure);
             else connection.Abort();
             throw;
         }

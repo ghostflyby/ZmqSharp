@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using Xunit;
 using ZmqSharp.Zmtp;
@@ -32,7 +33,7 @@ public class CurveTrafficAllocationTests
             var longSize = (wire[offset] & 2) != 0;
             var size = longSize ? (int)BinaryPrimitives.ReadInt64BigEndian(wire.AsSpan(offset + 1)) : wire[offset + 1];
             offset += longSize ? 9 : 2;
-            bodies[i] = new ZmtpFrameData { Body = new(wire.AsMemory(offset, size)) };
+            bodies[i] = new ZmtpFrameData { Body = new ReadOnlySequence<byte>(wire.AsMemory(offset, size)) };
             offset += size;
         }
 

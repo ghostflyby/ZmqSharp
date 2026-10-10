@@ -25,8 +25,8 @@ public sealed class ZmtpParserTests
 
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        Assert.Single(recorder.Frames);
-        Assert.Equal([.. "hello"u8], recorder.Frames[0]);
+        var frame = Assert.Single(recorder.Frames);
+        Assert.Equal([.. "hello"u8], frame);
         Assert.False(recorder.MoreFlags[0]);
     }
 
@@ -79,8 +79,8 @@ public sealed class ZmtpParserTests
 
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        Assert.Single(recorder.Frames);
-        Assert.Equal(payload, recorder.Frames[0]);
+        var frame = Assert.Single(recorder.Frames);
+        Assert.Equal(payload, frame);
     }
 
     [Fact(Timeout = 10_000)]
@@ -97,17 +97,17 @@ public sealed class ZmtpParserTests
         {
             frame.TryGetValue(out ZSegment segment);
             frames.Add(segment.Memory.ToArray());
-            if (frames.Count == 1)
+            if (frames.Count != 1)
             {
-                firstDelivered.TrySetResult();
-                return false;
+                return true;
             }
 
-            return true;
+            firstDelivered.TrySetResult();
+            return false;
         });
         var session = await ZmtpTestRunner.EstablishAsync(connection);
         using var parser =
-            ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"),
+            ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
                 recorder);
 
         var token = TestContext.Current.CancellationToken;
@@ -137,17 +137,18 @@ public sealed class ZmtpParserTests
         {
             frame.TryGetValue(out ZSegment segment);
             frames.Add(segment.Memory.ToArray());
-            if (frames.Count == 1)
+            if (frames.Count != 1)
             {
-                firstSeen.TrySetResult();
-                await release.Task; // pending ValueTask = backpressure
+                return true;
             }
 
+            firstSeen.TrySetResult();
+            await release.Task; // pending ValueTask = backpressure
             return true;
         });
         var session = await ZmtpTestRunner.EstablishAsync(connection);
         var parser =
-            ZmtpTestRunner.CreateParser(session is { } s ? s : throw new InvalidOperationException("handshake failed"),
+            ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
                 sink);
 
         var token = TestContext.Current.CancellationToken;
@@ -192,8 +193,8 @@ public sealed class ZmtpParserTests
 
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        Assert.Single(recorder.Frames);
-        Assert.Equal([.. "hello"u8], recorder.Frames[0]);
+        var frame = Assert.Single(recorder.Frames);
+        Assert.Equal([.. "hello"u8], frame);
     }
 
     [Fact]
@@ -229,8 +230,8 @@ public sealed class ZmtpParserTests
 
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        Assert.Single(recorder.Frames);
-        Assert.Equal([.. "last"u8], recorder.Frames[0]);
+        var frame = Assert.Single(recorder.Frames);
+        Assert.Equal([.. "last"u8], frame);
     }
 
     [Fact]

@@ -254,7 +254,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         var verifier = new Ed25519Signer();
         verifier.Init(false, new Ed25519PublicKeyParameters(publicKey));
         verifier.BlockUpdate(message);
-        return verifier.VerifySignature(signature.ToArray());
+        return verifier.VerifySignature([.. signature]);
     }
 
     public void RandomBytes(Span<byte> destination)
@@ -437,12 +437,11 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
             output[pos] = (byte)(input[pos] ^ block[i]);
             pos++;
             i++;
-            if (i == 64)
-            {
-                i = 0;
-                state[8]++;
-                Salsa20Block(state, block);
-            }
+            if (i != 64) continue;
+
+            i = 0;
+            state[8]++;
+            Salsa20Block(state, block);
         }
     }
 

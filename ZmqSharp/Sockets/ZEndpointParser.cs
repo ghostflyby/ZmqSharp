@@ -16,10 +16,9 @@ internal static class ZEndpointParser
         if (uri.Scheme.Equals("tcp", StringComparison.OrdinalIgnoreCase))
             return await ParseTcpAsync(uri, token);
 
-        if (uri.Scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase))
-            return ParseIpc(endpoint, uri);
-
-        throw new NotSupportedException($"unsupported endpoint scheme '{uri.Scheme}' in '{endpoint}'");
+        return uri.Scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)
+            ? ParseIpc(endpoint, uri)
+            : throw new NotSupportedException($"unsupported endpoint scheme '{uri.Scheme}' in '{endpoint}'");
     }
 
     private static async Task<IPEndPoint> ParseTcpAsync(Uri uri, CancellationToken token)
@@ -28,9 +27,9 @@ internal static class ZEndpointParser
         if (IPAddress.TryParse(uri.Host, out var address)) return new IPEndPoint(address, port);
 
         var addresses = await Dns.GetHostAddressesAsync(uri.Host, token);
-        if (addresses.Length == 0) throw new InvalidOperationException($"could not resolve endpoint host '{uri.Host}'");
-
-        return new IPEndPoint(addresses[0], port);
+        return addresses.Length == 0
+            ? throw new InvalidOperationException($"could not resolve endpoint host '{uri.Host}'")
+            : new IPEndPoint(addresses[0], port);
     }
 
     /// <summary>
@@ -52,10 +51,9 @@ internal static class ZEndpointParser
         if (endpoint.AsSpan(prefix.Length).StartsWith('@'))
         {
             var name = endpoint.AsSpan(prefix.Length + 1);
-            if (name.IsEmpty)
-                throw new ArgumentException("ipc abstract namespace requires a name", nameof(endpoint));
-
-            return new UnixDomainSocketEndPoint("\0" + name.ToString());
+            return name.IsEmpty
+                ? throw new ArgumentException("ipc abstract namespace requires a name", nameof(endpoint))
+                : new UnixDomainSocketEndPoint("\0" + name.ToString());
         }
 
         // The URI parser splits the two forms differently: an absolute form

@@ -58,7 +58,7 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
 
         // The scatter overload has no token. Aborting the socket cancels the
         // actual operation, so borrowed buffers remain live until it returns.
-        using var registration = token.UnsafeRegister(static state =>
+        await using var registration = token.UnsafeRegister(static state =>
         {
             if (state is ZSocketConnection connection) connection.Abort();
         }, this);

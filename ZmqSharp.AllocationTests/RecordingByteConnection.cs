@@ -8,7 +8,7 @@ internal sealed class RecordingByteConnection(byte[]? feed = null, int capacity 
     private readonly byte[] feed = feed ?? [];
     private readonly List<byte> written = new(capacity);
     private int position;
-    public byte[] Recorded => written.ToArray();
+    public byte[] Recorded => [.. written];
 
     public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
     {
