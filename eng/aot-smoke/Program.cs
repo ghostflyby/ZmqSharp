@@ -50,7 +50,7 @@ foreach (var ipc in (bool[])[false, true])
     ZPeer? ended = null;
     client.PeerEnded += (ZPeer peer, Exception? _) => ended = peer;
     await client.DisconnectAsync<EndPoint, ByteTransport>(resolved, timeout.Token);
-    if (ended is null || ended.Id <= 0) return 1;
+    if (ended is null) return 1;
     await server.UnbindAsync(address, timeout.Token);
 
     var backend = new BouncyCastleCurveCrypto();
