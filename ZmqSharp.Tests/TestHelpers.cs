@@ -418,8 +418,6 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
         firstFrame.TrySetResult();
         return ValueTask.FromResult(onFrame?.Invoke(frame, token) ?? true);
     }
-
-    public void OnConnectionEnded() { }
 }
 
 /// <summary>
@@ -637,7 +635,7 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
 internal sealed class EstablishedFakeConnection : IZConnection
 {
-    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
     private int position;
     private int disposed;
 
@@ -667,7 +665,7 @@ internal sealed class EstablishedFakeConnection : IZConnection
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }

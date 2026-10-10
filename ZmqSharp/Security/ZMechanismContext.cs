@@ -32,7 +32,7 @@ public sealed class ZMechanismContext : IDisposable
         reader = connection;
         encoder = new ZmtpFrameEncoder(connection);
         LocalReadyBody = localReadyBody;
-        this.MaxCommandSize = maxCommandSize;
+        MaxCommandSize = maxCommandSize;
         this.pool = pool ?? MemoryPool<byte>.Shared;
     }
 

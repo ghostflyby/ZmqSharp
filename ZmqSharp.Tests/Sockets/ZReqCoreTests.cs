@@ -19,7 +19,7 @@ public sealed class ZReqCoreTests
         var releaseSend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var retired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         ZPeer[] peers = [first];
-        var core = new ZReqCore(() => peers, async (_, message, _) =>
+        var core = new ZReqCore(() => peers, async (_, _, _) =>
         {
             sendStarted.TrySetResult();
             await releaseSend.Task;
@@ -73,7 +73,7 @@ public sealed class ZReqCoreTests
         var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var core = new ZReqCore(() => [peer], async (_, message, _) => { await release.Task; }, _ => { });
+        var core = new ZReqCore(() => [peer], async (_, _, _) => { await release.Task; }, _ => { });
         var request = core.RequestAsync(ZMessage.Copy("first"u8.ToArray()), token);
         await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.Copy("reply"u8.ToArray())), token);
         request.IsCompleted.Should().BeFalse();
@@ -106,7 +106,7 @@ public sealed class ZReqCoreTests
         var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var core = new ZReqCore(() => [peer], async (_, message, _) => { await release.Task; }, _ => { });
+        var core = new ZReqCore(() => [peer], async (_, _, _) => { await release.Task; }, _ => { });
         var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), token);
         core.OnPeerEnded(peer);
         request.IsCompleted.Should().BeFalse();
@@ -187,5 +187,5 @@ public sealed class ZReqCoreTests
     }
 
     private static ZReqCore CreateCore(ZPeer peer, Action? retired = null)
-        => new(() => [peer], (_, message, _) => { return ValueTask.CompletedTask; }, _ => retired?.Invoke());
+        => new(() => [peer], (_, _, _) => { return ValueTask.CompletedTask; }, _ => retired?.Invoke());
 }
