@@ -11,32 +11,27 @@ namespace ZmqSharp.Security.Curve;
 /// <see cref="ZMechanismContext"/>, and the session returns a
 /// <see cref="CurveFrameCodec"/> that encrypts traffic frames. The
 /// protocol layout follows the maintained libzmq/NetMQ reference; only the
-/// crypto primitives come from the user-supplied <see cref="ICurveCryptoBackend"/>.
+/// crypto primitives come from the internal <see cref="CurveCrypto"/> primitives.
 /// The handshake builds every fixed-size stage buffer with stackalloc and the
 /// destination-style backend, so it allocates only the command frames
 /// themselves (0027).
 /// </summary>
 public sealed class CurveMechanism : IZSecurityMechanism
 {
-    private readonly ICurveCryptoBackend crypto;
     private readonly Key32? clientLongTermKey;
     private readonly Key32? serverPublicKey;
     private readonly Key32? serverLongTermKey;
 
     /// <summary>Client role: authenticates with a long-term key pair against the server's public key.</summary>
-    public CurveMechanism(ICurveCryptoBackend crypto, Key32 clientLongTermKey, Key32 serverPublicKey)
+    public CurveMechanism(Key32 clientLongTermKey, Key32 serverPublicKey)
     {
-        ArgumentNullException.ThrowIfNull(crypto);
-        this.crypto = crypto;
         this.clientLongTermKey = clientLongTermKey;
         this.serverPublicKey = serverPublicKey;
     }
 
     /// <summary>Server role: holds the long-term secret key the clients authenticate against.</summary>
-    public CurveMechanism(ICurveCryptoBackend crypto, Key32 serverLongTermKey)
+    public CurveMechanism(Key32 serverLongTermKey)
     {
-        ArgumentNullException.ThrowIfNull(crypto);
-        this.crypto = crypto;
         this.serverLongTermKey = serverLongTermKey;
     }
 
@@ -56,17 +51,16 @@ public sealed class CurveMechanism : IZSecurityMechanism
             // (INITIATE) carries the public, the vouch box is sealed with the
             // secret.
             Span<byte> publicBytes = stackalloc byte[32];
-            crypto.DerivePublicKey(clientKey.Span, publicBytes);
-            return new ClientSession(crypto, clientKey, Key32.From(publicBytes), serverKey);
+            CurveCrypto.DerivePublicKey(clientKey.Span, publicBytes);
+            return new ClientSession(clientKey, Key32.From(publicBytes), serverKey);
         }
 
         return serverLongTermKey is { } serverSecretKey
-            ? new ServerSession(crypto, serverSecretKey)
+            ? new ServerSession(serverSecretKey)
             : throw new InvalidOperationException("a CURVE server requires a long-term key pair");
     }
 
     private sealed class ClientSession(
-        ICurveCryptoBackend crypto,
         Key32 longTerm,
         Key32 longTermPublic,
         Key32 serverKey)
@@ -78,7 +72,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
         public async ValueTask<ZMechanismResult?> RunAsync(ZMechanismContext context, CancellationToken token)
         {
             // Client handshake: HELLO -> WELCOME -> INITIATE -> READY.
-            crypto.GenerateKeyPair(out var ephemeralPublic, out var ephemeralSecret);
+            CurveCrypto.GenerateKeyPair(out var ephemeralPublic, out var ephemeralSecret);
             var nonce = 1UL;
 
             var hello = BuildHello(ephemeralPublic, ephemeralSecret, ref nonce);
@@ -94,7 +88,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             var serverEphemeralKey = ParseWelcome(welcome.Value, ephemeralSecret, out var cookie);
 
             Span<byte> sessionKeyBytes = stackalloc byte[32];
-            crypto.DeriveSharedSecret(ephemeralSecret.Span, serverEphemeralKey.Span, sessionKeyBytes);
+            CurveCrypto.DeriveSharedSecret(ephemeralSecret.Span, serverEphemeralKey.Span, sessionKeyBytes);
             var sessionKey = Key32.From(sessionKeyBytes);
 
             var initiate = BuildInitiate(context, ephemeralPublic, ephemeralSecret, serverEphemeralKey, cookie, ref nonce);
@@ -110,7 +104,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             var peerMetadata = OpenReady(ready.Value, sessionKey);
 
             var session = new CurveFrameCodec(
-                crypto, sessionKey,
+                sessionKey,
                 encodeServerToClient: false, decodeServerToClient: true,
                 nonce, 0);
             return new ZMechanismResult(session, peerMetadata);
@@ -131,7 +125,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
             // Box of 64 zero bytes under (C', S): proves the client knows c'.
             Span<byte> zeroPlain = stackalloc byte[64];
-            crypto.Box(zeroPlain, fullNonce, ephemeralSecret.Span, serverKey.Span, body.AsSpan(120));
+            CurveCrypto.Box(zeroPlain, fullNonce, ephemeralSecret.Span, serverKey.Span, body.AsSpan(120));
             return body;
         }
 
@@ -148,7 +142,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             args[..16].Span.CopyTo(nonce[8..]);
 
             Span<byte> plaintext = stackalloc byte[128];
-            if (!crypto.TryUnbox(args[16..].Span, nonce, ephemeralSecret.Span, serverKey.Span,
+            if (!CurveCrypto.TryUnbox(args[16..].Span, nonce, ephemeralSecret.Span, serverKey.Span,
                     plaintext, out var written)
                 || written != 128)
                 throw new ZMechanismException("WELCOME authentication failed");
@@ -173,9 +167,9 @@ public sealed class CurveMechanism : IZSecurityMechanism
             serverKey.CopyTo(vouchPlain[32..]);
             Span<byte> vouchNonce = stackalloc byte[24];
             CurveConstants.VouchNoncePrefix.CopyTo(vouchNonce);
-            crypto.RandomBytes(vouchNonce[8..24]); // the full 16-byte nonce tail
+            CurveCrypto.RandomBytes(vouchNonce[8..24]); // the full 16-byte nonce tail
             Span<byte> vouchBox = stackalloc byte[80];
-            crypto.Box(vouchPlain, vouchNonce, longTerm.Span, serverEphemeralKey.Span, vouchBox);
+            CurveCrypto.Box(vouchPlain, vouchNonce, longTerm.Span, serverEphemeralKey.Span, vouchBox);
 
             // Initiate: Box [C, vouch-nonce, vouch, metadata](C' -> S').
             var metadata = ReadyMetadata(context.LocalReadyBody);
@@ -193,7 +187,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             CurveConstants.InitiateLiteral.CopyTo(body);
             cookie.CopyTo(body, 9);
             initiateNonce[16..].CopyTo(body.AsSpan(105));
-            crypto.Box(initiatePlain, initiateNonce, ephemeralSecret.Span, serverEphemeralKey.Span,
+            CurveCrypto.Box(initiatePlain, initiateNonce, ephemeralSecret.Span, serverEphemeralKey.Span,
                 body.AsSpan(113));
             return body;
         }
@@ -214,7 +208,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             var plaintext = ArrayPool<byte>.Shared.Rent(args.Length - 24);
             try
             {
-                return crypto.TrySecretBoxOpen(args[8..].Span, nonce, sessionKey.Span, plaintext, out var written)
+                return CurveCrypto.TrySecretBoxOpen(args[8..].Span, nonce, sessionKey.Span, plaintext, out var written)
                     ? [.. plaintext[..written]]
                     : throw new ZMechanismException("READY authentication failed");
             }
@@ -230,7 +224,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
         }
     }
 
-    private sealed class ServerSession(ICurveCryptoBackend crypto, Key32 longTerm) : IZMechanismSession
+    private sealed class ServerSession(Key32 longTerm) : IZMechanismSession
     {
         // Same convention as ClientSession: the primary-constructor long-term
         // key is referenced directly; per-handshake values travel as parameters.
@@ -246,9 +240,9 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
             var clientEphemeralKey = ParseHello(hello.Value, out var peerNonce);
 
-            crypto.GenerateKeyPair(out var ephemeralPublic, out var ephemeralSecret);
+            CurveCrypto.GenerateKeyPair(out var ephemeralPublic, out var ephemeralSecret);
             Span<byte> cookieKeyBytes = stackalloc byte[32];
-            crypto.RandomBytes(cookieKeyBytes);
+            CurveCrypto.RandomBytes(cookieKeyBytes);
             var cookieKey = Key32.From(cookieKeyBytes);
             var welcome = BuildWelcome(ephemeralPublic, ephemeralSecret, clientEphemeralKey, cookieKey);
             await context.WriteCommandAsync(welcome, token);
@@ -268,7 +262,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             await context.WriteCommandAsync(ready, token);
 
             var session = new CurveFrameCodec(
-                crypto, sessionKey,
+                sessionKey,
                 encodeServerToClient: true, decodeServerToClient: false,
                 nonce, peerNonce);
             return new ZMechanismResult(session, peerMetadata);
@@ -292,7 +286,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
             // The box must open to 64 zero bytes under (s, C').
             Span<byte> plaintext = stackalloc byte[64];
-            if (!crypto.TryUnbox(body.AsSpan(120, 80), nonce, longTerm.Span, clientEphemeralKey.Span,
+            if (!CurveCrypto.TryUnbox(body.AsSpan(120, 80), nonce, longTerm.Span, clientEphemeralKey.Span,
                     plaintext, out var written)
                 || written != 64
                 || plaintext[..64].ContainsAnyExcept((byte)0))
@@ -314,9 +308,9 @@ public sealed class CurveMechanism : IZSecurityMechanism
             ephemeralSecret.CopyTo(cookiePlain[32..]);
             Span<byte> cookieNonce = stackalloc byte[24];
             CurveConstants.CookieNoncePrefix.CopyTo(cookieNonce);
-            crypto.RandomBytes(cookieNonce[8..24]); // the full 16-byte nonce tail
+            CurveCrypto.RandomBytes(cookieNonce[8..24]); // the full 16-byte nonce tail
             Span<byte> cookieBox = stackalloc byte[80];
-            crypto.SecretBox(cookiePlain, cookieNonce, cookieKey.Span, cookieBox);
+            CurveCrypto.SecretBox(cookiePlain, cookieNonce, cookieKey.Span, cookieBox);
 
             // Welcome: Box [S', cookie](s -> C').
             Span<byte> welcomePlain = stackalloc byte[128];
@@ -325,9 +319,9 @@ public sealed class CurveMechanism : IZSecurityMechanism
             cookieBox.CopyTo(welcomePlain[48..128]);
             Span<byte> welcomeNonce = stackalloc byte[24];
             CurveConstants.WelcomeNoncePrefix.CopyTo(welcomeNonce);
-            crypto.RandomBytes(welcomeNonce[8..24]); // the full 16-byte nonce tail
+            CurveCrypto.RandomBytes(welcomeNonce[8..24]); // the full 16-byte nonce tail
             Span<byte> welcomeBox = stackalloc byte[144];
-            crypto.Box(welcomePlain, welcomeNonce, longTerm.Span, clientEphemeralKey.Span, welcomeBox);
+            CurveCrypto.Box(welcomePlain, welcomeNonce, longTerm.Span, clientEphemeralKey.Span, welcomeBox);
 
             var body = new byte[8 + 16 + welcomeBox.Length];
             CurveConstants.WelcomeLiteral.CopyTo(body);
@@ -354,7 +348,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             CurveConstants.CookieNoncePrefix.CopyTo(cookieNonce);
             body.AsSpan(9, 16).CopyTo(cookieNonce[8..]);
             Span<byte> cookiePlain = stackalloc byte[64];
-            if (!crypto.TrySecretBoxOpen(body.AsSpan(25, 80), cookieNonce, cookieKey.Span, cookiePlain,
+            if (!CurveCrypto.TrySecretBoxOpen(body.AsSpan(25, 80), cookieNonce, cookieKey.Span, cookiePlain,
                     out var cookieWritten)
                 || cookieWritten != 64
                 || !cookiePlain[..32].SequenceEqual(clientEphemeralKey.Span)
@@ -371,7 +365,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             var initiatePlain = ArrayPool<byte>.Shared.Rent(body.Length - 129);
             try
             {
-                if (!crypto.TryUnbox(body.AsSpan(113), initiateNonce, ephemeralSecret.Span,
+                if (!CurveCrypto.TryUnbox(body.AsSpan(113), initiateNonce, ephemeralSecret.Span,
                         clientEphemeralKey.Span, initiatePlain, out var initiateWritten))
                     throw new ZMechanismException("INITIATE authentication failed");
 
@@ -381,14 +375,14 @@ public sealed class CurveMechanism : IZSecurityMechanism
                 CurveConstants.VouchNoncePrefix.CopyTo(vouchNonce);
                 initiatePlain.AsSpan(32, 16).CopyTo(vouchNonce[8..]);
                 Span<byte> vouchPlain = stackalloc byte[64];
-                if (!crypto.TryUnbox(initiatePlain.AsSpan(48, 80), vouchNonce, ephemeralSecret.Span,
+                if (!CurveCrypto.TryUnbox(initiatePlain.AsSpan(48, 80), vouchNonce, ephemeralSecret.Span,
                         clientLongKey.Span, vouchPlain, out var vouchWritten)
                     || vouchWritten != 64
                     || !vouchPlain[..32].SequenceEqual(clientEphemeralKey.Span))
                     throw new ZMechanismException("vouch does not match the connection");
 
                 Span<byte> sessionKeyBytes = stackalloc byte[32];
-                crypto.DeriveSharedSecret(ephemeralSecret.Span, clientEphemeralKey.Span, sessionKeyBytes);
+                CurveCrypto.DeriveSharedSecret(ephemeralSecret.Span, clientEphemeralKey.Span, sessionKeyBytes);
                 sessionKey = Key32.From(sessionKeyBytes);
                 return [.. initiatePlain[128..initiateWritten]];
             }
@@ -408,7 +402,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             Span<byte> readyNonce = stackalloc byte[24];
             WriteNonce(CurveConstants.ReadyNoncePrefix, ref nonce, readyNonce);
             Span<byte> box = stackalloc byte[16 + metadata.Length];
-            crypto.Box(metadata.Span, readyNonce, ephemeralSecret.Span, clientEphemeralKey.Span, box);
+            CurveCrypto.Box(metadata.Span, readyNonce, ephemeralSecret.Span, clientEphemeralKey.Span, box);
 
             var body = new byte[6 + 8 + box.Length];
             CurveConstants.ReadyLiteral.CopyTo(body);

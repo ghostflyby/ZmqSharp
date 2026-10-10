@@ -23,10 +23,9 @@ public sealed class CurveInteropTests
         reference.Options.CurveCertificate = localServer ? client : server;
         if (localServer) reference.Options.CurveServerKey = server.PublicKey;
         else reference.Options.CurveServer = true;
-        var backend = new BouncyCastleCurveCrypto();
         var mechanism = localServer
-            ? new CurveMechanism(backend, Key32.From(server.SecretKey))
-            : new CurveMechanism(backend, Key32.From(client.SecretKey), Key32.From(server.PublicKey));
+            ? new CurveMechanism(Key32.From(server.SecretKey))
+            : new CurveMechanism(Key32.From(client.SecretKey), Key32.From(server.PublicKey));
         await using var local = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = mechanism }

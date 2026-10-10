@@ -7,11 +7,11 @@ using Xunit;
 namespace ZmqSharp.Security.Curve.Tests;
 
 /// <summary>
-/// End-to-end CURVE tests: two ZmqSharp sockets configured with the optional
-/// <see cref="CurveMechanism"/> authenticate and then exchange encrypted
-/// messages over TCP. The package's default BouncyCastle backend is used, but
-/// the mechanism composes any <see cref="ICurveCryptoBackend"/> - swapping the
-/// backend is the only change needed to use a different crypto library.
+/// End-to-end CURVE tests: two ZmqSharp sockets configured with the
+/// internal <see cref="CurveMechanism"/> authenticate and then exchange
+/// encrypted messages over TCP. The in-box BouncyCastle primitives are used;
+/// per RFC 25 the primitives are fixed on the wire, so a different crypto
+/// library would ship as a byte-equivalent port, not a swappable backend.
 /// </summary>
 public sealed class CurveEndToEndTests
 {
@@ -23,15 +23,14 @@ public sealed class CurveEndToEndTests
     public async Task CurveClient_AndServer_AuthenticateAndExchangeMessages(bool reversed, bool ipc)
     {
         var token = TestContext.Current.CancellationToken;
-        var crypto = new BouncyCastleCurveCrypto();
-        crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
-        crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
+        CurveCrypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
+        CurveCrypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
         var serverKeys = (Public: serverPublic, Secret: serverSecret);
         var clientKeys = (Public: clientPublic, Secret: clientSecret);
 
         await using var server = new ZPairSocket(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverKeys.Secret) },
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverKeys.Secret) },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
 
@@ -39,7 +38,7 @@ public sealed class CurveEndToEndTests
         {
             Security = new ZSecurityOptions
             {
-                Mechanism = new CurveMechanism(crypto, clientKeys.Secret, serverKeys.Public)
+                Mechanism = new CurveMechanism(clientKeys.Secret, serverKeys.Public)
             },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -73,14 +72,13 @@ public sealed class CurveEndToEndTests
     public async Task CurveClient_WithWrongServerKey_FailsHandshake()
     {
         var token = TestContext.Current.CancellationToken;
-        var crypto = new BouncyCastleCurveCrypto();
-        crypto.GenerateKeyPair(out _, out var serverSecret);
-        crypto.GenerateKeyPair(out _, out var clientSecret);
-        crypto.GenerateKeyPair(out var wrongPublic, out _);
+        CurveCrypto.GenerateKeyPair(out _, out var serverSecret);
+        CurveCrypto.GenerateKeyPair(out _, out var clientSecret);
+        CurveCrypto.GenerateKeyPair(out var wrongPublic, out _);
 
         await using var server = new ZPairSocket(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverSecret) },
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverSecret) },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
 
@@ -90,7 +88,7 @@ public sealed class CurveEndToEndTests
             {
                 // The client holds a different server public key: the WELCOME
                 // box never opens, and establishment must fault.
-                Mechanism = new CurveMechanism(crypto, clientSecret, wrongPublic)
+                Mechanism = new CurveMechanism(clientSecret, wrongPublic)
             },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
