@@ -18,9 +18,9 @@ internal sealed class SocketRuntime : IZSocket
 {
     internal readonly MemoryPool<byte> Pool;
     internal readonly Lock StateLock = new();
-    internal readonly List<Task> BackgroundTasks = [];
-    internal readonly CancellationTokenSource Cts = new();
-    internal int Closed;
+    private readonly List<Task> backgroundTasks = [];
+    private readonly CancellationTokenSource cts = new();
+    private int closed;
     internal CancellationToken LifetimeToken { get; }
     private bool lifecycleDisposed;
 
@@ -28,16 +28,16 @@ internal sealed class SocketRuntime : IZSocket
     {
         lock (StateLock)
         {
-            BackgroundTasks.Add(task);
+            backgroundTasks.Add(task);
         }
     }
 
-    internal async Task AwaitBackgroundAsync()
+    private async Task AwaitBackgroundAsync()
     {
         Task[] tasks;
         lock (StateLock)
         {
-            tasks = [.. BackgroundTasks];
+            tasks = [.. backgroundTasks];
         }
 
         try
@@ -50,10 +50,10 @@ internal sealed class SocketRuntime : IZSocket
         {
             lock (StateLock)
             {
-                if (!lifecycleDisposed && Volatile.Read(ref Closed) == 1)
+                if (!lifecycleDisposed && Volatile.Read(ref closed) == 1)
                 {
                     lifecycleDisposed = true;
-                    Cts.Dispose();
+                    cts.Dispose();
                 }
             }
         }
@@ -61,7 +61,7 @@ internal sealed class SocketRuntime : IZSocket
 
     internal void ThrowIfClosed()
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref Closed) == 1, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref closed) == 1, this);
     }
 
     /// <summary>
@@ -117,7 +117,7 @@ internal sealed class SocketRuntime : IZSocket
     internal SocketRuntime(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
         IZInboundPolicy? inbound = null, bool supportsQueue = false)
     {
-        LifetimeToken = Cts.Token;
+        LifetimeToken = cts.Token;
         ArgumentNullException.ThrowIfNull(options);
         Pool = options.Pool;
         ArgumentNullException.ThrowIfNull(dispatch);
@@ -285,7 +285,7 @@ internal sealed class SocketRuntime : IZSocket
         listener.OnAccept += AcceptConnection;
         lock (StateLock)
         {
-            if (Volatile.Read(ref Closed) == 0 && !token.IsCancellationRequested)
+            if (Volatile.Read(ref closed) == 0 && !token.IsCancellationRequested)
             {
                 registration = new ZEndpointRegistration(listener, endpoint, typeof(TTransport), address, LifetimeToken);
                 listeners.Add(registration);
@@ -481,21 +481,16 @@ internal sealed class SocketRuntime : IZSocket
         else completion.TrySetResult();
     }
 
-    private async Task StopAsync()
-    {
-        if (Interlocked.Exchange(ref Closed, 1) != 0) return;
-
-        await StopCoreAsync();
-    }
-
     /// <summary>
     /// Disposes listeners and cancels background work; the Closed flag is
     /// already set when this runs. Subclasses that stop in their own order
     /// (the queue surface completes and drains its outbound channel before
     /// stopping the connection pumps) call this from their teardown.
     /// </summary>
-    internal async Task StopCoreAsync()
+    private async Task StopAsync()
     {
+        if (Interlocked.Exchange(ref closed, 1) != 0) return;
+
         ZEndpointRegistration[] registrations;
         lock (StateLock)
         {
@@ -504,7 +499,7 @@ internal sealed class SocketRuntime : IZSocket
         }
 
         foreach (var registration in registrations) registration.RequestStop();
-        await Cts.CancelAsync();
+        await cts.CancelAsync();
     }
 
     /// <summary>
@@ -683,7 +678,7 @@ internal sealed class SocketRuntime : IZSocket
         PeerRecord? record = null;
         lock (StateLock)
         {
-            if (Volatile.Read(ref Closed) == 0 &&
+            if (Volatile.Read(ref closed) == 0 &&
                 (!accepted || maxIncompleteHandshakes <= 0 || incompleteHandshakes < maxIncompleteHandshakes))
             {
                 var registration = new ZEndpointRegistration(connection, endpoint, transport, address, LifetimeToken, token,

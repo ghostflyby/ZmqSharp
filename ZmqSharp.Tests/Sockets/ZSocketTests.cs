@@ -1724,6 +1724,7 @@ public sealed class ZSocketTests
         });
         var token = TestContext.Current.CancellationToken;
         using var pump = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var pumpToken = pump.Token;
         var port = GetFreePort();
         await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
@@ -1733,7 +1734,7 @@ public sealed class ZSocketTests
         {
             try
             {
-                for (var i = 0; i < 300; i++) await server.SendAsync(ZMessage.FromOwned([1]), pump.Token);
+                for (var i = 0; i < 300; i++) await server.SendAsync(ZMessage.FromOwned([1]), pumpToken);
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
             catch (Exception ex)
@@ -1747,7 +1748,7 @@ public sealed class ZSocketTests
             try
             {
                 var messages = server.Messages;
-                await foreach (var message in messages.ReadAllAsync(pump.Token)) message.Dispose();
+                await foreach (var message in messages.ReadAllAsync(pumpToken)) message.Dispose();
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
             catch (Exception ex)
