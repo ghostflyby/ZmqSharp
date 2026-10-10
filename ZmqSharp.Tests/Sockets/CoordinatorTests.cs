@@ -18,8 +18,7 @@ public sealed class CoordinatorTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var handled = new List<ZPeer>();
         var replies = new List<ZPeer>();
-        ZRepCore? coordinator = null;
-        var core = new ZRepCore(async (context, handlerToken) =>
+        var core = new ZRepCore(async (self, context, handlerToken) =>
         {
             handled.Add(context.Peer);
             if (ReferenceEquals(context.Peer, first))
@@ -28,8 +27,7 @@ public sealed class CoordinatorTests
                 await release.Task;
             }
 
-            if (coordinator is not null)
-                await coordinator.SendReplyAsync(context, ZMessage.Copy("reply"u8.ToArray()), handlerToken);
+            await self.SendReplyAsync(context, ZMessage.Copy("reply"u8.ToArray()), handlerToken);
         }, (peer, message, _) =>
         {
             replies.Add(peer);
@@ -37,7 +35,6 @@ public sealed class CoordinatorTests
             Assert.Equal("reply"u8.ToArray(), reply[0].ToSequence().ToArray());
             return ValueTask.CompletedTask;
         });
-        coordinator = core;
         var one = core.DecideAsync(first, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token).AsTask();
         await entered.Task.WaitAsync(token);
         var two = core.DecideAsync(second, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token).AsTask();
@@ -57,7 +54,7 @@ public sealed class CoordinatorTests
         using var pool = new CountingMemoryPool();
         using var cancellation = new CancellationTokenSource();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var core = new ZRepCore(async (_, _) => await release.Task, (_, message, _) =>
+        var core = new ZRepCore(async (_, _, _) => await release.Task, (_, message, _) =>
         {
             message.Dispose();
             return ValueTask.CompletedTask;

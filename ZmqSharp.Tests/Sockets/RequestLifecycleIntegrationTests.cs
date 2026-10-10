@@ -18,6 +18,8 @@ public sealed class RequestLifecycleIntegrationTests
         await using var responder = new ZRepSocket();
         responder.BindRequestHandler((context, replyToken) =>
         {
+            // ReSharper disable once AccessToModifiedClosure
+            // ReSharper disable once AccessToDisposedClosure
             if (respond) return responder.SendReplyAsync(context, "reply"u8.ToArray(), replyToken);
             received.TrySetResult();
             return ValueTask.CompletedTask;

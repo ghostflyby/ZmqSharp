@@ -24,6 +24,7 @@ public sealed class ZReqRepTests
         {
             var frame = Assert.Single(context);
             var payload = frame.ToSequence().ToArray();
+            // ReSharper disable once AccessToDisposedClosure
             await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), handlerToken);
         });
 
@@ -47,6 +48,7 @@ public sealed class ZReqRepTests
         rep.BindRequestHandler((context, handlerToken) =>
         {
             Assert.Equal(2, context.Count);
+            // ReSharper disable once AccessToDisposedClosure
             return rep.SendReplyAsync(context, MessageFactory.Multipart([.. "x"u8], [.. "y"u8]), handlerToken);
         });
 
@@ -72,6 +74,7 @@ public sealed class ZReqRepTests
         rep.BindRequestHandler(async (context, handlerToken) =>
         {
             await release.Task.WaitAsync(handlerToken);
+            // ReSharper disable once AccessToDisposedClosure
             await rep.SendReplyAsync(context, ZMessage.FromOwned([.. "ok"u8]), handlerToken);
         });
 
@@ -134,6 +137,7 @@ public sealed class ZReqRepTests
         rep.BindRequestHandler(async (context, handlerToken) =>
         {
             var payload = context[0].ToSequence().ToArray();
+            // ReSharper disable once AccessToDisposedClosure
             await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), handlerToken);
         });
 
@@ -167,11 +171,13 @@ public sealed class ZReqRepTests
         repA.BindRequestHandler((context, handlerToken) =>
         {
             Interlocked.Increment(ref countA);
+            // ReSharper disable once AccessToDisposedClosure
             return repA.SendReplyAsync(context, ZMessage.FromOwned([.. "a"u8]), handlerToken);
         });
         repB.BindRequestHandler((context, handlerToken) =>
         {
             Interlocked.Increment(ref countB);
+            // ReSharper disable once AccessToDisposedClosure
             return repB.SendReplyAsync(context, ZMessage.FromOwned([.. "b"u8]), handlerToken);
         });
 

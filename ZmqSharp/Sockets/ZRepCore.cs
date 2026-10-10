@@ -11,7 +11,7 @@ namespace ZmqSharp.Sockets;
 /// request handler. Delimiter framing is <see cref="ZDelimiterFraming"/>.
 /// </summary>
 internal sealed class ZRepCore(
-    Func<ZRequestContext, CancellationToken, ValueTask> handle,
+    Func<ZRepCore, ZRequestContext, CancellationToken, ValueTask> handle,
     Func<ZPeer, ZMessage, CancellationToken, ValueTask> send) : IZInboundPolicy
 {
     private readonly SemaphoreSlim slot = new(1, 1);
@@ -35,7 +35,7 @@ internal sealed class ZRepCore(
         try
         {
             context = new ZRequestContext(peer, ZDelimiterFraming.Decode(message, "request"));
-            await handle(context.Value, token);
+            await handle(this, context.Value, token);
         }
         finally
         {

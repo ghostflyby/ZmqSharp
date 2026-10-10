@@ -89,6 +89,7 @@ public sealed class MultipartSendTests
         var port = InteropHelpers.GetFreePort();
         await rep.BindAsync($"tcp://127.0.0.1:{port}", token);
 
+        // ReSharper disable once AccessToDisposedClosure
         rep.BindRequestHandler((context, replyToken) => rep.SendReplyAsync(context, [new ReadOnlyMemory<byte>([.. "reply"u8])], replyToken));
 
         await req.ConnectAsync($"tcp://127.0.0.1:{port}", token);

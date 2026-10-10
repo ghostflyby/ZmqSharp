@@ -175,12 +175,14 @@ public sealed class ZReqCoreTests
             async Task CancelAsync()
             {
                 await start.Task;
+                // ReSharper disable once AccessToDisposedClosure
                 await cancellation.CancelAsync();
             }
 
             async Task DeliverAsync()
             {
                 await start.Task;
+                // ReSharper disable once AccessToDisposedClosure
                 await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token);
             }
         }

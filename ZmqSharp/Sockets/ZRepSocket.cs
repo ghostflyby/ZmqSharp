@@ -30,7 +30,7 @@ public sealed class ZRepSocket : ZSocketBase
     {
         var runtime = new SocketRuntime(options, new ZNoDispatch("REP replies through SendReplyAsync"), ZSocketTypes.Rep);
         var handlers = new RequestHandlerSlot();
-        var core = new ZRepCore(handlers.InvokeAsync, runtime.SendToAsync);
+        var core = new ZRepCore((_, context, token) => handlers.InvokeAsync(context, token), runtime.SendToAsync);
         runtime.ConfigureInbound(core);
         return (runtime, core, handlers);
     }

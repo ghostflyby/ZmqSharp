@@ -29,6 +29,7 @@ public sealed class RuntimeLifecycleTests
             Assert.Same(endpoint.Peer, peer);
             Assert.Equal(1, endpoint.Connection.Disposals);
             Assert.Equal(1, codec.Disposals);
+            // ReSharper disable once AccessToDisposedClosure
             Assert.Equal(0, pool.Outstanding);
             Assert.Empty(runtime.PeerSnapshot);
             observed = true;
