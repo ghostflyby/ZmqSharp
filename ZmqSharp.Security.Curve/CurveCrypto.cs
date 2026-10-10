@@ -77,65 +77,7 @@ public struct Key32 : IEquatable<Key32>
 }
 
 /// <summary>
-/// The cryptographic primitives a CURVE (RFC 25 / CurveZMQ) mechanism needs.
-/// The protocol skeleton (<see cref="CurveMechanism"/>) composes this; a user
-/// supplies the backend with their library of choice - the BouncyCastle
-/// implementation in this project is one pure-managed, AOT-safe option (0017).
-/// Every primitive writes into a caller-provided destination (0027 D1): output
-/// sizes are protocol-fixed, so the caller reserves the exact buffer and the
-/// backend never allocates.
-/// </summary>
-public interface ICurveCryptoBackend
-{
-    /// <summary>Derives the 32-byte X25519 public key from a 32-byte secret key.</summary>
-    void DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey);
-
-    /// <summary>Generates a fresh X25519 key pair (for the ephemeral connection keys).</summary>
-    void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey);
-
-    /// <summary>crypto_box_beforenm: the NaCl box key, HSalsa20(X25519(...)), 32 bytes.</summary>
-    void DeriveSharedSecret(ReadOnlySpan<byte> senderSecret, ReadOnlySpan<byte> recipientPublic,
-        Span<byte> destination);
-
-    /// <summary>
-    /// crypto_box_curve25519xsalsa20poly1305: seals <paramref name="plaintext"/>
-    /// with a 24-byte nonce into <paramref name="destination"/>, returning
-    /// tag(16) + ciphertext; the return value is the number of bytes written.
-    /// The box key is the X25519 shared secret between sender and recipient.
-    /// </summary>
-    int Box(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce,
-        ReadOnlySpan<byte> senderSecret, ReadOnlySpan<byte> recipientPublic,
-        Span<byte> destination);
-
-    /// <summary>
-    /// Opens a <see cref="Box"/> payload. The tag is verified first (0027 D5):
-    /// on authentication failure the destination is left untouched and false is
-    /// returned; on success <paramref name="written"/> is the plaintext length.
-    /// </summary>
-    bool TryUnbox(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce,
-        ReadOnlySpan<byte> recipientSecret, ReadOnlySpan<byte> senderPublic,
-        Span<byte> destination, out int written);
-
-    /// <summary>XSalsa20-Poly1305 secretbox (used for the server cookie); returns the bytes written.</summary>
-    int SecretBox(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce,
-        ReadOnlySpan<byte> key, Span<byte> destination);
-
-    /// <summary>Opens a <see cref="SecretBox"/> payload; tag verified before the destination is written.</summary>
-    bool TrySecretBoxOpen(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce,
-        ReadOnlySpan<byte> key, Span<byte> destination, out int written);
-
-    /// <summary>Ed25519 signature over a message (64 bytes).</summary>
-    void Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> secretKey, Span<byte> signature);
-
-    /// <summary>Verifies an Ed25519 signature over a message.</summary>
-    bool Verify(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey);
-
-    /// <summary>CSPRNG output for ephemeral keys and nonce tails.</summary>
-    void RandomBytes(Span<byte> destination);
-}
-
-/// <summary>
-/// BouncyCastle-based <see cref="ICurveCryptoBackend"/> (0017 recommendation):
+/// The RFC 25 CurveZMQ primitives over BouncyCastle (0017 recommendation):
 /// pure managed, no native dependency, IsAotCompatible. The crypto_box
 /// construction composes XSalsa20 + Poly1305 the way libsodium's
 /// crypto_secretbox does: the first 32 bytes of the XSalsa20 keystream form
@@ -144,16 +86,16 @@ public interface ICurveCryptoBackend
 /// so the hot path is stateless and allocates nothing; BouncyCastle is used
 /// only for X25519 and Ed25519. libsodium known vectors lock the wire bytes.
 /// </summary>
-public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
+internal static class CurveCrypto
 {
-    public void DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey)
+    public static void DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey)
     {
         ArgumentOutOfRangeException.ThrowIfNotEqual(secretKey.Length, 32);
         ArgumentOutOfRangeException.ThrowIfLessThan(publicKey.Length, 32);
         X25519.GeneratePublicKey(secretKey, publicKey);
     }
 
-    public void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey)
+    public static void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey)
     {
         Span<byte> secret = stackalloc byte[32];
         RandomNumberGenerator.Fill(secret);
@@ -168,7 +110,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
     /// crypto_box_beforenm does (the box key is not the raw X25519 output):
     /// 32 bytes.
     /// </summary>
-    public void DeriveSharedSecret(ReadOnlySpan<byte> senderSecret, ReadOnlySpan<byte> recipientPublic,
+    public static void DeriveSharedSecret(ReadOnlySpan<byte> senderSecret, ReadOnlySpan<byte> recipientPublic,
         Span<byte> destination)
     {
         if (destination.Length < 32)
@@ -182,7 +124,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         Hsalsa20(x25519, zeroInput, destination);
     }
 
-    public int Box(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce,
+    public static int Box(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> senderSecret, ReadOnlySpan<byte> recipientPublic,
         Span<byte> destination)
     {
@@ -191,7 +133,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         return SecretBox(plaintext, nonce, boxKey, destination);
     }
 
-    public bool TryUnbox(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce,
+    public static bool TryUnbox(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> recipientSecret, ReadOnlySpan<byte> senderPublic,
         Span<byte> destination, out int written)
     {
@@ -200,7 +142,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         return TrySecretBoxOpen(boxed, nonce, boxKey, destination, out written);
     }
 
-    public int SecretBox(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce,
+    public static int SecretBox(ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> key, Span<byte> destination)
     {
         var outputLength = 16 + plaintext.Length;
@@ -215,7 +157,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         return outputLength;
     }
 
-    public bool TrySecretBoxOpen(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce,
+    public static bool TrySecretBoxOpen(ReadOnlySpan<byte> boxed, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> key, Span<byte> destination, out int written)
     {
         written = 0;
@@ -238,7 +180,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         return true;
     }
 
-    public void Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> secretKey, Span<byte> signature)
+    public static void Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> secretKey, Span<byte> signature)
     {
         if (signature.Length < 64)
             throw new ArgumentException("destination is too small for the signature", nameof(signature));
@@ -249,7 +191,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         signer.GenerateSignature().CopyTo(signature);
     }
 
-    public bool Verify(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
+    public static bool Verify(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
     {
         var verifier = new Ed25519Signer();
         verifier.Init(false, new Ed25519PublicKeyParameters(publicKey));
@@ -257,7 +199,7 @@ public sealed class BouncyCastleCurveCrypto : ICurveCryptoBackend
         return verifier.VerifySignature([.. signature]);
     }
 
-    public void RandomBytes(Span<byte> destination)
+    public static void RandomBytes(Span<byte> destination)
     {
         RandomNumberGenerator.Fill(destination);
     }

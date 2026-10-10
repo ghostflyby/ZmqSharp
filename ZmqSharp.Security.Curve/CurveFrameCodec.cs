@@ -4,10 +4,15 @@ using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Security.Curve;
 
-/// <summary>Authenticated CURVE frame transformation; never reconstructs a plaintext wire header.</summary>
-public sealed class CurveFrameCodec : IZFrameCodec
+/// <summary>
+/// Authenticated CURVE frame transformation; never reconstructs a plaintext
+/// wire header. Created by <see cref="CurveMechanism"/> sessions and surfaced
+/// to consumers as <see cref="IZFrameCodec"/> through
+/// <see cref="ZMechanismResult.Codec"/>; the concrete type is an internal
+/// detail.
+/// </summary>
+internal sealed class CurveFrameCodec : IZFrameCodec
 {
-    private readonly ICurveCryptoBackend crypto;
     private Key32 key;
     private readonly bool encodeServerToClient;
     private readonly bool decodeServerToClient;
@@ -18,11 +23,10 @@ public sealed class CurveFrameCodec : IZFrameCodec
     private ulong decodeNonce;
     private bool disposed;
 
-    internal CurveFrameCodec(ICurveCryptoBackend crypto, Key32 key,
+    internal CurveFrameCodec(Key32 key,
         bool encodeServerToClient, bool decodeServerToClient,
         ulong encodeNonce, ulong decodeNonce)
     {
-        this.crypto = crypto;
         this.key = key;
         this.encodeServerToClient = encodeServerToClient;
         this.decodeServerToClient = decodeServerToClient;
@@ -54,7 +58,7 @@ public sealed class CurveFrameCodec : IZFrameCodec
             : CurveConstants.MessagePrefixClientToServer;
         encodePrefix.CopyTo(nonce);
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], encodeNonce++);
-        crypto.SecretBox(box[16..], nonce, key.Span, box);
+        CurveCrypto.SecretBox(box[16..], nonce, key.Span, box);
         return new ZmtpFrameData { Body = new ReadOnlySequence<byte>(buffer.AsMemory(0, length)) };
     }
 
@@ -84,7 +88,7 @@ public sealed class CurveFrameCodec : IZFrameCodec
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], tail);
         var plaintextLength = length - 32;
         var output = Ensure(ref plain, plaintextLength);
-        if (!crypto.TrySecretBoxOpen(body[16..], nonce, key.Span, output.AsSpan(0, plaintextLength), out var written)
+        if (!CurveCrypto.TrySecretBoxOpen(body[16..], nonce, key.Span, output.AsSpan(0, plaintextLength), out var written)
             || written != plaintextLength)
             throw new ZeroMqProtocolException("CURVE frame authentication failed");
         var flags = (ZmtpFrameFlags)output[0];

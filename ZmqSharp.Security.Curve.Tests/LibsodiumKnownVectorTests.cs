@@ -39,34 +39,28 @@ public sealed class LibsodiumKnownVectorTests
     [Fact]
     public void DeriveSharedSecret_MatchesCryptoBoxBeforenm()
     {
-        var bc = new BouncyCastleCurveCrypto();
-
         var derived = new byte[32];
-        bc.DeriveSharedSecret(Sk1, Pk2, derived);
+        CurveCrypto.DeriveSharedSecret(Sk1, Pk2, derived);
         Assert.Equal(LibsodiumBeforenm, derived);
 
         // The derivation is symmetric, like X25519 itself.
-        bc.DeriveSharedSecret(Sk2, Pk1, derived);
+        CurveCrypto.DeriveSharedSecret(Sk2, Pk1, derived);
         Assert.Equal(LibsodiumBeforenm, derived);
     }
 
     [Fact]
     public void Box_ProducesExactlyTheLibsodiumCiphertext()
     {
-        var bc = new BouncyCastleCurveCrypto();
-
         var boxed = new byte[16 + Plain.Length];
-        bc.Box(Plain, Nonce, Sk1, Pk2, boxed);
+        CurveCrypto.Box(Plain, Nonce, Sk1, Pk2, boxed);
         Assert.Equal(LibsodiumBox, boxed);
     }
 
     [Fact]
     public void Unbox_OpensTheLibsodiumCiphertext()
     {
-        var bc = new BouncyCastleCurveCrypto();
-
         var opened = new byte[LibsodiumBox.Length - 16];
-        Assert.True(bc.TryUnbox(LibsodiumBox, Nonce, Sk2, Pk1, opened, out var written));
+        Assert.True(CurveCrypto.TryUnbox(LibsodiumBox, Nonce, Sk2, Pk1, opened, out var written));
         Assert.Equal(Plain.Length, written);
         Assert.Equal(Plain, opened);
     }
@@ -74,11 +68,10 @@ public sealed class LibsodiumKnownVectorTests
     [Fact]
     public void Unbox_WithWrongRecipient_Fails()
     {
-        var bc = new BouncyCastleCurveCrypto();
-        bc.GenerateKeyPair(out var wrongSecret, out _);
+        CurveCrypto.GenerateKeyPair(out var wrongSecret, out _);
 
         var opened = new byte[LibsodiumBox.Length - 16];
-        Assert.False(bc.TryUnbox(LibsodiumBox, Nonce, wrongSecret.Span, Pk1, opened, out _));
+        Assert.False(CurveCrypto.TryUnbox(LibsodiumBox, Nonce, wrongSecret.Span, Pk1, opened, out _));
         // The destination must be untouched on a failed open (0027 D5).
         Assert.All(opened, b => Assert.Equal(0, b));
     }
@@ -86,18 +79,17 @@ public sealed class LibsodiumKnownVectorTests
     [Fact]
     public void SecretBox_MatchesLibsodiumKnownVector()
     {
-        var bc = new BouncyCastleCurveCrypto();
         var key = Convert.FromHexString("d1c816babcead3bacd134bfcef21bf4dd2d45e1409155c28f24be09a2147154e");
         var nonce = Convert.FromHexString("b05205a845db9a91e74358c4742652408315c3a3accfb849");
         var libsodium = Convert.FromHexString(
             "3a21ccb5a9a6b2fde7ed08bdd6a863d23cc41f4b3e536cebb1600e539fa2c2480b99c91523d0fa");
 
         var sealedMessage = new byte[16 + "secret box test message"u8.Length];
-        bc.SecretBox("secret box test message"u8, nonce, key, sealedMessage);
+        CurveCrypto.SecretBox("secret box test message"u8, nonce, key, sealedMessage);
         Assert.Equal(libsodium, sealedMessage);
 
         var opened = new byte["secret box test message"u8.Length];
-        Assert.True(bc.TrySecretBoxOpen(libsodium, nonce, key, opened, out var written));
+        Assert.True(CurveCrypto.TrySecretBoxOpen(libsodium, nonce, key, opened, out var written));
         Assert.Equal("secret box test message"u8.Length, written);
         Assert.Equal("secret box test message"u8.ToArray(), opened);
     }
@@ -105,9 +97,16 @@ public sealed class LibsodiumKnownVectorTests
     [Fact]
     public void GenerateKeyPair_MatchesScalarmultBase()
     {
-        var bc = new BouncyCastleCurveCrypto();
-        bc.GenerateKeyPair(out var publicKey, out var secretKey);
+        CurveCrypto.GenerateKeyPair(out var publicKey, out var secretKey);
         Assert.Equal(32, publicKey.Span.Length);
         Assert.Equal(32, secretKey.Span.Length);
+    }
+
+    [Fact]
+    public void DerivePublicKey_MatchesKnownVector()
+    {
+        var publicKey = new byte[32];
+        CurveCrypto.DerivePublicKey(Sk1, publicKey);
+        Assert.Equal(Pk1, publicKey);
     }
 }

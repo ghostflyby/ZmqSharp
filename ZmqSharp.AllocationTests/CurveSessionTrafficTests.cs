@@ -10,7 +10,7 @@ namespace ZmqSharp.AllocationTests;
 /// <summary>Logical frame delivery, authentication and whole-message serialization through the CURVE codec.</summary>
 public sealed class CurveSessionTrafficTests
 {
-    internal static CurveFrameCodec NewCodec() => new(new BouncyCastleCurveCrypto(), Key32.From(new byte[32]),
+    internal static CurveFrameCodec NewCodec() => new(Key32.From(new byte[32]),
         encodeServerToClient: false, decodeServerToClient: false, 1, 0);
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class CurveSessionTrafficTests
         Span<byte> nonce = stackalloc byte[24];
         CurveConstants.MessagePrefixClientToServer.CopyTo(nonce);
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], 1);
-        new BouncyCastleCurveCrypto().SecretBox([(byte)ZmtpFrameFlags.LongSize], nonce, new byte[32], encoded.AsSpan(16));
+        CurveCrypto.SecretBox([(byte)ZmtpFrameFlags.LongSize], nonce, new byte[32], encoded.AsSpan(16));
         using var decoder = NewCodec();
         var exception = Assert.Throws<ZeroMqProtocolException>(() => decoder.Decode(new ZmtpFrameData { Body = new ReadOnlySequence<byte>(encoded) }));
         Assert.Contains("logical flags", exception.Message);
