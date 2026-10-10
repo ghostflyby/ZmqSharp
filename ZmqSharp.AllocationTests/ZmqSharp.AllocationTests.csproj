@@ -13,10 +13,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="xunit.v3" Version="4.0.1"/>
+    <PackageReference Include="xunit.v3" Version="4.0.2"/>
     <!-- Registers the TRX reporter with Microsoft.Testing.Platform, which the
          CI `dotnet test` invocation selects. -->
-    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1"/>
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.1"/>
   </ItemGroup>
 
   <ItemGroup>
