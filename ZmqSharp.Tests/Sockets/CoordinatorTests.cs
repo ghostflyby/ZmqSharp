@@ -78,6 +78,7 @@ public sealed class CoordinatorTests
         var source = new ZPeer();
         var other = new ZPeer();
         var forwarded = new List<ZMessage>();
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
         var core = new XPubCoordinator(() => [source, other], (peer, message) =>
         {
             Assert.Same(other, peer);

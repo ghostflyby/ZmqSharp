@@ -22,6 +22,7 @@ public sealed class ZReqCoreTests
         {
             sendStarted.TrySetResult();
             await releaseSend.Task;
+            // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
         }, peer =>
         {
             Assert.Same(first, peer);

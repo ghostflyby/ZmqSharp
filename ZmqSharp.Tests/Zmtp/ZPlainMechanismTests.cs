@@ -213,6 +213,7 @@ public sealed class ZPlainMechanismTests
             ZmtpTestData.Frame(helloBody, command: true), InitiateFrame());
         using var connection = new ZConnection(new ChunkedMemoryStream(input));
         var authenticated = false;
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, password) =>
         {
             Assert.Equal("alice", user);

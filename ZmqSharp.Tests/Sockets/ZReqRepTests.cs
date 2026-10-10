@@ -97,7 +97,7 @@ public sealed class ZReqRepTests
     {
         var token = TestContext.Current.CancellationToken;
         var endpoint = TestTransports.GetEndpoint(kind);
-        await using var rep = new ZRepSocket();
+        var rep = new ZRepSocket();
         await rep.BindAsync(endpoint, token);
         // No handler bound: requests arrive and are dropped, so the reply
         // never comes and the peer stays alive until we close it.
