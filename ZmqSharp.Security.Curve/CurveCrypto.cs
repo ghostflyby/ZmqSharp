@@ -19,7 +19,7 @@ namespace ZmqSharp.Security.Curve;
 /// (0027 D2).
 /// </summary>
 [InlineArray(32)]
-public struct Key32 : IEquatable<Key32>
+internal struct Key32 : IEquatable<Key32>
 {
     private byte element0;
 

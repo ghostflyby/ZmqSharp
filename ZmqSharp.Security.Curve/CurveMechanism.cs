@@ -22,17 +22,25 @@ public sealed class CurveMechanism : IZSecurityMechanism
     private readonly Key32? serverPublicKey;
     private readonly Key32? serverLongTermKey;
 
-    /// <summary>Client role: authenticates with a long-term key pair against the server's public key.</summary>
-    public CurveMechanism(Key32 clientLongTermKey, Key32 serverPublicKey)
+    /// <summary>
+    /// Client role: authenticates with a long-term key pair against the
+    /// server's public key. Both keys must be 32 bytes and are copied at
+    /// construction; later mutation of the inputs has no effect.
+    /// </summary>
+    public CurveMechanism(ReadOnlySpan<byte> clientLongTermKey, ReadOnlySpan<byte> serverPublicKey)
     {
-        this.clientLongTermKey = clientLongTermKey;
-        this.serverPublicKey = serverPublicKey;
+        this.clientLongTermKey = Key32.From(clientLongTermKey);
+        this.serverPublicKey = Key32.From(serverPublicKey);
     }
 
-    /// <summary>Server role: holds the long-term secret key the clients authenticate against.</summary>
-    public CurveMechanism(Key32 serverLongTermKey)
+    /// <summary>
+    /// Server role: holds the long-term secret key the clients authenticate
+    /// against. The key must be 32 bytes and is copied at construction; later
+    /// mutation of the input has no effect.
+    /// </summary>
+    public CurveMechanism(ReadOnlySpan<byte> serverLongTermKey)
     {
-        this.serverLongTermKey = serverLongTermKey;
+        this.serverLongTermKey = Key32.From(serverLongTermKey);
     }
 
     public string Name => "CURVE";
