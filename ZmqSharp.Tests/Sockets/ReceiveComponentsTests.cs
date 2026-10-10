@@ -123,7 +123,7 @@ public sealed class ReceiveComponentsTests
         var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
-        using var parser = new ZmtpParser(new HeaderThenFailure(), (_, _) =>
+        using var parser = new ZmtpParser(new HeaderThenFailure(), (_, _, _) =>
             throw new InvalidOperationException("frame must not be delivered"), materializer.CreateAllocator(), pool);
         await Assert.ThrowsAsync<IOException>(() => parser.ParseAsync(token).AsTask());
         Assert.Equal(0, pool.Outstanding);

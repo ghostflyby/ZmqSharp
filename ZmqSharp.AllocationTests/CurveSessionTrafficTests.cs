@@ -117,7 +117,7 @@ public sealed class CurveSessionTrafficTests
         header[0] = (byte)ZmtpFrameFlags.LongSize;
         BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1), codec.GetMaximumEncodedLength(256) + 1);
         using var raw = new RecordingByteConnection(header);
-        using var parser = new ZmtpParser(raw, (_, _) => throw new InvalidOperationException("unexpected delivery"),
+        using var parser = new ZmtpParser(raw, (_, _, _) => throw new InvalidOperationException("unexpected delivery"),
             null, MemoryPool<byte>.Shared, maxCommandSize: 256, codec: codec, maxFrameLength: 8);
         // There is no body: ignoring the header bound would silently hit EOF.
         var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => parser.ParseAsync(token).AsTask());
@@ -139,7 +139,7 @@ public sealed class CurveSessionTrafficTests
         using var codec = NewCodec();
         using var pool = new CountingRentPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 8, 100, 10, () => { });
-        using var parser = new ZmtpParser(input, (_, _) => throw new InvalidOperationException("unexpected delivery"),
+        using var parser = new ZmtpParser(input, (_, _, _) => throw new InvalidOperationException("unexpected delivery"),
             materializer.CreateAllocator(), pool, maxCommandSize: 256, codec: codec, maxFrameLength: 8);
         var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => parser.ParseAsync(token).AsTask());
         Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, failure.Rejection.Reason);
