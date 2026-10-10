@@ -46,7 +46,7 @@ public sealed class ReceiveComponentsTests
     {
         using var pool = new CountingMemoryPool();
         using var connection = new EstablishedFakeConnection();
-        var registration = new ZEndpointRegistration(connection, null, null, null, default, abort: connection.Abort);
+        var registration = new ZEndpointRegistration(connection, null, null, null, CancellationToken.None, abort: connection.Abort);
         var record = new PeerRecord(connection, registration, false)
         {
             Phase = PeerPhase.Established,
@@ -77,7 +77,7 @@ public sealed class ReceiveComponentsTests
             new ZSinglePeerDispatch(), ZSocketTypes.Pair, supportsQueue: true);
         var surface = runtime.QueueSurface ?? throw new InvalidOperationException();
         using var connection = new EstablishedFakeConnection();
-        var registration = new ZEndpointRegistration(connection, null, null, null, default, abort: connection.Abort);
+        var registration = new ZEndpointRegistration(connection, null, null, null, CancellationToken.None, abort: connection.Abort);
         var record = new PeerRecord(connection, registration, false) { Phase = PeerPhase.Established };
         lock (runtime.StateLock) surface.Add(record);
         var owners = Enumerable.Range(0, 8).Select(_ => new OnceOwner()).ToArray();

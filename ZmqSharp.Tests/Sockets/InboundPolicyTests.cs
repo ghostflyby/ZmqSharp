@@ -165,8 +165,6 @@ public sealed class InboundPolicyTests
         private int count;
         private readonly TaskCompletionSource reachedTwo = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public int Count => count;
-
         /// <summary>Completes when two messages have been consumed (the state
         /// this test waits for, exposed instead of polling the counter).</summary>
         public Task ReachedTwoAsync => reachedTwo.Task;

@@ -79,9 +79,12 @@ public sealed class ZMechanismContext : IDisposable
             ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
             : headerBuffer[1];
         if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
+        // Checked before the configured bound: MaxCommandSize is an int, so this
+        // wire-level guard must run first to stay reachable; it protects the
+        // narrowing cast below.
+        if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
         if (size > MaxCommandSize)
             throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
-        if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
         var length = (int)size;
         EnsureScratchCapacity(length);

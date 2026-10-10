@@ -84,8 +84,16 @@ internal sealed class ZReqCore(
         }
 
         if (ownsReply) request.Completion.TrySetResult(reply);
-        else if (failure is OperationCanceledException) request.Completion.TrySetCanceled(request.Token);
-        else if (failure is { } error) request.Completion.TrySetException(error);
+        else
+            switch (failure)
+            {
+                case OperationCanceledException:
+                    request.Completion.TrySetCanceled(request.Token);
+                    break;
+                case not null:
+                    request.Completion.TrySetException(failure);
+                    break;
+            }
     }
 
     private void Cancel(Request request)

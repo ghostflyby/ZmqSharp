@@ -57,8 +57,8 @@ public sealed class PubSubInteropTests
 
         pub.SendFrame(Concat("news", "headline"));
         var message = await channel.Reader.ReadAsync(token);
-        Assert.Single(message);
-        Assert.Equal(Concat("news", "headline"), message[0].ToSequence().ToArray());
+        var frame = Assert.Single(message);
+        Assert.Equal(Concat("news", "headline"), frame.ToSequence().ToArray());
         message.Dispose();
 
         // Unsubscribe propagates the 0x00 frame; the filter then drops the

@@ -40,17 +40,17 @@ public sealed class ZMessageConstructionTests
     [Fact]
     public void Copy_Enumerable_SingleElementIsOneFrameMessage()
     {
-        var message = ZMessage.Copy(new[] { new ReadOnlyMemory<byte>("x"u8.ToArray()) });
+        var message = ZMessage.Copy([new ReadOnlyMemory<byte>([.. "x"u8])]);
 
-        Assert.Single(message);
-        Assert.Equal((byte[])[.. "x"u8], message[0].ToSequence().ToArray());
+        var frame = Assert.Single(message);
+        Assert.Equal((byte[])[.. "x"u8], frame.ToSequence().ToArray());
         message.Dispose();
     }
 
     [Fact]
     public void Copy_SingleSegmentSequence_CollapsesToContiguous()
     {
-        var message = ZMessage.Copy(new ReadOnlySequence<byte>("payload"u8.ToArray()));
+        var message = ZMessage.Copy(new ReadOnlySequence<byte>((byte[])[.. "payload"u8]));
 
         Assert.True(message.TryGetValue(out ZSingleMessage single));
         Assert.True(single[0].TryGetValue(out ZSegment _));

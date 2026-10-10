@@ -26,9 +26,9 @@ public sealed class CurveSessionTrafficTests
         var wire = raw.Recorded;
         Assert.NotEqual(0, wire[0] & (byte)ZmtpFrameFlags.LongSize);
         var frames = await ReadAsync(wire);
-        Assert.Single(frames);
-        Assert.Equal(payload, frames[0].Payload);
-        Assert.False(frames[0].More);
+        var frame = Assert.Single(frames);
+        Assert.Equal(payload, frame.Payload);
+        Assert.False(frame.More);
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class CurveSessionTrafficTests
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], 1);
         new BouncyCastleCurveCrypto().SecretBox([(byte)ZmtpFrameFlags.LongSize], nonce, new byte[32], encoded.AsSpan(16));
         using var decoder = NewCodec();
-        var exception = Assert.Throws<ZeroMqProtocolException>(() => decoder.Decode(new ZmtpFrameData { Body = new(encoded) }));
+        var exception = Assert.Throws<ZeroMqProtocolException>(() => decoder.Decode(new ZmtpFrameData { Body = new ReadOnlySequence<byte>(encoded) }));
         Assert.Contains("logical flags", exception.Message);
     }
 

@@ -65,7 +65,15 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
     public int Count => nonContiguous?.Count ?? 1;
 
     public ZSegment this[int index]
-        => nonContiguous is null ? SingleSegment(index) : nonContiguous.Value[index];
+    {
+        get
+        {
+            if (nonContiguous is { } segments) return segments[index];
+
+            ArgumentOutOfRangeException.ThrowIfNotEqual(index, 0);
+            return contiguous.GetValueOrDefault();
+        }
+    }
 
     public Enumerator GetEnumerator()
     {
@@ -96,12 +104,6 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
     {
         contiguous?.Dispose();
         nonContiguous?.Dispose();
-    }
-
-    private ZSegment SingleSegment(int index)
-    {
-        ArgumentOutOfRangeException.ThrowIfNotEqual(index, 0);
-        return contiguous.GetValueOrDefault();
     }
 
     private static IEnumerable<ReadOnlyMemory<byte>> IterateSegments(ZSegments segments)

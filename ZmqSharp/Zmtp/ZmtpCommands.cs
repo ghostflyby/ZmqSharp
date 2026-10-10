@@ -53,7 +53,7 @@ public static class ZmtpCommands
         offset += socketTypeBytes.Length;
 
         if (!identity.IsEmpty)
-            offset += ZmtpCommandCodec.WriteMetadataProperty(span[offset..], IdentityPropertyName, identity.Span);
+            ZmtpCommandCodec.WriteMetadataProperty(span[offset..], IdentityPropertyName, identity.Span);
 
         return body;
     }

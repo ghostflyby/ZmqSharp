@@ -19,11 +19,10 @@ internal sealed class ReceiveQueueSurface
         this.runtime = runtime;
         receiveFactory = options.ReceiveQueueFactory;
         Messages = new AggregateReader(() => snapshot, wake, completion.Task);
-        if (options.SendQueueFactory is { } factory)
-        {
-            outbound = factory.Create(static message => message.Dispose());
-            runtime.TrackBackground(SendPumpAsync(runtime.LifetimeToken));
-        }
+        if (options.SendQueueFactory is not { } factory) return;
+
+        outbound = factory.Create(static message => message.Dispose());
+        runtime.TrackBackground(SendPumpAsync(runtime.LifetimeToken));
     }
 
     public void Add(PeerRecord record)

@@ -30,11 +30,11 @@ public sealed class MultipartSendTests
         // byte[][] binds the IEnumerable<byte[]> overload directly.
         byte[][] frames =
         [
-            "identity"u8.ToArray(),
-            "hmac"u8.ToArray(),
-            "header"u8.ToArray(),
-            "parent"u8.ToArray(),
-            "content"u8.ToArray(),
+            [.. "identity"u8],
+            [.. "hmac"u8],
+            [.. "header"u8],
+            [.. "parent"u8],
+            [.. "content"u8]
         ];
         await dealer.SendAsync(frames, token);
 
@@ -75,8 +75,8 @@ public sealed class MultipartSendTests
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
         Assert.NotNull(message);
-        Assert.Single(message.Value);
-        Assert.Equal([.. "abcdef"u8], message.Value[0].ToSequence().ToArray());
+        var frame = Assert.Single(message.Value);
+        Assert.Equal([.. "abcdef"u8], frame.ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -89,14 +89,14 @@ public sealed class MultipartSendTests
         var port = InteropHelpers.GetFreePort();
         await rep.BindAsync($"tcp://127.0.0.1:{port}", token);
 
-        rep.BindRequestHandler((context, replyToken) => rep.SendReplyAsync(context, [new ReadOnlyMemory<byte>("reply"u8.ToArray())], replyToken));
+        rep.BindRequestHandler((context, replyToken) => rep.SendReplyAsync(context, [new ReadOnlyMemory<byte>([.. "reply"u8])], replyToken));
 
         await req.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         ReadOnlyMemory<byte>[] request =
         [
-            "part-1"u8.ToArray(),
-            "part-2"u8.ToArray(),
+            (byte[])[.. "part-1"u8],
+            (byte[])[.. "part-2"u8]
         ];
         var reply = await req.RequestAsync(request, token);
 

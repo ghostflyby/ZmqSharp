@@ -90,9 +90,9 @@ public sealed class ZQueueFactoryTests
         Assert.True(channel.Writer.TryWrite(Item()));
         Assert.True(channel.Writer.TryWrite(Item(2)));
 
-        Assert.Single(dropped);
-        Assert.Equal([2], dropped[0][0].ToSequence().ToArray());
-        dropped[0].Dispose();
+        var droppedMessage = Assert.Single(dropped);
+        Assert.Equal([2], droppedMessage[0].ToSequence().ToArray());
+        droppedMessage.Dispose();
     }
 
     [Fact]

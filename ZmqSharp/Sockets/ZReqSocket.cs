@@ -11,7 +11,7 @@ namespace ZmqSharp;
 /// capabilities; reply intake is the consume arm of the composed inbound policy (the
 /// <see cref="ZReqCore"/>), so a <see cref="ZSocketOptions.MessageSink"/>
 /// consumer is never hijacked by the protocol. Sends go through
-/// <see cref="RequestAsync"/>; the generic base send path is unavailable.
+/// <see cref="RequestAsync(ZMessage, System.Threading.CancellationToken)"/>; the generic base send path is unavailable.
 /// </summary>
 public sealed class ZReqSocket : ZSocketBase
 {

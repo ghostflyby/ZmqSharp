@@ -43,8 +43,8 @@ public sealed class ZmtpFrameEncoderTests
         var recorder = new FrameRecorder();
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        Assert.Single(recorder.Frames);
-        Assert.Equal(payload, recorder.Frames[0]);
+        var frame = Assert.Single(recorder.Frames);
+        Assert.Equal(payload, frame);
     }
 
     [Fact]
@@ -60,8 +60,8 @@ public sealed class ZmtpFrameEncoderTests
         var recorder = new FrameRecorder();
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        Assert.Single(recorder.Frames);
-        Assert.Equal([.. "hello!"u8], recorder.Frames[0]);
+        var frame = Assert.Single(recorder.Frames);
+        Assert.Equal([.. "hello!"u8], frame);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class ZmtpFrameEncoderTests
         await encoder.WriteCommandAsync(longBody, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, sink.Writes.Count);
-        Assert.Equal(ZmtpTestData.Frame("READY"u8.ToArray(), command: true),
+        Assert.Equal(ZmtpTestData.Frame([.. "READY"u8], command: true),
             sink.Writes[0].SelectMany(segment => segment.ToArray()));
         Assert.Equal(ZmtpTestData.Frame(longBody, command: true),
             sink.Writes[1].SelectMany(segment => segment.ToArray()));
@@ -101,7 +101,7 @@ public sealed class ZmtpFrameEncoderTests
             ([.. "AAA"u8], true),
             ([.. "BBBB"u8], true),
             ([.. "C"u8], true),
-            ([.. "DDDDDDD"u8], false),
+            ([.. "DDDDDDD"u8], false)
         };
 
         // Each write concatenates to the exact wire frame (header + payload).
@@ -130,11 +130,11 @@ public sealed class ZmtpFrameEncoderTests
 
         // One write per frame, one segment per original segment, with the
         // 2-byte short header first and the original MORE-less flags.
-        Assert.Single(sink.Writes);
-        Assert.Equal(4, sink.Writes[0].Length);
-        Assert.Equal([0x00, 0x06], sink.Writes[0][0].ToArray());
-        Assert.Equal([.. "hel"u8], sink.Writes[0][1].ToArray());
-        Assert.Equal([.. "lo"u8], sink.Writes[0][2].ToArray());
-        Assert.Equal([.. "!"u8], sink.Writes[0][3].ToArray());
+        var write = Assert.Single(sink.Writes);
+        Assert.Equal(4, write.Length);
+        Assert.Equal([0x00, 0x06], write[0].ToArray());
+        Assert.Equal([.. "hel"u8], write[1].ToArray());
+        Assert.Equal([.. "lo"u8], write[2].ToArray());
+        Assert.Equal([.. "!"u8], write[3].ToArray());
     }
 }

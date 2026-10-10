@@ -158,7 +158,7 @@ public sealed class ZmtpHandshakeTests
     [Fact]
     public async Task CommandName_Truncated_Throws()
     {
-        await AssertHandshakeCommandRejectedAsync([10, (byte)'R', (byte)'E']);
+        await AssertHandshakeCommandRejectedAsync([10, .. "RE"u8]);
     }
 
     [Fact]

@@ -130,7 +130,7 @@ public sealed class RouterIdentityConnectionOrderTests
         await first.ConnectAsync($"tcp://127.0.0.1:{port}", token);
 
         await using var second = new ZDealerSocket(new ZSocketOptions { Identity = identity });
-        await Record.ExceptionAsync(async () => await second.ConnectAsync($"tcp://127.0.0.1:{port}", token));
+        _ = await Record.ExceptionAsync(() => second.ConnectAsync($"tcp://127.0.0.1:{port}", token));
 
         var failure = await rejected.Task.WaitAsync(token);
         Assert.IsType<ZeroMqProtocolException>(failure);

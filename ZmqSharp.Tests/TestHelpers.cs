@@ -245,12 +245,11 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref disposed, 1) == 0)
-            {
-                Interlocked.Decrement(ref pool.outstanding);
-                pool.OnReleased();
-                inner.Dispose();
-            }
+            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+
+            Interlocked.Decrement(ref pool.outstanding);
+            pool.OnReleased();
+            inner.Dispose();
         }
     }
 }

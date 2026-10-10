@@ -148,8 +148,7 @@ public sealed class ZReceiveOptionsTests
         var options = new ZSocketOptions();
 
         var policy = options.ReceivePolicy;
-        Assert.IsType<ZReceiveOptions>(policy);
-        var receiveOptions = (ZReceiveOptions)policy;
+        var receiveOptions = Assert.IsType<ZReceiveOptions>(policy);
         Assert.Equal(ZReceiveMode.Pooled, receiveOptions.Mode);
         Assert.Equal(85_000, receiveOptions.ContiguousFrameLimit);
 

@@ -54,9 +54,8 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     {
         if (MemoryMarshal.TryGetArray(memory, out var segment) && segment.Array is { } array)
             return new ZSegment(array, segment.Offset, segment.Count, true);
-        if (MemoryMarshal.TryGetMemoryManager<byte, MemoryManager<byte>>(memory, out var manager, out var start, out var length)
-            && manager is { } source)
-            return new ZSegment(source, start, length, true);
+        if (MemoryMarshal.TryGetMemoryManager<byte, MemoryManager<byte>>(memory, out var manager, out var start, out var length))
+            return new ZSegment(manager, start, length, true);
         return new ZSegment(new BorrowedMemory(memory), 0, memory.Length, true);
     }
 
@@ -72,16 +71,10 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     }
 
     /// <summary>Writable view, used by the parser to fill the buffer during materialization.</summary>
-    internal Memory<byte> Writable
-    {
-        get
-        {
-            if (owner is BorrowedMemory)
-                throw new InvalidOperationException("a borrowed view segment has no writable view");
-
-            return Reacquire().Slice(offset, length);
-        }
-    }
+    internal Memory<byte> Writable =>
+        owner is BorrowedMemory
+            ? throw new InvalidOperationException("a borrowed view segment has no writable view")
+            : Reacquire().Slice(offset, length);
 
     /// <summary>True when the segment is owned (backed by a caller byte[]).</summary>
     public bool IsOwned => !IsBorrowed && owner is byte[];

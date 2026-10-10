@@ -112,15 +112,12 @@ internal sealed class AllocationFakeConnection : IZConnection
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
-        if (handshakePosition < Handshake.Length)
-        {
-            var count = Math.Min(buffer.Length, Handshake.Length - handshakePosition);
-            Handshake.AsSpan(handshakePosition, count).CopyTo(buffer.Span);
-            handshakePosition += count;
-            return ValueTask.FromResult(count);
-        }
+        if (handshakePosition >= Handshake.Length) return ReadInboundAsync(buffer, token);
 
-        return ReadInboundAsync(buffer, token);
+        var count = Math.Min(buffer.Length, Handshake.Length - handshakePosition);
+        Handshake.AsSpan(handshakePosition, count).CopyTo(buffer.Span);
+        handshakePosition += count;
+        return ValueTask.FromResult(count);
     }
 
     private async ValueTask<int> ReadInboundAsync(Memory<byte> buffer, CancellationToken token)

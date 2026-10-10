@@ -104,7 +104,7 @@ public sealed class ZPlainMechanism : IZSecurityMechanism
                 throw new ZMechanismException("HELLO is missing Username or Password");
             }
 
-            if (authenticator is not { } authenticate || !authenticate(user, peerPassword))
+            if (authenticator is null || !authenticator(user, peerPassword))
             {
                 await context.WriteCommandAsync(ZmtpCommands.BuildError(RejectionReason), token);
                 throw new ZMechanismException(RejectionReason);
@@ -149,9 +149,8 @@ public sealed class ZPlainMechanism : IZSecurityMechanism
         /// <summary>HELLO contains length-prefixed credentials, not metadata properties.</summary>
         private byte[] BuildHello()
         {
-            var user = Encoding.UTF8.GetBytes(username is { } name
-                ? name
-                : throw new InvalidOperationException("a PLAIN client requires fixed credentials"));
+            var user = Encoding.UTF8.GetBytes(username
+                ?? throw new InvalidOperationException("a PLAIN client requires fixed credentials"));
             var body = new byte[8 + user.Length + password.Length];
             body[0] = 5;
             "HELLO"u8.CopyTo(body.AsSpan(1));

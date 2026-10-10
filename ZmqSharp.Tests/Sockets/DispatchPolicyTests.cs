@@ -87,7 +87,7 @@ public sealed class DispatchPolicyTests
         var b = new ZPeer();
         ZPeer[] peers = [a, b];
         var message = ZMessage.FromOwned([.. "x"u8]);
-        ZPeer[] targets = new ZPeer[peers.Length];
+        var targets = new ZPeer[peers.Length];
 
         var count = policy.SelectTargets(message, peers, targets);
 
@@ -111,20 +111,22 @@ public sealed class DispatchPolicyTests
     public void Identity_GenericSendPath_Throws()
     {
         var policy = new ZIdentityDispatch();
-        var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
 
-        var ex = Assert.Throws<InvalidOperationException>(act);
+        var ex = Assert.Throws<InvalidOperationException>(Act);
         Assert.Contains("SendAsync(identity, message)", ex.Message);
+
+        ZPeer? Act() => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
     }
 
     [Fact]
     public void CurrentPeer_GenericSendPath_Throws()
     {
         var policy = new ZCurrentPeerDispatch();
-        var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
 
-        var ex = Assert.Throws<InvalidOperationException>(act);
+        var ex = Assert.Throws<InvalidOperationException>(Act);
         Assert.Contains("RequestAsync", ex.Message);
+
+        ZPeer? Act() => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
     }
 
     [Fact]

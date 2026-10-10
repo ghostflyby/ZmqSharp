@@ -50,7 +50,7 @@ public static class ZmtpCommandCodec
     /// (RFC 23 / 0015 section 2.4). The value is not validated against the
     /// built-in names: custom socket types interoperate between ZmqSharp
     /// endpoints (0015 section 2.3), so an unknown name is accepted here and
-    /// decided by the local socket's <see cref="ZSocketType.AcceptsPeer"/>
+    /// decided by the local socket's <see cref="ZmqSharp.Patterns.ZSocketType.AcceptsPeer"/>
     /// predicate at connection time.
     /// </summary>
     public static string ParseReadySocketType(ReadOnlySpan<byte> metadata)
@@ -103,13 +103,12 @@ public static class ZmtpCommandCodec
             var nameString = Encoding.ASCII.GetString(name);
             var value = metadata.Slice(offset, valueLength);
             offset += valueLength;
-            if (nameString == "Identity")
-            {
-                if (found) throw new ZeroMqProtocolException("duplicate metadata property 'Identity'");
+            if (nameString != "Identity") continue;
 
-                found = true;
-                identity = value;
-            }
+            if (found) throw new ZeroMqProtocolException("duplicate metadata property 'Identity'");
+
+            found = true;
+            identity = value;
         }
 
         // Note: no ternary here - `null` would take the byte[] arm of the

@@ -20,13 +20,13 @@ internal sealed class ReceiveMaterializer(
     {
         return (length, more) =>
         {
-            var frameIndex = this.frameIndex;
+            var index = this.frameIndex;
             if (!ZReceiveGuard.TryAccumulate(accumulatedLength, length, out var accumulated))
                 // An unrepresentable message total is a rejection, never an
                 // arithmetic exception (0008 D3/D6).
                 Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
 
-            this.frameIndex = frameIndex + 1;
+            this.frameIndex = index + 1;
             accumulatedLength = accumulated;
 
             // Connection-level limits are enforced here, before any allocation,
@@ -34,7 +34,7 @@ internal sealed class ReceiveMaterializer(
             if (ZReceiveGuard.CheckLimits(
                     length,
                     accumulated,
-                    frameIndex,
+                    index,
                     maxFrameLength,
                     maxMessageLength,
                     maxFramesPerMessage) is { } rejection)
@@ -44,7 +44,7 @@ internal sealed class ReceiveMaterializer(
             {
                 FrameLength = length,
                 HasMore = more,
-                FrameIndex = frameIndex,
+                FrameIndex = index,
                 AccumulatedLength = accumulated
             });
             return AllocateSegments(allocation, length, more);
@@ -69,16 +69,11 @@ internal sealed class ReceiveMaterializer(
         Reject(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
     }
 
-    private (object Owner, int Length) Allocate(ZReceiveMode mode, int length)
+    private object Allocate(ZReceiveMode mode, int length)
     {
-        if (mode == ZReceiveMode.Owned)
-        {
-            var buffer = GC.AllocateUninitializedArray<byte>(length);
-            return (buffer, length);
-        }
-
-        var owner = pool.Rent(length);
-        return (owner, length);
+        return mode == ZReceiveMode.Owned
+            ? GC.AllocateUninitializedArray<byte>(length)
+            : pool.Rent(length);
     }
 
     private ZFrame AllocateSegments(
@@ -97,7 +92,7 @@ internal sealed class ReceiveMaterializer(
                 for (; allocated < count; allocated++)
                 {
                     var blockLength = Math.Min(SegmentBlockSize, length - offset);
-                    var (owner, _) = Allocate(allocation.Mode, blockLength);
+                    var owner = Allocate(allocation.Mode, blockLength);
                     segments[allocated] = new ZSegment(owner, 0, blockLength);
                     offset += blockLength;
                 }
@@ -111,7 +106,7 @@ internal sealed class ReceiveMaterializer(
             return new ZFrame(new ZSegments(segments), more);
         }
 
-        var (singleOwner, _) = Allocate(allocation.Mode, length);
+        var singleOwner = Allocate(allocation.Mode, length);
         return new ZFrame(new ZSegment(singleOwner, 0, length), more);
     }
 }

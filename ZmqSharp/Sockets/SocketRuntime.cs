@@ -87,16 +87,16 @@ internal sealed class SocketRuntime : IZSocket
     private readonly int maxIncompleteHandshakes;
     private int incompleteHandshakes;
     private ZFrameHandler? onFrame;
-    private IPatternSink? messageSink;
+    private readonly IPatternSink? messageSink;
     private Action<ZPeer>? peerConnected;
     private Action<ZPeer, Exception?>? peerEnded;
 
     // Receive materialization (0007 2.1): allocation policy and the 0008 guard
     // limits, applied per connection by a ReceiveMaterializer.
-    private IZReceivePolicy? receivePolicy;
-    private long maxFrameLength = long.MaxValue;
-    private long maxMessageLength = long.MaxValue;
-    private int maxFramesPerMessage = int.MaxValue;
+    private readonly IZReceivePolicy? receivePolicy;
+    private readonly long maxFrameLength = long.MaxValue;
+    private readonly long maxMessageLength = long.MaxValue;
+    private readonly int maxFramesPerMessage = int.MaxValue;
     private long receiveRejections;
 
     /// <summary>
@@ -141,14 +141,14 @@ internal sealed class SocketRuntime : IZSocket
         localReadyBody = ZmtpCommands.BuildReady(
             type.Name,
             type.AdvertisesIdentity ? options.Identity : ReadOnlyMemory<byte>.Empty);
-        if (supportsQueue && options.MessageSink is null && options.ReceiveSurface == ZReceiveSurface.Queue)
-        {
-            receivePolicy = options.ReceivePolicy;
-            maxFrameLength = options.MaxFrameLength;
-            maxMessageLength = options.MaxMessageLength;
-            maxFramesPerMessage = options.MaxFramesPerMessage;
-            QueueSurface = new ReceiveQueueSurface(this, options);
-        }
+        if (!supportsQueue || options.MessageSink is not null || options.ReceiveSurface != ZReceiveSurface.Queue)
+            return;
+
+        receivePolicy = options.ReceivePolicy;
+        maxFrameLength = options.MaxFrameLength;
+        maxMessageLength = options.MaxMessageLength;
+        maxFramesPerMessage = options.MaxFramesPerMessage;
+        QueueSurface = new ReceiveQueueSurface(this, options);
     }
 
     internal event Action<ZPeer, ReadOnlyMemory<byte>?>? PeerEstablished;
@@ -535,14 +535,14 @@ internal sealed class SocketRuntime : IZSocket
 
     private async ValueTask SendToTargetsAsync(ZMessage message, CancellationToken token)
     {
-        var peers = peerSnapshot;
+        var snapshot = peerSnapshot;
         // The policy may select up to every peer; the target buffer is rented
         // so the steady-state path stays GC-allocation-free (ArrayPool reuses
         // the array, 0006 3.6).
-        var targets = ArrayPool<ZPeer>.Shared.Rent(peers.Length);
+        var targets = ArrayPool<ZPeer>.Shared.Rent(snapshot.Length);
         try
         {
-            var count = dispatch.SelectTargets(message, peers, targets.AsSpan(0, peers.Length));
+            var count = dispatch.SelectTargets(message, snapshot, targets.AsSpan(0, snapshot.Length));
             for (var i = 0; i < count; i++) await SendToPeerAsync(targets[i], message, token);
         }
         finally
@@ -635,8 +635,8 @@ internal sealed class SocketRuntime : IZSocket
             if (record.Session is not { } session) throw new IOException("peer has no established session");
             await session.SendAsync(message, token);
         }
-        catch (Exception ex) when (suppressRetirement && ex is (ObjectDisposedException or IOException or SocketException)) { }
-        catch (OperationCanceledException) when (suppressRetirement && record is { } stopped && stopped.Registration.Token.IsCancellationRequested) { }
+        catch (Exception ex) when (suppressRetirement && ex is ObjectDisposedException or IOException or SocketException) { }
+        catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
         {
             // Owned background sends release their message before teardown can dispose the session.
@@ -646,11 +646,11 @@ internal sealed class SocketRuntime : IZSocket
             }
             finally
             {
-                if (leased && record is { } active)
+                if (leased && record is not null)
                     lock (StateLock)
                     {
-                        active.ActiveSends--;
-                        if (active.ActiveSends == 0) active.SendsDrained?.TrySetResult();
+                        record.ActiveSends--;
+                        if (record.ActiveSends == 0) record.SendsDrained?.TrySetResult();
                     }
             }
         }
@@ -689,8 +689,8 @@ internal sealed class SocketRuntime : IZSocket
                 var registration = new ZEndpointRegistration(connection, endpoint, transport, address, LifetimeToken, token,
                     connection.Abort);
                 record = new PeerRecord(connection, registration, accepted);
-                if (receivePolicy is { } policy)
-                    record.Materializer = new ReceiveMaterializer(Pool, policy, maxFrameLength, maxMessageLength,
+                if (receivePolicy is not null)
+                    record.Materializer = new ReceiveMaterializer(Pool, receivePolicy, maxFrameLength, maxMessageLength,
                         maxFramesPerMessage, OnMaterializerRejected);
                 peers.Add(record.Peer, record);
                 if (accepted) incompleteHandshakes++;
@@ -727,7 +727,7 @@ internal sealed class SocketRuntime : IZSocket
             using var handshake = new ZmtpHandshake(record.Connection, mechanism, localReadyBody, maxCommandSize, Pool);
             var result = await EstablishWithTimeoutAsync(handshake, record);
             if (result is not { } established) throw new IOException("peer closed during ZMTP handshake");
-            record.Session = new ZmtpSession(record.Connection, established.Codec, failure => RetirePeer(record.Peer, failure));
+            record.Session = new ZmtpSession(record.Connection, established.Codec, fault => RetirePeer(record.Peer, fault));
             var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
             if (!type.AcceptsPeer(peerType))
             {
@@ -771,8 +771,9 @@ internal sealed class SocketRuntime : IZSocket
                 failure ??= record.Failure;
                 MarkStopping(record);
                 if (record.HandshakeCounted) incompleteHandshakes--;
-                if (record.ActiveSends == 0) sends = Task.CompletedTask;
-                else sends = (record.SendsDrained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                sends = record.ActiveSends == 0
+                    ? Task.CompletedTask
+                    : (record.SendsDrained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
             }
 
             record.Registration.RequestStop();
@@ -906,9 +907,9 @@ internal sealed class SocketRuntime : IZSocket
             return true;
 
         var toDeliver = decision.Message ?? message;
-        if (QueueSurface is { } queue)
+        if (QueueSurface is not null)
         {
-            await queue.DeliverAsync(record, toDeliver, token);
+            await QueueSurface.DeliverAsync(record, toDeliver, token);
             return true;
         }
 
@@ -925,11 +926,9 @@ internal sealed class SocketRuntime : IZSocket
     }
 
     private static ZMessage BuildMessage(List<ZFrame> frames)
-    {
-        if (frames.Count == 1) return new ZMessage(new ZSingleMessage(frames[0]));
-
-        return new ZMessage(new ZMultiMessage([.. frames]));
-    }
+        => frames.Count == 1
+            ? new ZMessage(new ZSingleMessage(frames[0]))
+            : new ZMessage(new ZMultiMessage([.. frames]));
 
     /// <summary>Publishes termination after internal cleanup; never participates in cleanup.</summary>
     private void RaisePeerEnded(ZPeer connection, Exception? failure)

@@ -32,7 +32,7 @@ public sealed class PlainWireContractTests
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "s3cret"u8) },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
         var token = TestContext.Current.CancellationToken;
         var port = GetFreePort();
@@ -85,7 +85,7 @@ public sealed class PlainWireContractTests
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("s3cret"u8))
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
         var token = TestContext.Current.CancellationToken;
         var port = GetFreePort();
@@ -136,7 +136,7 @@ public sealed class PlainWireContractTests
                 Mechanism = new ZPlainMechanism((user, pass) =>
                     user == "alice" && pass.SequenceEqual("s3cret"u8))
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
         var token = TestContext.Current.CancellationToken;
         var port = GetFreePort();

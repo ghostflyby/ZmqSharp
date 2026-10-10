@@ -94,8 +94,8 @@ public sealed class PushPullInteropTests
 
         Assert.Equal(4, turnsA.Count);
         Assert.Equal(4, turnsB.Count);
-        Assert.All(turnsA, turn => Assert.True(int.Parse(turn.Substring(5)) % 2 == 0, $"Expected '{turn}' to carry an even turn index."));
-        Assert.All(turnsB, turn => Assert.True(int.Parse(turn.Substring(5)) % 2 == 1, $"Expected '{turn}' to carry an odd turn index."));
+        Assert.All(turnsA, turn => Assert.True(int.Parse(turn[5..]) % 2 == 0, $"Expected '{turn}' to carry an even turn index."));
+        Assert.All(turnsB, turn => Assert.True(int.Parse(turn[5..]) % 2 == 1, $"Expected '{turn}' to carry an odd turn index."));
     }
 
     private static IEnumerable<string> DrainAvailable(PullSocket pull)
