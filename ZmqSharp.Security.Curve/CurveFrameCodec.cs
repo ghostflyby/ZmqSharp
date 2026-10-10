@@ -10,8 +10,8 @@ public sealed class CurveFrameCodec : IZFrameCodec
 {
     private readonly ICurveCryptoBackend crypto;
     private Key32 key;
-    private readonly byte[] encodePrefix;
-    private readonly byte[] decodePrefix;
+    private readonly bool encodeServerToClient;
+    private readonly bool decodeServerToClient;
     private byte[]? seal;
     private byte[]? plain;
     private byte[]? gathered;
@@ -20,13 +20,13 @@ public sealed class CurveFrameCodec : IZFrameCodec
     private bool disposed;
 
     internal CurveFrameCodec(ICurveCryptoBackend crypto, Key32 key,
-        ReadOnlyMemory<byte> encodePrefix, ReadOnlyMemory<byte> decodePrefix,
+        bool encodeServerToClient, bool decodeServerToClient,
         ulong encodeNonce, ulong decodeNonce)
     {
         this.crypto = crypto;
         this.key = key;
-        this.encodePrefix = encodePrefix.ToArray();
-        this.decodePrefix = decodePrefix.ToArray();
+        this.encodeServerToClient = encodeServerToClient;
+        this.decodeServerToClient = decodeServerToClient;
         this.encodeNonce = encodeNonce;
         this.decodeNonce = decodeNonce;
     }
@@ -50,6 +50,9 @@ public sealed class CurveFrameCodec : IZFrameCodec
         box[16] = (byte)logicalFrame.Flags;
         logicalFrame.Body.CopyTo(box[17..]);
         Span<byte> nonce = stackalloc byte[24];
+        var encodePrefix = encodeServerToClient
+            ? CurveConstants.MessagePrefixServerToClient
+            : CurveConstants.MessagePrefixClientToServer;
         encodePrefix.CopyTo(nonce);
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], encodeNonce++);
         crypto.SecretBox(box[16..], nonce, key.Span, box);
@@ -75,6 +78,9 @@ public sealed class CurveFrameCodec : IZFrameCodec
         var tail = BinaryPrimitives.ReadUInt64BigEndian(body[8..16]);
         if (tail <= decodeNonce) throw new ZeroMqProtocolException("CURVE frame nonce is not increasing (replay?)");
         Span<byte> nonce = stackalloc byte[24];
+        var decodePrefix = decodeServerToClient
+            ? CurveConstants.MessagePrefixServerToClient
+            : CurveConstants.MessagePrefixClientToServer;
         decodePrefix.CopyTo(nonce);
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], tail);
         var plaintextLength = length - 32;
@@ -113,7 +119,5 @@ public sealed class CurveFrameCodec : IZFrameCodec
         Return(plain);
         Return(gathered);
         seal = plain = gathered = null;
-        CryptographicOperations.ZeroMemory(encodePrefix);
-        CryptographicOperations.ZeroMemory(decodePrefix);
     }
 }
