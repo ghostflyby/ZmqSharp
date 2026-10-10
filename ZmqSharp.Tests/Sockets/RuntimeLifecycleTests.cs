@@ -222,6 +222,10 @@ public sealed class RuntimeLifecycleTests
         }
     }
 
+    // Connect-only phantom: the type carries its static ConnectAsync factory
+    // and satisfies the IZTransport CRTP constraint; BindAsync throws, so no
+    // instance can ever exist.
+    // ReSharper disable once ClassNeverInstantiated.Local
     private sealed class ClosingTransport : IZTransport<ClosingTransport, ClosingEndpoint>
     {
         public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
@@ -297,6 +301,10 @@ public sealed class RuntimeLifecycleTests
         }
     }
 
+    // Connect-only phantom: the type carries its static ConnectAsync factory
+    // and satisfies the IZTransport CRTP constraint; BindAsync throws, so no
+    // instance can ever exist.
+    // ReSharper disable once ClassNeverInstantiated.Local
     private sealed class ByteTransport : IZTransport<ByteTransport, ByteEndpoint>
     {
         public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
