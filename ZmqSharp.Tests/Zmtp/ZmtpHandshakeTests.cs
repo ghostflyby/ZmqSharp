@@ -16,7 +16,7 @@ namespace ZmqSharp.Tests.Zmtp;
 /// </summary>
 public sealed class ZmtpHandshakeTests
 {
-    private const int MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
+    private const long MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
 
     private static ReadOnlySpan<byte> ReadyName => "READY"u8;
 

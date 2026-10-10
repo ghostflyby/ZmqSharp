@@ -20,14 +20,14 @@ internal sealed class ZmtpHandshake : IDisposable
     private readonly IZConnection connection;
     private readonly IZSecurityMechanism mechanism;
     private readonly ReadOnlyMemory<byte> localReadyBody;
-    private readonly int maxCommandSize;
+    private readonly long maxCommandSize;
     private readonly MemoryPool<byte> pool;
 
     internal ZmtpHandshake(
         IZConnection connection,
         IZSecurityMechanism mechanism,
         ReadOnlyMemory<byte> localReadyBody,
-        int maxCommandSize,
+        long maxCommandSize,
         MemoryPool<byte>? pool = null)
     {
         ArgumentNullException.ThrowIfNull(connection);

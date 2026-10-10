@@ -77,7 +77,7 @@ internal sealed class SocketRuntime : IZSocket
     private readonly List<ZEndpointRegistration> listeners = [];
     private readonly ConcurrentQueue<ZmtpParser> paused = [];
 
-    private readonly int maxCommandSize;
+    private readonly long maxCommandSize;
     private readonly IZDispatchPolicy dispatch;
     private readonly ZSocketType type;
     private IZInboundPolicy inbound;

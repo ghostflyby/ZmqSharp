@@ -11,7 +11,7 @@ public sealed class ZSocketOptions
     /// Lowest configurable command-size limit: prevents disabling the limit
     /// entirely (0008 Slice B completion gate).
     /// </summary>
-    public const int MinMaxCommandSize = 256;
+    public const long MinMaxCommandSize = 256;
 
     /// <summary>
     /// Memory pool used for the send copy path; defaults to the shared pool.
@@ -45,10 +45,13 @@ public sealed class ZSocketOptions
 
     /// <summary>
     /// Maximum accepted ZMTP command-frame size; a larger command rejects the
-    /// connection (0006 3.2, 0008 Slice B). Defaults to 1 MiB and cannot be
-    /// lowered below <see cref="MinMaxCommandSize"/>.
+    /// connection (0006 3.2, 0008 Slice B). The wire size is 64-bit, so the
+    /// limit is long and may exceed <c>int.MaxValue</c>; sizes beyond that are
+    /// still rejected because the parser allocates int-sized buffers.
+    /// Defaults to 1 MiB and cannot be lowered below
+    /// <see cref="MinMaxCommandSize"/>.
     /// </summary>
-    public int MaxCommandSize
+    public long MaxCommandSize
     {
         get;
         init
