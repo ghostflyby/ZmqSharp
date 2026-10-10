@@ -13,7 +13,7 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
     public IZFrameCodec? Codec => codec;
 
     internal ZmtpParser CreateParser(ZFrameHandlerAsync handler, ZFrameAllocator? allocator,
-        MemoryPool<byte> pool, int maxCommandSize, long maxFrameLength)
+        MemoryPool<byte> pool, long maxCommandSize, long maxFrameLength)
     {
         if (parser is not null) throw new InvalidOperationException("a session has one receive parser");
         parser = new ZmtpParser(connection, handler, allocator, pool, maxCommandSize, codec, maxFrameLength);

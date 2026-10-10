@@ -26,7 +26,7 @@ public sealed class ZMechanismContext : IDisposable
     internal ZMechanismContext(
         IZConnection connection,
         ReadOnlyMemory<byte> localReadyBody,
-        int maxCommandSize,
+        long maxCommandSize,
         MemoryPool<byte>? pool = null)
     {
         reader = connection;
@@ -44,7 +44,7 @@ public sealed class ZMechanismContext : IDisposable
     public ReadOnlyMemory<byte> LocalReadyBody { get; }
 
     /// <summary>Command-frame size limit shared with the traffic parser (0008 Slice B).</summary>
-    public int MaxCommandSize { get; }
+    public long MaxCommandSize { get; }
 
     /// <summary>Writes one command frame (header + body) during the exclusive handshake phase.</summary>
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
@@ -79,12 +79,11 @@ public sealed class ZMechanismContext : IDisposable
             ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
             : headerBuffer[1];
         if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
-        // Checked before the configured bound: MaxCommandSize is an int, so this
-        // wire-level guard must run first to stay reachable; it protects the
-        // narrowing cast below.
-        if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
         if (size > MaxCommandSize)
             throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
+        // The wire size and the configured bound are both long, so this guard
+        // is live for limits above 2 GB; it protects the narrowing cast below.
+        if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
         var length = (int)size;
         EnsureScratchCapacity(length);

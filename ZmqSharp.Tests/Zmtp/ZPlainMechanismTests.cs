@@ -18,7 +18,7 @@ namespace ZmqSharp.Tests.Zmtp;
 /// </summary>
 public sealed class ZPlainMechanismTests
 {
-    private const int MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
+    private const long MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
 
     [Fact]
     public async Task Client_CompletesHandshake_WithWelcomeThenReady()

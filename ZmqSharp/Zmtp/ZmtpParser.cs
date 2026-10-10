@@ -22,7 +22,7 @@ public sealed class ZmtpParser : IDisposable
     private const int ScratchShrinkThreshold = 1 << 20;
 
     /// <summary>Default command-size limit (0008 Slice B).</summary>
-    public const int DefaultMaxCommandSize = 1 << 20;
+    public const long DefaultMaxCommandSize = 1L << 20;
 
     private readonly IZByteReader reader;
     private readonly ZFrameHandlerAsync onFrame;
@@ -30,7 +30,7 @@ public sealed class ZmtpParser : IDisposable
     private readonly long maxEncodedLength;
     private readonly MemoryPool<byte> pool;
     private readonly ZFrameAllocator? allocator;
-    private readonly int maxCommandSize;
+    private readonly long maxCommandSize;
     private readonly byte[] headerBuffer = new byte[9];
 
     private IMemoryOwner<byte>? scratchOwner;
@@ -51,7 +51,7 @@ public sealed class ZmtpParser : IDisposable
 
     internal ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
         ZFrameAllocator? allocator, MemoryPool<byte> pool,
-        int maxCommandSize = DefaultMaxCommandSize, IZFrameCodec? codec = null,
+        long maxCommandSize = DefaultMaxCommandSize, IZFrameCodec? codec = null,
         long maxFrameLength = int.MaxValue)
     {
         ArgumentNullException.ThrowIfNull(reader);
