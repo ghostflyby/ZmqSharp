@@ -56,6 +56,7 @@ public sealed class ReqRepInteropTests
         rep.BindRequestHandler((context, replyToken) =>
         {
             var payload = context[0].ToSequence().ToArray();
+            // ReSharper disable once AccessToDisposedClosure
             return rep.SendReplyAsync(context, ZMessage.FromOwned(payload), replyToken);
         });
 

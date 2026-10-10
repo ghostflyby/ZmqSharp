@@ -91,6 +91,7 @@ public sealed class ReceiveComponentsTests
         var reclaiming = Task.Run(async () =>
         {
             await start.Task;
+            // ReSharper disable once AccessToDisposedClosure
             lock (runtime.StateLock)
             {
                 record.Phase = PeerPhase.Stopping;
