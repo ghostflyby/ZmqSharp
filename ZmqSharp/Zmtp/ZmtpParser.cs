@@ -25,7 +25,7 @@ public sealed class ZmtpParser : IDisposable
     public const long DefaultMaxCommandSize = 1L << 20;
 
     private readonly IZByteReader reader;
-    private readonly ZFrameHandlerAsync onFrame;
+    private readonly Func<ZmtpParser, ZFrame, CancellationToken, ValueTask<bool>> onFrame;
     private readonly IZFrameCodec? codec;
     private readonly long maxEncodedLength;
     private readonly MemoryPool<byte> pool;
@@ -47,9 +47,12 @@ public sealed class ZmtpParser : IDisposable
 
     public ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
         IZFrameCodec? codec = null, MemoryPool<byte>? pool = null)
-        : this(reader, onFrame, null, pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec) { }
+        : this(reader, (_, frame, token) => onFrame(frame, token), null,
+            pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec)
+    { }
 
-    internal ZmtpParser(IZByteReader reader, ZFrameHandlerAsync onFrame,
+    internal ZmtpParser(IZByteReader reader,
+        Func<ZmtpParser, ZFrame, CancellationToken, ValueTask<bool>> onFrame,
         ZFrameAllocator? allocator, MemoryPool<byte> pool,
         long maxCommandSize = DefaultMaxCommandSize, IZFrameCodec? codec = null,
         long maxFrameLength = int.MaxValue)
@@ -151,7 +154,7 @@ public sealed class ZmtpParser : IDisposable
                     else decodedFrame = new ZFrame(ZSegment.Borrowed(decoded.Body.First), decodedMore);
                 }
 
-                if (!await onFrame(decodedFrame, token)) await WaitForResumeAsync(token);
+                if (!await onFrame(this, decodedFrame, token)) await WaitForResumeAsync(token);
                 continue;
             }
 
@@ -197,7 +200,7 @@ public sealed class ZmtpParser : IDisposable
                     return;
                 }
 
-                if (!await onFrame(materialized, token)) await WaitForResumeAsync(token);
+                if (!await onFrame(this, materialized, token)) await WaitForResumeAsync(token);
                 continue;
             }
 
@@ -212,7 +215,7 @@ public sealed class ZmtpParser : IDisposable
                 throw new InvalidOperationException("borrowed frame without scratch owner");
 
             var frame = new ZFrame(ZSegment.Borrowed(source, scratchUsed, length), more);
-            var keepGoing = await onFrame(frame, token);
+            var keepGoing = await onFrame(this, frame, token);
             if (!keepGoing) await WaitForResumeAsync(token);
 
             // The borrowed frame must outlive the await; the scratch is

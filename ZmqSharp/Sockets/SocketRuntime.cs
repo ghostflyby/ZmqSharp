@@ -731,10 +731,12 @@ internal sealed class SocketRuntime : IZSocket
             }
 
             PeerEstablished?.Invoke(record.Peer, ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span));
-            ZFrameHandlerAsync handler = static (_, _) => ValueTask.FromResult(true);
-            var parser = record.Session.CreateParser((frame, ct) => handler(frame, ct),
+            var aggregate = NeedsAggregation;
+            var parser = record.Session.CreateParser(
+                (self, frame, ct) => aggregate
+                    ? OnMessageSinkFrameAsync(record, frame, ct)
+                    : OnBorrowedFrameAsync(self, frame, ct),
                 record.Materializer?.CreateAllocator(), Pool, maxCommandSize, maxFrameLength);
-            handler = NeedsAggregation ? MessageSinkHandler(record) : BorrowedSink(parser);
             lock (StateLock)
             {
                 if (record.Phase >= PeerPhase.Stopping) throw new OperationCanceledException(token);
@@ -828,15 +830,17 @@ internal sealed class SocketRuntime : IZSocket
     /// Default per-peer sink for the borrowed tier: invokes the raw OnFrame
     /// callback; a false return pauses this peer's pump until ResumePaused.
     /// </summary>
-    private ZFrameHandlerAsync BorrowedSink(ZmtpParser parser)
+    /// <summary>
+    /// Default per-peer sink for the borrowed tier: invokes the raw OnFrame
+    /// callback; a false return pauses this peer's pump until ResumePaused.
+    /// </summary>
+    private ValueTask<bool> OnBorrowedFrameAsync(
+        ZmtpParser parser, ZFrame frame, CancellationToken token)
     {
-        return (frame, token) =>
-        {
-            var keepGoing = RaiseOnFrame(frame, token);
-            if (!keepGoing) paused.Enqueue(parser);
+        var keepGoing = RaiseOnFrame(frame, token);
+        if (!keepGoing) paused.Enqueue(parser);
 
-            return ValueTask.FromResult(keepGoing);
-        };
+        return ValueTask.FromResult(keepGoing);
     }
 
     private bool RaiseOnFrame(ZFrame frame, CancellationToken token)
@@ -862,9 +866,6 @@ internal sealed class SocketRuntime : IZSocket
     /// accumulation path. The receive materializer's guard counters reset at
     /// each message boundary.
     /// </summary>
-    private ZFrameHandlerAsync MessageSinkHandler(PeerRecord record)
-        => (frame, token) => OnMessageSinkFrameAsync(record, frame, token);
-
     private async ValueTask<bool> OnMessageSinkFrameAsync(
         PeerRecord record,
         ZFrame frame,
