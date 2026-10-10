@@ -15,6 +15,12 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 {
     private readonly Lock gate = new();
     private readonly List<(int Threshold, TaskCompletionSource Tcs)> pending = [];
+
+    // Delivered count and write cursor; both guarded by gate. OnMessageAsync
+    // is the single writer (the pump thread) but still publishes under the
+    // lock, so every access is uniformly synchronized and the test thread
+    // reading Samples/ThreadIds after awaiting WaitForAsync sees them via the
+    // monitor's memory barrier.
     private int index;
     private long received;
 
@@ -23,9 +29,6 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 
     /// <summary>Thread id observed at each delivery, for diagnosing pump thread stability.</summary>
     public int[] ThreadIds { get; } = new int[capacity];
-
-    /// <summary>Messages delivered so far.</summary>
-    public int Count => (int)Volatile.Read(ref received);
 
     /// <summary>
     /// Real completion notification: completes when at least <paramref name="count"/>
@@ -36,7 +39,7 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
     {
         lock (gate)
         {
-            if (Volatile.Read(ref received) >= count) return Task.CompletedTask;
+            if (received >= count) return Task.CompletedTask;
 
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             pending.Add((count, tcs));
@@ -46,28 +49,33 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
 
     public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
     {
+        // Sample before touching the lock: the counters must measure only the
+        // library's per-message work, and the cursor is written by this pump
+        // thread alone.
         Samples[index] = GC.GetAllocatedBytesForCurrentThread();
         ThreadIds[index] = Environment.CurrentManagedThreadId;
-        index++;
-        Volatile.Write(ref received, index);
-        NotifyWaiters();
+
+        lock (gate)
+        {
+            index++;
+            received = index;
+            NotifyWaitersLocked();
+        }
+
         message.Dispose();
         return ValueTask.CompletedTask;
     }
 
-    private void NotifyWaiters()
+    /// <summary>Caller must hold <c>gate</c>.</summary>
+    private void NotifyWaitersLocked()
     {
-        lock (gate)
-        {
-            if (pending.Count == 0) return;
+        if (pending.Count == 0) return;
 
-            var delivered = Volatile.Read(ref received);
-            for (var i = pending.Count - 1; i >= 0; i--)
-                if (delivered >= pending[i].Threshold)
-                {
-                    pending[i].Tcs.TrySetResult();
-                    pending.RemoveAt(i);
-                }
-        }
+        for (var i = pending.Count - 1; i >= 0; i--)
+            if (received >= pending[i].Threshold)
+            {
+                pending[i].Tcs.TrySetResult();
+                pending.RemoveAt(i);
+            }
     }
 }
