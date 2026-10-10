@@ -41,6 +41,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="ZmqSharp.AllocationTests"/>
     <InternalsVisibleTo Include="ZmqSharp.Security.Curve.Tests"/>
+    <InternalsVisibleTo Include="Measure"/>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,21 +1,25 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using ZmqSharp;
 using ZmqSharp.Security.Curve;
 
 foreach (var ipc in (bool[])[false, true])
     foreach (var curve in (bool[])[false, true])
     {
-        var backend = new BouncyCastleCurveCrypto();
-        backend.GenerateKeyPair(out var pub, out var secret);
-        backend.GenerateKeyPair(out _, out var clientSecret);
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        var pub = new byte[32];
+        CurveCrypto.DerivePublicKey(secret, pub);
+        var clientSecret = new byte[32];
+        RandomNumberGenerator.Fill(clientSecret);
         var received = 0;
         var target = 0;
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ZPairSocket(new ZSocketOptions
         {
             ReceiveSurface = ZReceiveSurface.Callback,
-            Security = curve ? new ZSecurityOptions { Mechanism = new CurveMechanism(backend, secret) } : ZSecurityOptions.Null
+            Security = curve ? new ZSecurityOptions { Mechanism = new CurveMechanism(secret) } : ZSecurityOptions.Null
         });
         server.OnFrame += (frame, _) =>
         {
@@ -26,7 +30,7 @@ foreach (var ipc in (bool[])[false, true])
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             ReceiveSurface = ZReceiveSurface.Callback,
-            Security = curve ? new ZSecurityOptions { Mechanism = new CurveMechanism(backend, clientSecret, pub) } : ZSecurityOptions.Null
+            Security = curve ? new ZSecurityOptions { Mechanism = new CurveMechanism(clientSecret, pub) } : ZSecurityOptions.Null
         });
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();

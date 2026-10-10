@@ -34,20 +34,24 @@ using ZmqSharp.Security.Curve;
 
 // --- Curve package: loopback CURVE exchange over TCP. ---
 {
-    var crypto = new BouncyCastleCurveCrypto();
-    crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
-    crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
+    // RFC 7748 scalar-mult base vector: serverPublic is X25519(serverSecret).
+    var serverSecret = Convert.FromHexString(
+        "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    var serverPublic = Convert.FromHexString(
+        "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+    var clientSecret = Convert.FromHexString(
+        "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
 
     await using var server = new ZPairSocket(new ZSocketOptions
     {
-        Security = new ZSecurityOptions { Mechanism = new CurveMechanism(crypto, serverSecret) },
+        Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverSecret) },
         ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
     });
     await using var client = new ZPairSocket(new ZSocketOptions
     {
         Security = new ZSecurityOptions
         {
-            Mechanism = new CurveMechanism(crypto, clientSecret, serverPublic)
+            Mechanism = new CurveMechanism(clientSecret, serverPublic)
         },
         ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
     });
