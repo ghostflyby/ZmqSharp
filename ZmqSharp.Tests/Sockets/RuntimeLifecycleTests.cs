@@ -23,6 +23,7 @@ public sealed class RuntimeLifecycleTests
             Security = new ZSecurityOptions { Mechanism = new TestMechanism(codec) }
         }, new ZSinglePeerDispatch(), ZSocketTypes.Pair);
         var observed = false;
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
         runtime.PeerEnded += (peer, _) =>
         {
             Assert.Same(endpoint.Peer, peer);
