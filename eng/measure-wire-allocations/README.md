@@ -17,6 +17,4 @@ message, including both peers and BCL async I/O. Thread scheduling affects these
 numbers, so they are comparative evidence rather than a deterministic allocation
 gate. The allocation test project separately enforces library hot-path budgets.
 
-The external consumer validation workflow builds this project in Release and
-checks its formatting on Linux. It does not run these measurements or enforce a
-threshold on their results; measurements remain an explicit manual step.
+Build, format verification and measurements for this harness are manual steps.
