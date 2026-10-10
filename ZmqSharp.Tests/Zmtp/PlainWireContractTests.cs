@@ -4,7 +4,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Zmtp;
@@ -54,16 +53,16 @@ public sealed class PlainWireContractTests
         // The client's HELLO must be byte-exact RFC 24: the short-string name
         // plus two octet-length credential fields.
         var hello = await ReadFrameAsync(stream, token);
-        hello.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
-        hello.Body.Should().Equal(ExpectedHelloBody("alice", "s3cret"));
+        Assert.True(hello.Flags.HasFlag(ZmtpFrameFlags.Command));
+        Assert.Equal(ExpectedHelloBody("alice", "s3cret"), hello.Body);
 
         // WELCOME, then the client's INITIATE carrying Socket-Type. The frame
         // body is [name-len]["INITIATE"][metadata]; the metadata parser takes
         // only the property part, so strip the command name first.
         await stream.WriteAsync(BuildFrame(ExpectedWelcomeBody(), true), token);
         var ready = await ReadFrameAsync(stream, token);
-        ready.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
-        ParseReadySocketType(ready.Body, "INITIATE").Should().Be("PAIR");
+        Assert.True(ready.Flags.HasFlag(ZmtpFrameFlags.Command));
+        Assert.Equal("PAIR", ParseReadySocketType(ready.Body, "INITIATE"));
 
         // Complete the handshake, then exchange a data frame.
         await stream.WriteAsync(BuildFrame(ZmtpCommands.BuildReady("PAIR"), true), token);
@@ -71,8 +70,8 @@ public sealed class PlainWireContractTests
 
         await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]), token);
         var data = await ReadFrameAsync(stream, token);
-        data.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeFalse();
-        data.Body.Should().Equal([.. "hi"u8]);
+        Assert.False(data.Flags.HasFlag(ZmtpFrameFlags.Command));
+        Assert.Equal([.. "hi"u8], data.Body);
     }
 
     [Fact(Timeout = 10_000)]
@@ -106,22 +105,22 @@ public sealed class PlainWireContractTests
 
         // The server's WELCOME must be byte-exact RFC 24.
         var welcome = await ReadFrameAsync(stream, token);
-        welcome.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
-        welcome.Body.Should().Equal(ExpectedWelcomeBody());
+        Assert.True(welcome.Flags.HasFlag(ZmtpFrameFlags.Command));
+        Assert.Equal(ExpectedWelcomeBody(), welcome.Body);
 
         // INITIATE must precede server READY.
         await stream.WriteAsync(BuildFrame(ExpectedInitiateBody(), true), token);
         // The server's READY carries Socket-Type.
         var ready = await ReadFrameAsync(stream, token);
-        ready.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
-        ParseReadySocketType(ready.Body).Should().Be("PAIR");
+        Assert.True(ready.Flags.HasFlag(ZmtpFrameFlags.Command));
+        Assert.Equal("PAIR", ParseReadySocketType(ready.Body));
 
         // Complete the handshake, then exchange a data frame.
         await stream.WriteAsync(BuildFrame([.. "yo"u8], false), token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "yo"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "yo"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -152,12 +151,12 @@ public sealed class PlainWireContractTests
         await stream.WriteAsync(BuildFrame(ExpectedHelloBody("alice", "wrong"), true), token);
 
         var error = await ReadFrameAsync(stream, token);
-        error.Flags.HasFlag(ZmtpFrameFlags.Command).Should().BeTrue();
-        error.Body.Should().Equal(ExpectedErrorBody("Invalid username or password"));
+        Assert.True(error.Flags.HasFlag(ZmtpFrameFlags.Command));
+        Assert.Equal(ExpectedErrorBody("Invalid username or password"), error.Body);
 
         // The server closes the connection after the rejection.
         var buffer = new byte[1];
-        (await stream.ReadAsync(buffer, token)).Should().Be(0);
+        Assert.Equal(0, await stream.ReadAsync(buffer, token));
     }
 
     // ---- Independent RFC 24 fixtures (built from the spec, not the library) ----
@@ -166,18 +165,18 @@ public sealed class PlainWireContractTests
     private static string ParseReadySocketType(byte[] body, string expectedCommand = "READY")
     {
         var span = body.AsSpan();
-        ZmtpCommandCodec.TryReadCommandName(span, out var name).Should().BeTrue();
-        Encoding.ASCII.GetString(name).Should().Be(expectedCommand);
+        Assert.True(ZmtpCommandCodec.TryReadCommandName(span, out var name));
+        Assert.Equal(expectedCommand, Encoding.ASCII.GetString(name));
         return ZmtpCommandCodec.ParseReadySocketType(span[(1 + name.Length)..]);
     }
 
     private static void AssertGreeting(byte[] greeting, string mechanism, bool asServer)
     {
-        greeting[0].Should().Be(0xFF);
-        greeting[9].Should().Be(0x7F);
-        greeting[10].Should().Be(3);
-        Encoding.ASCII.GetString(greeting, 12, 20).TrimEnd('\0').Should().Be(mechanism);
-        greeting[32].Should().Be(asServer ? (byte)1 : (byte)0);
+        Assert.Equal((byte)0xFF, greeting[0]);
+        Assert.Equal((byte)0x7F, greeting[9]);
+        Assert.Equal((byte)3, greeting[10]);
+        Assert.Equal(mechanism, Encoding.ASCII.GetString(greeting, 12, 20).TrimEnd('\0'));
+        Assert.Equal(asServer ? (byte)1 : (byte)0, greeting[32]);
     }
 
     private static byte[] BuildGreeting(string mechanism, bool asServer)

@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Security.Curve.Tests;
@@ -52,8 +51,8 @@ public sealed class CurveEndToEndTests
         // Client -> server.
         await client.SendAsync(ZMessage.FromOwned([.. "hello-secret"u8]), token);
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "hello-secret"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "hello-secret"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
 
         // Server -> client (two frames; multipart construction is an internal
@@ -61,12 +60,12 @@ public sealed class CurveEndToEndTests
         await server.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
         await server.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
         var first = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), token);
-        first.Should().NotBeNull();
-        first.Value[0].ToSequence().ToArray().Should().Equal([.. "a"u8]);
+        Assert.NotNull(first);
+        Assert.Equal([.. "a"u8], first.Value[0].ToSequence().ToArray());
         first.Value.Dispose();
         var second = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), token);
-        second.Should().NotBeNull();
-        second.Value[0].ToSequence().ToArray().Should().Equal([.. "b"u8]);
+        Assert.NotNull(second);
+        Assert.Equal([.. "b"u8], second.Value[0].ToSequence().ToArray());
         second.Value.Dispose();
     }
 
@@ -100,13 +99,14 @@ public sealed class CurveEndToEndTests
         await server.BindAsync($"tcp://127.0.0.1:{port}", token);
 
         // The client seals HELLO under the wrong server public key, so the
-        // server's HELLO box never opens and it tears the connection down;
+        // server's HELLO box never opens, and it tears the connection down;
         // the client surfaces either the protocol failure or the peer close
         // (the same teardown race the socket layer documents).
-        var act = async () => await client.ConnectAsync($"tcp://127.0.0.1:{port}", token);
-        var failure = await Record.ExceptionAsync(act);
-        failure.Should().NotBeNull();
-        (failure is ZMechanismException or IOException).Should().BeTrue();
+        var failure = await Record.ExceptionAsync(async () => await client.ConnectAsync($"tcp://127.0.0.1:{port}", token));
+        Assert.NotNull(failure);
+        Assert.True(
+            failure is ZMechanismException or IOException,
+            $"Expected ZMechanismException or IOException, but was: {failure?.GetType().FullName ?? "null"}");
     }
 
     private static int GetFreePort()

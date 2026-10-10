@@ -1,4 +1,3 @@
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Security.Curve.Tests;
@@ -12,7 +11,7 @@ public sealed class CurveBackendBoundaryTests
         var expected = Convert.FromHexString("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
         var publicKey = new byte[32];
         new BouncyCastleCurveCrypto().DerivePublicKey(secret, publicKey);
-        publicKey.Should().Equal(expected);
+        Assert.Equal(expected, publicKey);
     }
 
     [Fact]
@@ -21,8 +20,8 @@ public sealed class CurveBackendBoundaryTests
         var backend = new RecordingBackend();
         var secret = Key32.From(new byte[32]);
         var mechanism = new CurveMechanism(backend, secret, secret);
-        mechanism.CreateSession().Should().NotBeNull();
-        backend.Derivations.Should().Be(1);
+        Assert.NotNull(mechanism.CreateSession());
+        Assert.Equal(1, backend.Derivations);
     }
 
     private sealed class RecordingBackend : ICurveCryptoBackend

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -50,7 +49,7 @@ public sealed class CurveInteropTests
             if (args.Socket.TryReceiveFrameBytes(out var bytes))
             {
                 received.TrySetResult(bytes);
-                args.Socket.TrySendFrame("reference-reply").Should().BeTrue();
+                Assert.True(args.Socket.TrySendFrame("reference-reply"));
             }
         };
         if (localBinds)
@@ -65,11 +64,11 @@ public sealed class CurveInteropTests
         poller.RunAsync();
         if (!localBinds) await local.ConnectAsync(endpoint, token);
         using (var hello = await local.Messages.ReadAsync(token))
-            hello[0].ToSequence().ToArray().Should().Equal("reference-hello"u8.ToArray());
+            Assert.Equal("reference-hello"u8.ToArray(), hello[0].ToSequence().ToArray());
         await local.SendAsync("authenticated"u8.ToArray(), token);
-        (await received.Task.WaitAsync(token)).Should().Equal("authenticated"u8.ToArray());
+        Assert.Equal("authenticated"u8.ToArray(), await received.Task.WaitAsync(token));
         using var reply = await local.Messages.ReadAsync(token);
-        reply[0].ToSequence().ToArray().Should().Equal("reference-reply"u8.ToArray());
+        Assert.Equal("reference-reply"u8.ToArray(), reply[0].ToSequence().ToArray());
         poller.StopAsync();
     }
 }

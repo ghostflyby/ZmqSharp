@@ -1,5 +1,4 @@
 using System.Buffers;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 
@@ -28,7 +27,7 @@ public sealed class DispatchPolicyTests
         for (var i = 0; i < selections.Length; i++)
             selections[i] = SelectOnly(policy, message, peers);
 
-        selections.Should().Equal(a, b, c, a, b, c);
+        Assert.Equal([a, b, c, a, b, c], selections);
         message.Dispose();
     }
 
@@ -38,7 +37,7 @@ public sealed class DispatchPolicyTests
         var policy = new ZRoundRobinDispatch();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty).Should().Be(0);
+        Assert.Equal(0, policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty));
 
         message.Dispose();
     }
@@ -51,7 +50,7 @@ public sealed class DispatchPolicyTests
         var message = ZMessage.FromOwned([.. "x"u8]);
 
         for (var i = 0; i < 3; i++)
-            SelectOnly(policy, message, [peer]).Should().BeSameAs(peer);
+            Assert.Same(peer, SelectOnly(policy, message, [peer]));
 
         message.Dispose();
     }
@@ -64,7 +63,7 @@ public sealed class DispatchPolicyTests
         var second = new ZPeer();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        SelectOnly(policy, message, [first, second]).Should().BeSameAs(first);
+        Assert.Same(first, SelectOnly(policy, message, [first, second]));
 
         message.Dispose();
     }
@@ -75,7 +74,7 @@ public sealed class DispatchPolicyTests
         var policy = new ZSinglePeerDispatch();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty).Should().Be(0);
+        Assert.Equal(0, policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty));
 
         message.Dispose();
     }
@@ -92,8 +91,8 @@ public sealed class DispatchPolicyTests
 
         var count = policy.SelectTargets(message, peers, targets);
 
-        count.Should().Be(2);
-        targets.AsSpan(0, count).ToArray().Should().Equal(a, b);
+        Assert.Equal(2, count);
+        Assert.Equal([a, b], targets.AsSpan(0, count).ToArray());
         message.Dispose();
     }
 
@@ -103,7 +102,7 @@ public sealed class DispatchPolicyTests
         var policy = new ZBroadcastDispatch();
         var message = ZMessage.FromOwned([.. "x"u8]);
 
-        policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty).Should().Be(0);
+        Assert.Equal(0, policy.SelectTargets(message, ReadOnlySpan<ZPeer>.Empty, Span<ZPeer>.Empty));
 
         message.Dispose();
     }
@@ -114,7 +113,8 @@ public sealed class DispatchPolicyTests
         var policy = new ZIdentityDispatch();
         var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*SendAsync(identity, message)*");
+        var ex = Assert.Throws<InvalidOperationException>(act);
+        Assert.Contains("SendAsync(identity, message)", ex.Message);
     }
 
     [Fact]
@@ -123,7 +123,8 @@ public sealed class DispatchPolicyTests
         var policy = new ZCurrentPeerDispatch();
         var act = () => SelectOnly(policy, ZMessage.FromOwned([.. "x"u8]), [new ZPeer()]);
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*RequestAsync*");
+        var ex = Assert.Throws<InvalidOperationException>(act);
+        Assert.Contains("RequestAsync", ex.Message);
     }
 
     [Fact]
@@ -134,15 +135,15 @@ public sealed class DispatchPolicyTests
         var policy = new ZCurrentPeerDispatch();
         var peer = new ZPeer();
         var message = ZMessage.FromOwned([.. "x"u8]);
-        ZPeer[] targets = new ZPeer[1];
+        var targets = new ZPeer[1];
 
         policy.SetCurrent(peer);
-        policy.SelectTargets(message, [peer], targets).Should().Be(1);
-        targets[0].Should().BeSameAs(peer);
+        Assert.Equal(1, policy.SelectTargets(message, [peer], targets));
+        Assert.Same(peer, targets[0]);
 
         policy.Clear();
-        var act = () => policy.SelectTargets(message, [peer], targets);
-        act.Should().Throw<InvalidOperationException>().WithMessage("*RequestAsync*");
+        var ex = Assert.Throws<InvalidOperationException>(() => { policy.SelectTargets(message, [peer], targets); });
+        Assert.Contains("RequestAsync", ex.Message);
 
         message.Dispose();
     }
@@ -157,13 +158,13 @@ public sealed class DispatchPolicyTests
         var peer = new ZPeer();
 
         var identity = policy.AssignIdentity(peer);
-        identity.Should().NotBeEmpty();
+        Assert.NotEmpty(identity);
 
-        policy.TryResolve(identity, out var resolved).Should().BeTrue();
-        resolved.Should().BeSameAs(peer);
+        Assert.True(policy.TryResolve(identity, out var resolved));
+        Assert.Same(peer, resolved);
 
         policy.RemovePeer(peer);
-        policy.TryResolve(identity, out resolved).Should().BeFalse();
+        Assert.False(policy.TryResolve(identity, out resolved));
     }
 
     [Theory(Timeout = 10_000)]
@@ -190,8 +191,10 @@ public sealed class DispatchPolicyTests
 
         // The custom policy selects both established peers.
         await sender.SendAsync(ZMessage.FromOwned([.. "both"u8]), token);
-        (await receivedA.Task.WaitAsync(token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
-        (await receivedB.Task.WaitAsync(token))[0].ToSequence().ToArray().Should().Equal([.. "both"u8]);
+        var payloadA = (await receivedA.Task.WaitAsync(token))[0].ToSequence().ToArray();
+        var payloadB = (await receivedB.Task.WaitAsync(token))[0].ToSequence().ToArray();
+        Assert.Equal([.. "both"u8], payloadA);
+        Assert.Equal([.. "both"u8], payloadB);
     }
 
     private static ZPeer? SelectOnly(IZDispatchPolicy policy, ZMessage message, ZPeer[] peers)

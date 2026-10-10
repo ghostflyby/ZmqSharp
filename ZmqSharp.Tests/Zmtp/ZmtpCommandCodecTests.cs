@@ -1,4 +1,3 @@
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Zmtp;
 
@@ -17,8 +16,8 @@ public sealed class ZmtpCommandCodecTests
     {
         var body = ZmtpCommands.BuildReady("DEALER");
 
-        ZmtpCommandCodec.ParseReadySocketType(MetadataOf(body)).Should().Be("DEALER");
-        ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body)).Should().BeNull();
+        Assert.Equal("DEALER", ZmtpCommandCodec.ParseReadySocketType(MetadataOf(body)));
+        Assert.Null(ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body)));
     }
 
     [Fact]
@@ -31,19 +30,19 @@ public sealed class ZmtpCommandCodecTests
         var body = ZmtpCommands.BuildReady("DEALER", identity);
 
         var parsed = ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body));
-        parsed.Should().NotBeNull();
-        parsed.Value.ToArray().Should().Equal(identity);
-        ZmtpCommandCodec.ParseReadySocketType(MetadataOf(body)).Should().Be("DEALER");
+        Assert.NotNull(parsed);
+        Assert.Equal(identity, parsed.Value.ToArray());
+        Assert.Equal("DEALER", ZmtpCommandCodec.ParseReadySocketType(MetadataOf(body)));
     }
 
     [Fact]
     public void ParseReadyIdentity_NullOnAbsentAndEmpty()
     {
-        ZmtpCommandCodec.ParseReadyIdentity([]).Should().BeNull();
+        Assert.Null(ZmtpCommandCodec.ParseReadyIdentity([]));
 
         // A default identity builds the same READY as today: no Identity property.
         var empty = ZmtpCommands.BuildReady("DEALER");
-        ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(empty)).Should().BeNull();
+        Assert.Null(ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(empty)));
     }
 
     [Fact]
@@ -55,11 +54,12 @@ public sealed class ZmtpCommandCodecTests
         // The string property view still sees Socket-Type; the raw identity
         // path returns the bytes untouched.
         var metadata = ZmtpCommandCodec.ParseMetadata(MetadataOf(body));
-        metadata.Should().ContainKey("Socket-Type").WhoseValue.Should().Be("ROUTER");
+        Assert.Contains("Socket-Type", metadata);
+        Assert.Equal("ROUTER", metadata["Socket-Type"]);
 
         var parsed = ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body));
-        parsed.Should().NotBeNull();
-        parsed.Value.ToArray().Should().Equal(identity);
+        Assert.NotNull(parsed);
+        Assert.Equal(identity, parsed.Value.ToArray());
     }
 
     [Fact]
@@ -67,9 +67,9 @@ public sealed class ZmtpCommandCodecTests
     {
         var body = BuildReadyWithDuplicateIdentity();
 
-        var act = () => ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body));
-        act.Should().Throw<ZeroMqProtocolException>()
-            .WithMessage("*duplicate metadata property 'Identity'*");
+        var ex = Assert.Throws<ZeroMqProtocolException>(
+            () => ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body)));
+        Assert.Contains("duplicate metadata property 'Identity'", ex.Message);
     }
 
     /// <summary>Strips the READY command-name prefix, leaving the metadata arguments.</summary>

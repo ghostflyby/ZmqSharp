@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net.Sockets;
 using System.Text;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -35,14 +34,14 @@ public sealed class ReqRepInteropTests
             var pending = req.RequestAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"req-{i}")), token);
 
             var received = new NetMQMessage();
-            rep.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref received).Should().BeTrue();
-            received.Should().NotBeNull();
-            received.FrameCount.Should().Be(1);
-            received[0].ToByteArray().Should().Equal(Encoding.ASCII.GetBytes($"req-{i}"));
+            Assert.True(rep.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref received));
+            Assert.NotNull(received);
+            Assert.Equal(1, received.FrameCount);
+            Assert.Equal(Encoding.ASCII.GetBytes($"req-{i}"), received[0].ToByteArray());
             rep.SendFrame(Encoding.ASCII.GetBytes($"ack-{i}"));
 
             var request = await pending;
-            request[0].ToSequence().ToArray().Should().Equal(Encoding.ASCII.GetBytes($"ack-{i}"));
+            Assert.Equal(Encoding.ASCII.GetBytes($"ack-{i}"), request[0].ToSequence().ToArray());
             request.Dispose();
         }
     }
@@ -72,7 +71,7 @@ public sealed class ReqRepInteropTests
             if (!req.TryReceiveFrameBytes(TimeSpan.FromSeconds(5), out var reply))
                 throw new TimeoutException("expected a reply within the timeout");
 
-            reply.Should().Equal(Encoding.ASCII.GetBytes($"ping-{i}"));
+            Assert.Equal(Encoding.ASCII.GetBytes($"ping-{i}"), reply);
         }
     }
 
@@ -93,7 +92,7 @@ public sealed class ReqRepInteropTests
         // ERROR can surface as IOException/SocketException on Windows and
         // Ubuntu (the documented teardown race in ZSocketBase).
         var failure = await Record.ExceptionAsync(() => pair.ConnectAsync($"tcp://127.0.0.1:{port}", token));
-        failure.Should().NotBeNull();
-        (failure is ZeroMqProtocolException or IOException or SocketException).Should().BeTrue();
+        Assert.NotNull(failure);
+        Assert.True(failure is ZeroMqProtocolException or IOException or SocketException);
     }
 }

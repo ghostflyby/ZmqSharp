@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 
@@ -24,12 +23,11 @@ public sealed class CustomSocketTypeTests
     {
         // A custom ZSocketBase subclass never composes a queue; queue options
         // on it are rejected at construction (0023).
-        var act = () => new CustomTypeSocket(CustomName, new ZSocketOptions
+        var exception = Assert.Throws<InvalidOperationException>(() => new CustomTypeSocket(CustomName, new ZSocketOptions
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
-        });
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*never composes a queue*");
+        }));
+        Assert.Contains("never composes a queue", exception.Message);
     }
 
     [Theory(Timeout = 10_000)]
@@ -49,7 +47,7 @@ public sealed class CustomSocketTypeTests
 
         var message = await received.Task.WaitAsync(token);
         byte[] expected = [.. "hello"u8];
-        message[0].ToSequence().ToArray().Should().Equal(expected);
+        Assert.Equal(expected, message[0].ToSequence().ToArray());
         message.Dispose();
     }
 
@@ -69,16 +67,16 @@ public sealed class CustomSocketTypeTests
         await server.BindAsync(endpoint, token);
         var failure = await Record.ExceptionAsync(() => client.ConnectAsync(endpoint, token));
 
-        failure.Should().NotBeNull();
+        Assert.NotNull(failure);
         // Both peers reject each other. Either the local rejection surfaces as
         // ZeroMqProtocolException, or the peer's rejection wins the race and
         // closes first, so the local ERROR write faults with an IO error
         // (broken pipe on ipc, buffered write on tcp). When the protocol
         // rejection is the one that surfaces, its semantics must still name
         // the socket-type mismatch.
-        (failure is ZeroMqProtocolException or IOException or SocketException).Should().BeTrue();
+        Assert.True(failure is ZeroMqProtocolException or IOException or SocketException);
         if (failure is ZeroMqProtocolException)
-            failure.Message.Should().Contain("not accepted by local socket type");
+            Assert.Contains("not accepted by local socket type", failure.Message);
     }
 
     /// <summary>

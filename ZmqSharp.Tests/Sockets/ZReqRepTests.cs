@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Net.Sockets;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Tests.Sockets;
@@ -23,7 +22,7 @@ public sealed class ZReqRepTests
         await rep.BindAsync(endpoint, token);
         rep.BindRequestHandler(async (context, token) =>
         {
-            context.Should().HaveCount(1);
+            Assert.Single(context);
             var payload = context[0].ToSequence().ToArray();
             await rep.SendReplyAsync(context, ZMessage.FromOwned(payload), token);
         });
@@ -32,8 +31,8 @@ public sealed class ZReqRepTests
         await req.ConnectAsync(endpoint, token);
         var reply = await req.RequestAsync(ZMessage.FromOwned([.. "ping"u8]), token);
 
-        reply.Should().HaveCount(1);
-        reply[0].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
+        Assert.Single(reply);
+        Assert.Equal([.. "ping"u8], reply[0].ToSequence().ToArray());
         reply.Dispose();
     }
 
@@ -47,7 +46,7 @@ public sealed class ZReqRepTests
         await rep.BindAsync(endpoint, token);
         rep.BindRequestHandler((context, token) =>
         {
-            context.Should().HaveCount(2);
+            Assert.Equal(2, context.Count);
             return rep.SendReplyAsync(context, MessageFactory.Multipart([.. "x"u8], [.. "y"u8]), token);
         });
 
@@ -55,9 +54,9 @@ public sealed class ZReqRepTests
         await req.ConnectAsync(endpoint, token);
         var reply = await req.RequestAsync(MessageFactory.Multipart([.. "a"u8], [.. "b"u8]), token);
 
-        reply.Count.Should().Be(2);
-        reply[0].ToSequence().ToArray().Should().Equal([.. "x"u8]);
-        reply[1].ToSequence().ToArray().Should().Equal([.. "y"u8]);
+        Assert.Equal(2, reply.Count);
+        Assert.Equal([.. "x"u8], reply[0].ToSequence().ToArray());
+        Assert.Equal([.. "y"u8], reply[1].ToSequence().ToArray());
         reply.Dispose();
     }
 
@@ -81,8 +80,7 @@ public sealed class ZReqRepTests
 
         var first = req.RequestAsync(ZMessage.FromOwned([.. "1"u8]), token);
 
-        await FluentActions.Awaiting(() => req.RequestAsync(ZMessage.FromOwned([.. "2"u8]), token))
-            .Should().ThrowAsync<InvalidOperationException>();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => req.RequestAsync(ZMessage.FromOwned([.. "2"u8]), token));
 
         release.TrySetResult();
         var reply = await first;
@@ -113,8 +111,8 @@ public sealed class ZReqRepTests
         await rep.DisposeAsync();
 
         var ex = await Record.ExceptionAsync(() => requestTask.WaitAsync(token));
-        ex.Should().NotBeNull();
-        (ex is IOException or SocketException or ObjectDisposedException).Should().BeTrue();
+        Assert.NotNull(ex);
+        Assert.True(ex is IOException or SocketException or ObjectDisposedException);
     }
 
     [Fact]
@@ -122,8 +120,7 @@ public sealed class ZReqRepTests
     {
         var token = TestContext.Current.CancellationToken;
         await using var req = new ZReqSocket();
-        await FluentActions.Awaiting(() => req.RequestAsync(ZMessage.FromOwned([.. "x"u8]), token))
-            .Should().ThrowAsync<InvalidOperationException>();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => req.RequestAsync(ZMessage.FromOwned([.. "x"u8]), token));
     }
 
     [Theory]
@@ -146,11 +143,11 @@ public sealed class ZReqRepTests
         await reqB.ConnectAsync(endpoint, token);
 
         var replyA = await reqA.RequestAsync(ZMessage.FromOwned([.. "a"u8]), token);
-        replyA[0].ToSequence().ToArray().Should().Equal([.. "a"u8]);
+        Assert.Equal([.. "a"u8], replyA[0].ToSequence().ToArray());
         replyA.Dispose();
 
         var replyB = await reqB.RequestAsync(ZMessage.FromOwned([.. "b"u8]), token);
-        replyB[0].ToSequence().ToArray().Should().Equal([.. "b"u8]);
+        Assert.Equal([.. "b"u8], replyB[0].ToSequence().ToArray());
         replyB.Dispose();
     }
 
@@ -188,7 +185,7 @@ public sealed class ZReqRepTests
             reply.Dispose();
         }
 
-        countA.Should().Be(4);
-        countB.Should().Be(4);
+        Assert.Equal(4, countA);
+        Assert.Equal(4, countB);
     }
 }

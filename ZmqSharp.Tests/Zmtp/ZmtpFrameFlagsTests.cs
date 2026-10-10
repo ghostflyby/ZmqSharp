@@ -1,4 +1,3 @@
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Zmtp;
 
@@ -9,12 +8,12 @@ public sealed class ZmtpFrameFlagsTests
     [Fact]
     public void MoreBit_IsSet()
     {
-        ((byte)ZmtpFrameFlags.More).Should().Be(0b0001);
+        Assert.Equal(0b0001, (byte)ZmtpFrameFlags.More);
     }
 
     [Fact]
     public void LongSizeBit_IsSet()
     {
-        ((byte)ZmtpFrameFlags.LongSize).Should().Be(0b0010);
+        Assert.Equal(0b0010, (byte)ZmtpFrameFlags.LongSize);
     }
 }

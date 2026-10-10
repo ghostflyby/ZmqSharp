@@ -9,7 +9,6 @@ updates:
     groups:
       test-packages:
         patterns:
-          - "FluentAssertions"
           - "Microsoft.Testing.Extensions.*"
           - "xunit.v3"
 

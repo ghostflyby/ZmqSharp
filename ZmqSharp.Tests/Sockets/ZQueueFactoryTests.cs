@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Tests.Sockets;
@@ -25,16 +24,16 @@ public sealed class ZQueueFactoryTests
         // violation is undefined behavior, not an exception), so the effective
         // flags are asserted on the factory's fixed snapshot instead.
         var factory = new ZBoundedQueueFactory(new BoundedChannelOptions(4) { SingleWriter = false });
-        factory.Options.SingleReader.Should().BeTrue();
-        factory.Options.SingleWriter.Should().BeFalse();
+        Assert.True(factory.Options.SingleReader);
+        Assert.False(factory.Options.SingleWriter);
     }
 
     [Fact]
     public void Factory_SingleWriterTrue_IsPreserved()
     {
         var factory = new ZBoundedQueueFactory(new BoundedChannelOptions(4) { SingleWriter = true });
-        factory.Options.SingleReader.Should().BeTrue();
-        factory.Options.SingleWriter.Should().BeTrue();
+        Assert.True(factory.Options.SingleReader);
+        Assert.True(factory.Options.SingleWriter);
     }
 
     [Fact]
@@ -50,7 +49,7 @@ public sealed class ZQueueFactoryTests
         })).ToArray();
         await Task.WhenAll(writers);
 
-        accepted.Should().Be(4);
+        Assert.Equal(4, accepted);
         Drain(channel);
     }
 
@@ -71,10 +70,10 @@ public sealed class ZQueueFactoryTests
         var channel = factory.Create(_ => { });
         channel.Writer.TryWrite(Item());
         channel.Writer.TryWrite(Item(2));
-        channel.Writer.TryWrite(Item(3)).Should().BeTrue();
-        channel.Reader.Count.Should().Be(1);
-        channel.Reader.TryRead(out var kept).Should().BeTrue();
-        kept[0].ToSequence().ToArray().Should().Equal(1);
+        Assert.True(channel.Writer.TryWrite(Item(3)));
+        Assert.Equal(1, channel.Reader.Count);
+        Assert.True(channel.Reader.TryRead(out var kept));
+        Assert.Equal([1], kept[0].ToSequence().ToArray());
         kept.Dispose();
     }
 
@@ -88,11 +87,11 @@ public sealed class ZQueueFactoryTests
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);
 
-        channel.Writer.TryWrite(Item()).Should().BeTrue();
-        channel.Writer.TryWrite(Item(2)).Should().BeTrue();
+        Assert.True(channel.Writer.TryWrite(Item()));
+        Assert.True(channel.Writer.TryWrite(Item(2)));
 
-        dropped.Should().ContainSingle();
-        dropped[0][0].ToSequence().ToArray().Should().Equal(2);
+        Assert.Single(dropped);
+        Assert.Equal([2], dropped[0][0].ToSequence().ToArray());
         dropped[0].Dispose();
     }
 
@@ -103,37 +102,36 @@ public sealed class ZQueueFactoryTests
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);
 
-        for (var i = 0; i < 100; i++) channel.Writer.TryWrite(Item((byte)i)).Should().BeTrue();
+        for (var i = 0; i < 100; i++) Assert.True(channel.Writer.TryWrite(Item((byte)i)));
 
-        dropped.Should().BeEmpty();
+        Assert.Empty(dropped);
         Drain(channel);
-        channel.Reader.Completion.IsCompleted.Should().BeFalse();
+        Assert.False(channel.Reader.Completion.IsCompleted);
     }
 
     [Fact]
     public void ImplicitConversion_FromBoundedOptions()
     {
         ZQueueFactory factory = new BoundedChannelOptions(16);
-        factory.Should().BeOfType<ZBoundedQueueFactory>();
+        Assert.IsType<ZBoundedQueueFactory>(factory);
         var channel = factory.Create(_ => { });
-        channel.Reader.Count.Should().Be(0);
+        Assert.Equal(0, channel.Reader.Count);
     }
 
     [Fact]
     public void ImplicitConversion_FromUnboundedOptions()
     {
         ZQueueFactory factory = new UnboundedChannelOptions();
-        factory.Should().BeOfType<ZUnboundedQueueFactory>();
+        Assert.IsType<ZUnboundedQueueFactory>(factory);
         var channel = factory.Create(_ => { });
-        channel.Writer.TryWrite(Item()).Should().BeTrue();
+        Assert.True(channel.Writer.TryWrite(Item()));
         Drain(channel);
     }
 
     [Fact]
     public void Factory_InvalidCapacity_Throws()
     {
-        var act = () => new BoundedChannelOptions(-1);
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BoundedChannelOptions(-1));
     }
 
     [Fact]
@@ -141,8 +139,7 @@ public sealed class ZQueueFactoryTests
     {
         // BoundedChannelOptions validates the full mode in its setter, so the
         // failure surfaces at the options construction the factory consumes.
-        var act = () => new BoundedChannelOptions(4) { FullMode = (BoundedChannelFullMode)99 };
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BoundedChannelOptions(4) { FullMode = (BoundedChannelFullMode)99 });
     }
 
     [Fact]
@@ -153,17 +150,17 @@ public sealed class ZQueueFactoryTests
         // base satisfies the IZQueueFactory strategy contract.
         ZQueueFactory fromOptions = new BoundedChannelOptions(16);
         IZQueueFactory viaBase = new ZBoundedQueueFactory(new BoundedChannelOptions(16));
-        fromOptions.Should().BeOfType<ZBoundedQueueFactory>();
+        Assert.IsType<ZBoundedQueueFactory>(fromOptions);
         viaBase.Create(_ => { });
-        viaBase.Should().BeOfType<ZBoundedQueueFactory>();
+        Assert.IsType<ZBoundedQueueFactory>(viaBase);
     }
 
     [Fact]
     public void Options_Defaults_ReceiveBoundedSendDisabled()
     {
         var options = new ZSocketOptions();
-        options.ReceiveQueueFactory.Should().BeOfType<ZBoundedQueueFactory>();
-        options.SendQueueFactory.Should().BeNull();
+        Assert.IsType<ZBoundedQueueFactory>(options.ReceiveQueueFactory);
+        Assert.Null(options.SendQueueFactory);
     }
 
     private static void Drain(Channel<ZMessage> channel)

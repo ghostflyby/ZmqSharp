@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using Xunit;
 using ZmqSharp.Tests.Interop;
@@ -68,10 +67,10 @@ public sealed class RouterIdentityConnectionOrderTests
         // ROUTER, so the kernel can route stdin back to the frontend whose
         // shell message it is answering, regardless of connection or arrival
         // order - and it is exactly the bytes the client configured.
-        shellA[0].ToSequence().ToArray().Should().Equal(identityA);
-        stdinA[0].ToSequence().ToArray().Should().Equal(identityA);
-        shellB[0].ToSequence().ToArray().Should().Equal(identityB);
-        stdinB[0].ToSequence().ToArray().Should().Equal(identityB);
+        Assert.Equal(identityA, shellA[0].ToSequence().ToArray());
+        Assert.Equal(identityA, stdinA[0].ToSequence().ToArray());
+        Assert.Equal(identityB, shellB[0].ToSequence().ToArray());
+        Assert.Equal(identityB, stdinB[0].ToSequence().ToArray());
     }
 
     [Fact(Timeout = 15_000)]
@@ -96,14 +95,14 @@ public sealed class RouterIdentityConnectionOrderTests
         dealer.SendFrame([.. "ping"u8]);
         var routed = await routedMessage.Task.WaitAsync(token);
         var identity = routed[0].ToSequence().ToArray();
-        identity.Should().NotBeEmpty();
-        routed[1].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
+        Assert.NotEmpty(identity);
+        Assert.Equal([.. "ping"u8], routed[1].ToSequence().ToArray());
         routed.Dispose();
 
         // The local id addresses the peer on outbound, exactly as before.
         await router.SendAsync(identity, ZMessage.FromOwned([.. "pong"u8]), token);
         var reply = InteropHelpers.ReceiveFrame(dealer, TimeSpan.FromSeconds(5));
-        reply.Should().Equal([.. "pong"u8]);
+        Assert.Equal([.. "pong"u8], reply);
     }
 
     [Fact(Timeout = 10_000)]
@@ -134,7 +133,7 @@ public sealed class RouterIdentityConnectionOrderTests
         await Record.ExceptionAsync(async () => await second.ConnectAsync($"tcp://127.0.0.1:{port}", token));
 
         var failure = await rejected.Task.WaitAsync(token);
-        failure.Should().BeOfType<ZeroMqProtocolException>();
+        Assert.IsType<ZeroMqProtocolException>(failure);
     }
 
     private static async Task<ZMessage> ReadMessageAsync(

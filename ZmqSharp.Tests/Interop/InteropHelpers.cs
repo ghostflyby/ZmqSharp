@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
-using FluentAssertions;
 using NetMQ;
+using Xunit;
 
 namespace ZmqSharp.Tests.Interop;
 
@@ -23,8 +23,8 @@ internal static class InteropHelpers
     /// <summary>Blocks until one frame is received (bounded by timeout).</summary>
     public static byte[] ReceiveFrame(NetMQSocket socket, TimeSpan timeout)
     {
-        socket.TryReceiveFrameBytes(timeout, out var frame).Should().BeTrue("expected a frame within the timeout");
-        frame.Should().NotBeNull();
+        Assert.True(socket.TryReceiveFrameBytes(timeout, out var frame), "expected a frame within the timeout");
+        Assert.NotNull(frame);
         return frame;
     }
 }

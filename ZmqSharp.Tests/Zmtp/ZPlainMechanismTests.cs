@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Sockets;
@@ -33,9 +32,9 @@ public sealed class ZPlainMechanismTests
 
         var result = await handshake.EstablishAsync(token);
 
-        result.Should().NotBeNull();
-        result.Value.Codec.Should().BeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
+        Assert.NotNull(result);
+        Assert.Null(result.Value.Codec);
+        Assert.Equal("PAIR", ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span));
     }
 
     [Fact]
@@ -51,8 +50,8 @@ public sealed class ZPlainMechanismTests
 
         var result = await handshake.EstablishAsync(token);
 
-        result.Should().NotBeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
+        Assert.NotNull(result);
+        Assert.Equal("PAIR", ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span));
     }
 
     [Fact]
@@ -64,8 +63,8 @@ public sealed class ZPlainMechanismTests
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) =>
             user == "alice" && pass.SequenceEqual("secret"u8)));
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*Invalid username or password*");
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        Assert.Contains("Invalid username or password", exception.Message);
     }
 
     [Fact]
@@ -76,9 +75,8 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism((_, _) => true));
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZMechanismException>()
-            .WithMessage("*missing Username or Password*");
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        Assert.Contains("missing Username or Password", exception.Message);
     }
 
     [Fact]
@@ -89,8 +87,8 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism((_, _) => true));
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*expected HELLO*");
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        Assert.Contains("expected HELLO", exception.Message);
     }
 
     [Fact]
@@ -103,9 +101,8 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "wrong"u8));
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZMechanismException>()
-            .WithMessage("*Invalid username or password*");
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        Assert.Contains("Invalid username or password", exception.Message);
     }
 
     [Fact]
@@ -116,25 +113,24 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(ZmtpTestData.Greeting()));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>()
-            .WithMessage("*does not match the configured mechanism 'PLAIN'*");
+        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        Assert.Contains("does not match the configured mechanism 'PLAIN'", exception.Message);
     }
 
     [Fact]
     public void ServerConfiguration_SelectsServerRole()
     {
         var server = new ZPlainMechanism((_, _) => true);
-        server.Role.Should().Be(ZMechanismRole.Server);
-        server.CreateSession().Should().NotBeNull();
+        Assert.Equal(ZMechanismRole.Server, server.Role);
+        Assert.NotNull(server.CreateSession());
     }
 
     [Fact]
     public void ClientConfiguration_SelectsClientRole()
     {
         var client = new ZPlainMechanism("alice", "secret"u8);
-        client.Role.Should().Be(ZMechanismRole.Client);
-        client.CreateSession().Should().NotBeNull();
+        Assert.Equal(ZMechanismRole.Client, client.Role);
+        Assert.NotNull(client.CreateSession());
     }
 
     [Theory(Timeout = 15_000)]
@@ -176,8 +172,8 @@ public sealed class ZPlainMechanismTests
 
         await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), token);
         var echo = await TryReadAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        echo.Should().NotBeNull();
-        echo.Value[0].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
+        Assert.NotNull(echo);
+        Assert.Equal([.. "ping"u8], echo.Value[0].ToSequence().ToArray());
         echo.Value.Dispose();
     }
 
@@ -204,8 +200,8 @@ public sealed class ZPlainMechanismTests
         var endpoint = TestTransports.GetEndpoint(kind);
         await server.BindAsync(endpoint, token);
 
-        await FluentActions.Awaiting(() => client.ConnectAsync(endpoint, token)).Should().ThrowAsync<ZMechanismException>()
-            .WithMessage("*Invalid username or password*");
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => client.ConnectAsync(endpoint, token));
+        Assert.Contains("Invalid username or password", exception.Message);
     }
 
     [Fact]
@@ -219,23 +215,21 @@ public sealed class ZPlainMechanismTests
         var authenticated = false;
         using var handshake = NewHandshake(connection, new ZPlainMechanism((user, password) =>
         {
-            user.Should().Be("alice");
-            password.ToArray().Should().Equal(0, 255, 128);
+            Assert.Equal("alice", user);
+            Assert.Equal([0, 255, 128], password.ToArray());
             authenticated = true;
             return true;
         }));
-        (await handshake.EstablishAsync(token)).Should().NotBeNull();
-        authenticated.Should().BeTrue();
+        Assert.NotNull(await handshake.EstablishAsync(token));
+        Assert.True(authenticated);
     }
 
     [Fact]
     public void Credentials_EnforceWireOctetLengthIncludingUtf8Bytes()
     {
-        FluentActions.Invoking(() => new ZPlainMechanism(new string('é', 128), "x"u8))
-            .Should().Throw<ArgumentOutOfRangeException>();
-        FluentActions.Invoking(() => new ZPlainMechanism("alice", new byte[256]))
-            .Should().Throw<ArgumentOutOfRangeException>();
-        new ZPlainMechanism(new string('a', 255), new byte[255]).Role.Should().Be(ZMechanismRole.Client);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ZPlainMechanism(new string('é', 128), "x"u8));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ZPlainMechanism("alice", new byte[256]));
+        Assert.Equal(ZMechanismRole.Client, new ZPlainMechanism(new string('a', 255), new byte[255]).Role);
     }
 
     // ---- Fixtures ----

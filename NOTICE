@@ -28,7 +28,3 @@ library itself has no runtime dependencies):
 - Microsoft.Testing.Platform and Microsoft.Testing.Extensions.TrxReport -
   https://github.com/microsoft/testfx - MIT License. Provides the test host
   (the xUnit.net v3 runner is built on it) and TRX result reporting.
-- FluentAssertions (8.x) - https://fluentassertions.com - used under the
-  Fluent Assertions Community License for non-commercial use; an active
-  subscription is required for commercial use. See
-  https://xceed.com/products/unit-testing/fluent-assertions/.

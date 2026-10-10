@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security.Curve;
 using ZmqSharp.Sockets;
@@ -25,11 +24,11 @@ public sealed class CurveSessionTrafficTests
         using var message = ZMessage.FromOwned(payload);
         await session.SendAsync(message, token);
         var wire = raw.Recorded;
-        (wire[0] & (byte)ZmtpFrameFlags.LongSize).Should().NotBe(0);
+        Assert.NotEqual(0, wire[0] & (byte)ZmtpFrameFlags.LongSize);
         var frames = await ReadAsync(wire);
-        frames.Should().ContainSingle();
-        frames[0].Payload.Should().Equal(payload);
-        frames[0].More.Should().BeFalse();
+        Assert.Single(frames);
+        Assert.Equal(payload, frames[0].Payload);
+        Assert.False(frames[0].More);
     }
 
     [Fact]
@@ -41,8 +40,9 @@ public sealed class CurveSessionTrafficTests
         using var message = ZMessage.Copy((byte[][])[[.. "first"u8], [.. "second"u8], [.. "third"u8]]);
         await session.SendAsync(message, token);
         var frames = await ReadAsync(raw.Recorded);
-        frames.Select(frame => frame.More).Should().Equal(true, true, false);
-        frames.Select(frame => System.Text.Encoding.ASCII.GetString(frame.Payload)).Should().Equal("first", "second", "third");
+        Assert.Equal([true, true, false], frames.Select(frame => frame.More).ToArray());
+        Assert.Equal(["first", "second", "third"],
+            frames.Select(frame => System.Text.Encoding.ASCII.GetString(frame.Payload)).ToArray());
     }
 
     [Fact]
@@ -55,12 +55,12 @@ public sealed class CurveSessionTrafficTests
         using var two = ZMessage.Copy((byte[][])[[.. "2-a"u8], [.. "2-b"u8], [.. "2-c"u8]]);
         await Task.WhenAll(session.SendAsync(one, token).AsTask(), session.SendAsync(two, token).AsTask());
         var frames = await ReadAsync(raw.Recorded);
-        frames.Select(frame => frame.More).Should().Equal(true, true, false, true, true, false);
+        Assert.Equal([true, true, false, true, true, false], frames.Select(frame => frame.More).ToArray());
         var groupOne = frames.Take(3).Select(frame => frame.Payload[0]).Distinct().ToArray();
         var groupTwo = frames.Skip(3).Select(frame => frame.Payload[0]).Distinct().ToArray();
-        groupOne.Should().ContainSingle();
-        groupTwo.Should().ContainSingle();
-        groupOne.Should().NotEqual(groupTwo);
+        Assert.Single(groupOne);
+        Assert.Single(groupTwo);
+        Assert.NotEqual(groupTwo, groupOne);
     }
 
     [Fact]
@@ -68,15 +68,15 @@ public sealed class CurveSessionTrafficTests
     {
         var wire = await SealAsync();
         wire[2 + 16 + 5] ^= 0xFF;
-        await FluentActions.Awaiting(() => ReadAsync(wire)).Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(() => ReadAsync(wire));
     }
 
     [Fact]
     public async Task ReplayedFrame_IsRejected()
     {
         var wire = await SealAsync();
-        await FluentActions.Awaiting(() => ReadAsync([.. wire, .. wire])).Should().ThrowAsync<ZeroMqProtocolException>()
-            .WithMessage("*nonce*");
+        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => ReadAsync([.. wire, .. wire]));
+        Assert.Contains("nonce", exception.Message);
     }
 
     [Theory]
@@ -89,8 +89,8 @@ public sealed class CurveSessionTrafficTests
         using var decoder = NewCodec();
         var encoded = encoder.Encode(new ZmtpFrameData { Flags = flags });
         var decoded = decoder.Decode(encoded);
-        decoded.Flags.Should().Be(flags);
-        decoded.Body.IsEmpty.Should().BeTrue();
+        Assert.Equal(flags, decoded.Flags);
+        Assert.True(decoded.Body.IsEmpty);
     }
 
     [Fact]
@@ -103,8 +103,8 @@ public sealed class CurveSessionTrafficTests
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], 1);
         new BouncyCastleCurveCrypto().SecretBox([(byte)ZmtpFrameFlags.LongSize], nonce, new byte[32], encoded.AsSpan(16));
         using var decoder = NewCodec();
-        FluentActions.Invoking(() => decoder.Decode(new ZmtpFrameData { Body = new(encoded) }))
-            .Should().Throw<ZeroMqProtocolException>().WithMessage("*logical flags*");
+        var exception = Assert.Throws<ZeroMqProtocolException>(() => decoder.Decode(new ZmtpFrameData { Body = new(encoded) }));
+        Assert.Contains("logical flags", exception.Message);
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class CurveSessionTrafficTests
     {
         var token = TestContext.Current.CancellationToken;
         using var codec = NewCodec();
-        codec.GetMaximumEncodedLength(long.MaxValue).Should().Be(long.MaxValue);
+        Assert.Equal(long.MaxValue, codec.GetMaximumEncodedLength(long.MaxValue));
         var header = new byte[9];
         header[0] = (byte)ZmtpFrameFlags.LongSize;
         BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1), codec.GetMaximumEncodedLength(256) + 1);
@@ -120,8 +120,8 @@ public sealed class CurveSessionTrafficTests
         using var parser = new ZmtpParser(raw, (_, _) => throw new InvalidOperationException("unexpected delivery"),
             null, MemoryPool<byte>.Shared, maxCommandSize: 256, codec: codec, maxFrameLength: 8);
         // There is no body: ignoring the header bound would silently hit EOF.
-        await FluentActions.Awaiting(() => parser.ParseAsync(token).AsTask()).Should().ThrowAsync<ZeroMqProtocolException>()
-            .WithMessage("*encoded frame*");
+        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => parser.ParseAsync(token).AsTask());
+        Assert.Contains("encoded frame", exception.Message);
     }
 
     [Fact]
@@ -141,9 +141,9 @@ public sealed class CurveSessionTrafficTests
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 8, 100, 10, () => { });
         using var parser = new ZmtpParser(input, (_, _) => throw new InvalidOperationException("unexpected delivery"),
             materializer.CreateAllocator(), pool, maxCommandSize: 256, codec: codec, maxFrameLength: 8);
-        var failure = await FluentActions.Awaiting(() => parser.ParseAsync(token).AsTask()).Should().ThrowAsync<ZReceiveRejectedException>();
-        failure.Which.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
-        pool.Rentals.Should().Be(1, "only bounded ciphertext scratch may be rented");
+        var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => parser.ParseAsync(token).AsTask());
+        Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, failure.Rejection.Reason);
+        Assert.Equal(1, pool.Rentals);
     }
 
     [Fact(Timeout = 15_000)]
@@ -170,9 +170,9 @@ public sealed class CurveSessionTrafficTests
             {
                 entered.TrySetResult();
                 await release.Task;
-                frame[0].Memory.Span[0].Should().Be(17);
+                Assert.Equal(17, frame[0].Memory.Span[0]);
             }
-            else frame[0].Memory.Span[0].Should().Be(23);
+            else Assert.Equal(23, frame[0].Memory.Span[0]);
 
             return true;
         }, codec);
@@ -180,8 +180,8 @@ public sealed class CurveSessionTrafficTests
         try
         {
             await entered.Task.WaitAsync(token);
-            count.Should().Be(1);
-            parsing.IsCompleted.Should().BeFalse();
+            Assert.Equal(1, count);
+            Assert.False(parsing.IsCompleted);
         }
         finally
         {
@@ -189,7 +189,7 @@ public sealed class CurveSessionTrafficTests
         }
 
         await parsing.WaitAsync(token);
-        count.Should().Be(2);
+        Assert.Equal(2, count);
     }
 
     private static async Task<byte[]> SealAsync()

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -32,7 +31,7 @@ public sealed class PushPullInteropTests
         {
             await push.SendAsync(ZMessage.FromOwned(Encoding.ASCII.GetBytes($"msg-{i}")), token);
             var received = InteropHelpers.ReceiveFrame(pull, TimeSpan.FromSeconds(5));
-            received.Should().Equal(Encoding.ASCII.GetBytes($"msg-{i}"));
+            Assert.Equal(Encoding.ASCII.GetBytes($"msg-{i}"), received);
         }
     }
 
@@ -52,8 +51,8 @@ public sealed class PushPullInteropTests
         {
             push.SendFrame(Encoding.ASCII.GetBytes($"push-{i}"));
             var message = await ReadMessageAsync(pull.Messages, TimeSpan.FromSeconds(5), token);
-            message.Should().NotBeNull();
-            message.Value[0].ToSequence().ToArray().Should().Equal(Encoding.ASCII.GetBytes($"push-{i}"));
+            Assert.NotNull(message);
+            Assert.Equal(Encoding.ASCII.GetBytes($"push-{i}"), message.Value[0].ToSequence().ToArray());
             message.Value.Dispose();
         }
     }
@@ -93,10 +92,10 @@ public sealed class PushPullInteropTests
             await Task.Delay(20, token);
         }
 
-        turnsA.Should().HaveCount(4);
-        turnsB.Should().HaveCount(4);
-        turnsA.Should().OnlyContain(turn => int.Parse(turn.Substring(5)) % 2 == 0);
-        turnsB.Should().OnlyContain(turn => int.Parse(turn.Substring(5)) % 2 == 1);
+        Assert.Equal(4, turnsA.Count);
+        Assert.Equal(4, turnsB.Count);
+        Assert.All(turnsA, turn => Assert.True(int.Parse(turn.Substring(5)) % 2 == 0, $"Expected '{turn}' to carry an even turn index."));
+        Assert.All(turnsB, turn => Assert.True(int.Parse(turn.Substring(5)) % 2 == 1, $"Expected '{turn}' to carry an odd turn index."));
     }
 
     private static IEnumerable<string> DrainAvailable(PullSocket pull)

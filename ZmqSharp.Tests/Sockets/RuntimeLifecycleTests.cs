@@ -1,5 +1,4 @@
 using System.Buffers;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 using ZmqSharp.Security;
@@ -26,11 +25,11 @@ public sealed class RuntimeLifecycleTests
         var observed = false;
         runtime.PeerEnded += (peer, _) =>
         {
-            peer.Should().BeSameAs(endpoint.Peer);
-            endpoint.Connection.Disposals.Should().Be(1);
-            codec.Disposals.Should().Be(1);
-            pool.Outstanding.Should().Be(0);
-            runtime.PeerSnapshot.Should().BeEmpty();
+            Assert.Same(endpoint.Peer, peer);
+            Assert.Equal(1, endpoint.Connection.Disposals);
+            Assert.Equal(1, codec.Disposals);
+            Assert.Equal(0, pool.Outstanding);
+            Assert.Empty(runtime.PeerSnapshot);
             observed = true;
             if (throwFromEvent) throw new InvalidOperationException("event failed");
         };
@@ -45,23 +44,25 @@ public sealed class RuntimeLifecycleTests
             await endpoint.Connection.WriteStarted.Task.WaitAsync(token);
             var stopping = runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint, token).AsTask();
             await endpoint.Connection.Aborted.Task.WaitAsync(token);
-            stopping.IsCompleted.Should().BeFalse();
-            endpoint.Connection.Disposals.Should().Be(0);
-            codec.Disposals.Should().Be(0);
-            pool.Outstanding.Should().Be(1);
+            Assert.False(stopping.IsCompleted);
+            Assert.Equal(0, endpoint.Connection.Disposals);
+            Assert.Equal(0, codec.Disposals);
+            Assert.Equal(1, pool.Outstanding);
             endpoint.Connection.ReleaseWrite.TrySetResult();
             if (throwFromEvent)
-                await FluentActions.Awaiting(() => stopping.WaitAsync(token)).Should().ThrowAsync<InvalidOperationException>()
-                    .WithMessage("event failed");
+            {
+                var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => stopping.WaitAsync(token));
+                Assert.Equal("event failed", failure.Message);
+            }
             else await stopping.WaitAsync(token);
-            observed.Should().BeTrue();
+            Assert.True(observed);
             await runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint, token);
         }
         finally
         {
             endpoint.Connection.ReleaseWrite.TrySetResult();
             if (throwFromEvent)
-                await FluentActions.Awaiting(async () => await runtime.DisposeAsync()).Should().ThrowAsync<InvalidOperationException>();
+                await Assert.ThrowsAsync<InvalidOperationException>(async () => await runtime.DisposeAsync());
             else await runtime.DisposeAsync();
         }
     }
@@ -84,11 +85,11 @@ public sealed class RuntimeLifecycleTests
         {
             await endpoint.Connection.WriteStarted.Task.WaitAsync(token);
             endpoint.Connection.ReleaseWrite.TrySetResult();
-            await FluentActions.Awaiting(() => sending.WaitAsync(token)).Should().ThrowAsync<IOException>()
-                .WithMessage("write failed");
-            (await ended.Task.WaitAsync(token)).Should().BeOfType<IOException>();
-            runtime.PeerSnapshot.Should().BeEmpty();
-            endpoint.Connection.Disposals.Should().Be(1);
+            var failure = await Assert.ThrowsAsync<IOException>(() => sending.WaitAsync(token));
+            Assert.Equal("write failed", failure.Message);
+            Assert.IsType<IOException>(await ended.Task.WaitAsync(token));
+            Assert.Empty(runtime.PeerSnapshot);
+            Assert.Equal(1, endpoint.Connection.Disposals);
         }
         finally
         {
@@ -108,9 +109,9 @@ public sealed class RuntimeLifecycleTests
             ZSocketType.ForCustom("FOO"));
         var token = TestContext.Current.CancellationToken;
 
-        await FluentActions.Awaiting(() => runtime.ConnectAsync<ClosingEndpoint, ClosingTransport>(endpoint, token))
-            .Should().ThrowAsync<IOException>().WithMessage("peer closed before the ERROR write");
-        runtime.PeerSnapshot.Should().BeEmpty();
+        var failure = await Assert.ThrowsAsync<IOException>(() => runtime.ConnectAsync<ClosingEndpoint, ClosingTransport>(endpoint, token));
+        Assert.Equal("peer closed before the ERROR write", failure.Message);
+        Assert.Empty(runtime.PeerSnapshot);
     }
 
     [Fact(Timeout = 15_000)]
@@ -151,15 +152,16 @@ public sealed class RuntimeLifecycleTests
             await entered.Task.WaitAsync(token);
             var stopping = runtime.DisconnectAsync<ByteEndpoint, ByteTransport>(endpoint, token).AsTask();
             await cancelled.Task.WaitAsync(token);
-            stopping.IsCompleted.Should().BeFalse();
-            endpoint.Connection.Disposals.Should().Be(0);
-            pool.Outstanding.Should().Be(1);
+            Assert.False(stopping.IsCompleted);
+            Assert.Equal(0, endpoint.Connection.Disposals);
+            Assert.Equal(1, pool.Outstanding);
             release.TrySetResult();
             await stopping.WaitAsync(token);
-            await FluentActions.Awaiting(() => connecting).Should().ThrowAsync<OperationCanceledException>()
-                .Where(failure => !token.IsCancellationRequested);
-            pool.Outstanding.Should().Be(0);
-            endpoint.Connection.Disposals.Should().Be(1);
+            var failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connecting);
+            Assert.True(!token.IsCancellationRequested,
+                $"token.IsCancellationRequested was {token.IsCancellationRequested} but expected the connect to fail independently of the test token");
+            Assert.Equal(0, pool.Outstanding);
+            Assert.Equal(1, endpoint.Connection.Disposals);
         }
         finally
         {
@@ -279,7 +281,7 @@ public sealed class RuntimeLifecycleTests
             WriteStarted.TrySetResult();
             await ReleaseWrite.Task;
             // Borrowed sequence is still valid after Abort, until the actual write exits.
-            bytes.Length.Should().BeGreaterThan(0);
+            Assert.True(bytes.Length > 0, $"bytes.Length was {bytes.Length} but expected greater than 0");
             if (FailWrite) throw new IOException("write failed");
             if (Aborted.Task.IsCompleted) throw new IOException("aborted write");
         }
