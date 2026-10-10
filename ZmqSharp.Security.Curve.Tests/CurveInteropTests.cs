@@ -24,8 +24,8 @@ public sealed class CurveInteropTests
         if (localServer) reference.Options.CurveServerKey = server.PublicKey;
         else reference.Options.CurveServer = true;
         var mechanism = localServer
-            ? new CurveMechanism(Key32.From(server.SecretKey))
-            : new CurveMechanism(Key32.From(client.SecretKey), Key32.From(server.PublicKey));
+            ? new CurveMechanism(server.SecretKey)
+            : new CurveMechanism(client.SecretKey, server.PublicKey);
         await using var local = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = mechanism }

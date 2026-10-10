@@ -30,7 +30,7 @@ public sealed class CurveEndToEndTests
 
         await using var server = new ZPairSocket(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverKeys.Secret) },
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverKeys.Secret.Span) },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
 
@@ -38,7 +38,7 @@ public sealed class CurveEndToEndTests
         {
             Security = new ZSecurityOptions
             {
-                Mechanism = new CurveMechanism(clientKeys.Secret, serverKeys.Public)
+                Mechanism = new CurveMechanism(clientKeys.Secret.Span, serverKeys.Public.Span)
             },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
@@ -78,7 +78,7 @@ public sealed class CurveEndToEndTests
 
         await using var server = new ZPairSocket(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverSecret) },
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverSecret.Span) },
             ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
         });
 
@@ -88,7 +88,7 @@ public sealed class CurveEndToEndTests
             {
                 // The client holds a different server public key: the WELCOME
                 // box never opens, and establishment must fault.
-                Mechanism = new CurveMechanism(clientSecret, wrongPublic)
+                Mechanism = new CurveMechanism(clientSecret.Span, wrongPublic.Span)
             },
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
