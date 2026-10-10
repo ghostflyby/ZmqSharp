@@ -11,9 +11,9 @@ namespace ZmqSharp.Security.Curve;
 /// <see cref="ZMechanismContext"/>, and the session returns a
 /// <see cref="CurveFrameCodec"/> that encrypts traffic frames. The
 /// protocol layout follows the maintained libzmq/NetMQ reference; only the
-/// crypto primitives come from the internal <see cref="CurveCrypto"/> primitives.
-/// The handshake builds every fixed-size stage buffer with stackalloc and the
-/// destination-style backend, so it allocates only the command frames
+/// crypto primitives are the internal <see cref="CurveCrypto"/> static implementations.
+/// The handshake builds every fixed-size stage buffer with stackalloc and
+/// destination-style primitive calls, so it allocates only the command frames
 /// themselves (0027).
 /// </summary>
 public sealed class CurveMechanism : IZSecurityMechanism

@@ -7,10 +7,10 @@ using Xunit;
 namespace ZmqSharp.Security.Curve.Tests;
 
 /// <summary>
-/// End-to-end CURVE tests: two ZmqSharp sockets configured with the
-/// internal <see cref="CurveMechanism"/> authenticate and then exchange
-/// encrypted messages over TCP. The in-box BouncyCastle primitives are used;
-/// per RFC 25 the primitives are fixed on the wire, so a different crypto
+/// End-to-end CURVE tests: two ZmqSharp sockets configured with the in-box
+/// <see cref="CurveMechanism"/> authenticate and then exchange encrypted
+/// messages over TCP. The in-box BouncyCastle primitives are used; per
+/// RFC 25 the primitives are fixed on the wire, so a different crypto
 /// library would ship as a byte-equivalent port, not a swappable backend.
 /// </summary>
 public sealed class CurveEndToEndTests

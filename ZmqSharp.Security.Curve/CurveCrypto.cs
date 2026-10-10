@@ -2,8 +2,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math.EC.Rfc7748;
 
 namespace ZmqSharp.Security.Curve;
@@ -84,7 +82,7 @@ internal struct Key32 : IEquatable<Key32>
 /// the one-time Poly1305 key, the rest encrypts the message. The Salsa20 core
 /// and Poly1305 are hand-written (0027) in the style of the existing HSalsa20,
 /// so the hot path is stateless and allocates nothing; BouncyCastle is used
-/// only for X25519 and Ed25519. libsodium known vectors lock the wire bytes.
+/// only for X25519. libsodium known vectors lock the wire bytes.
 /// </summary>
 internal static class CurveCrypto
 {
@@ -178,25 +176,6 @@ internal static class CurveCrypto
         XorWithKeystream(ciphertext, destination[..ciphertext.Length], key, nonce);
         written = ciphertext.Length;
         return true;
-    }
-
-    public static void Sign(ReadOnlySpan<byte> message, ReadOnlySpan<byte> secretKey, Span<byte> signature)
-    {
-        if (signature.Length < 64)
-            throw new ArgumentException("destination is too small for the signature", nameof(signature));
-
-        var signer = new Ed25519Signer();
-        signer.Init(true, new Ed25519PrivateKeyParameters(secretKey));
-        signer.BlockUpdate(message);
-        signer.GenerateSignature().CopyTo(signature);
-    }
-
-    public static bool Verify(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> publicKey)
-    {
-        var verifier = new Ed25519Signer();
-        verifier.Init(false, new Ed25519PublicKeyParameters(publicKey));
-        verifier.BlockUpdate(message);
-        return verifier.VerifySignature([.. signature]);
     }
 
     public static void RandomBytes(Span<byte> destination)

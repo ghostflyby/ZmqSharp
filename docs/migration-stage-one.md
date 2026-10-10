@@ -74,8 +74,13 @@ socket.PeerEnded += (_, failure) =>
 };
 ```
 
-Custom `ICurveCryptoBackend` implementations must add
-`DerivePublicKey(ReadOnlySpan<byte> secretKey, Span<byte> publicKey)` for X25519.
-The default backend checks a 32-byte secret and at least 32 destination bytes.
-Existing `Key32`, message construction factories, and configuration defaults
-remain available. The default backend still brings the BouncyCastle package.
+The CURVE security mechanism is now internal to the
+`ZmqSharp.Security.Curve` package: enable it with
+`new ZSecurityOptions { Mechanism = new CurveMechanism(serverSecret) }`
+(server role) or `new CurveMechanism(clientSecret, serverPublicKey)`
+(client role), where the keys are 32-byte spans copied at construction.
+Custom crypto backends are no longer a public extension point: RFC 25
+fixes the CURVE primitives on the wire, and the in-box BouncyCastle
+implementation is byte-for-byte compatible with libsodium's crypto_box.
+Message construction factories and configuration defaults remain
+available.
