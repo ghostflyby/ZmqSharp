@@ -240,9 +240,9 @@ required final checks; section 9 records their results.
 The following results were recorded locally on macOS ARM64:
 
 - Release solution build: zero warnings and errors, with warnings-as-errors.
-- Full xUnit/FluentAssertions suite, including allocation gates: 412 passed.
+- Full xUnit suite, including allocation gates: 412 passed.
 - Solution and both engineering harnesses pass format verification.
-- Native AOT published and executed on osx-arm64: AOT-SMOKE-OK. The smoke
+- Native AOT published and executed on osx-arm64. The external consumer
   assembly has no access to internals and implements a public mechanism/codec
   and a byte-only transport adapter; it exchanges NULL and reverse-topology
   CURVE over TCP and IPC.
@@ -255,24 +255,12 @@ wire fixtures now test length-prefixed credentials, binary passwords, octet size
 limits and HELLO/WELCOME/INITIATE/READY. The legacy fixtures had been mislabeled
 as RFC 27, which specifies ZAP rather than the PLAIN wire mechanism.
 
-### Automated external consumer validation
+Additional historical Linux validation ran on pull request #41 and on main at
+commit `767974e` (2026-10-08). The native consumer and all four PLAIN role/bind
+combinations passed, and all three platform jobs reported 412 tests with zero
+failures.
 
-`consumer-validation.yml` exposes both `workflow_call` and `workflow_dispatch`.
-CI calls it for pull requests, pushes to main and manual CI runs. The existing
-release requirement for a successful CI run on the same commit therefore includes
-this validation. Published-package smoke remains a separate manual workflow.
-
-The consumer job runs on Ubuntu and publishes the public-extension smoke as
-`linux-x64` Native AOT with warnings-as-errors. It installs the native build
-prerequisites, uses Python 3.12 with pyzmq 27.1.0, runs NULL and reverse-topology
-CURVE over TCP/IPC, and checks all four PLAIN role/bind combinations with that
-same native executable. It also builds the allocation measurement consumer and
-verifies formatting of both engineering projects; performance measurements remain
-manual. The job has a 20-minute timeout and uploads its logs regardless of outcome.
-
-The validation has run in CI: on pull request #41 and on main at commit
-`767974e` (2026-10-08). The AOT consumer printed `AOT-SMOKE-OK`, the PLAIN
-harness passed all four role/bind combinations, and all three platform jobs
-reported 412 tests with zero failures. Linux AOT and PLAIN acceptance therefore
-rest on a recorded workflow run. The local macOS evidence above is retained
-independently.
+The external consumer harness and its dedicated workflow have since been removed.
+These results are historical evidence, not current CI coverage. CI builds, tests
+and checks formatting of the solution. Published-package smoke remains a separate
+manual workflow.

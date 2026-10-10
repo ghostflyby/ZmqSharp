@@ -95,6 +95,5 @@ retirement or naming migration is needed for the built-in coordinator model.
 
 Reference verification also found that the old PLAIN wire sequence used metadata
 credentials and READY instead of INITIATE. The implementation now uses RFC 24
-length-prefixed credentials and HELLO/WELCOME/INITIATE/READY, with a libzmq
-interop harness in eng/aot-smoke. See 0030 for allocation measurements and final
-build/test/AOT evidence.
+length-prefixed credentials and HELLO/WELCOME/INITIATE/READY. See 0030 for
+allocation measurements and historical build/test/AOT and libzmq interop evidence.
