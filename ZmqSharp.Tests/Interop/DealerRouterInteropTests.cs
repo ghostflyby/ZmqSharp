@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -29,13 +28,13 @@ public sealed class DealerRouterInteropTests
         // Ours -> NetMQ.
         await ours.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
         var received = InteropHelpers.ReceiveFrame(dealer, TimeSpan.FromSeconds(5));
-        received.Should().Equal([.. "hello"u8]);
+        Assert.Equal([.. "hello"u8], received);
 
         // NetMQ -> ours.
         dealer.SendFrame([.. "world"u8]);
         var message = await ReadMessageAsync(ours.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "world"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "world"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -59,14 +58,14 @@ public sealed class DealerRouterInteropTests
         dealer.SendFrame([.. "ping"u8]);
         var routed = await routedMessage.Task.WaitAsync(token);
         var identity = routed[0].ToSequence().ToArray();
-        identity.Should().NotBeEmpty();
-        routed[1].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
+        Assert.NotEmpty(identity);
+        Assert.Equal([.. "ping"u8], routed[1].ToSequence().ToArray());
         routed.Dispose();
 
         // Reply with the identity frame -> routes back to the dealer.
         await router.SendAsync(identity, ZMessage.FromOwned([.. "pong"u8]), token);
         var reply = InteropHelpers.ReceiveFrame(dealer, TimeSpan.FromSeconds(5));
-        reply.Should().Equal([.. "pong"u8]);
+        Assert.Equal([.. "pong"u8], reply);
     }
 
     [Fact(Timeout = 20_000)]
@@ -90,22 +89,22 @@ public sealed class DealerRouterInteropTests
         // advertised identity, followed by the payload.
         await dealer.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
         var message = new NetMQMessage();
-        router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
-        message.Should().NotBeNull();
-        message.FrameCount.Should().Be(2);
+        Assert.True(router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message));
+        Assert.NotNull(message);
+        Assert.Equal(2, message.FrameCount);
         if (message[0] is not { } identityFrame)
             throw new InvalidOperationException("the router must prefix the advertised identity");
         if (message[1] is not { } payloadFrame)
             throw new InvalidOperationException("the router must deliver the payload frame");
 
-        identityFrame.ToByteArray().Should().Equal(identity);
-        payloadFrame.ToByteArray().Should().Equal([.. "hello"u8]);
+        Assert.Equal(identity, identityFrame.ToByteArray());
+        Assert.Equal([.. "hello"u8], payloadFrame.ToByteArray());
 
         // NetMQ router -> dealer, addressed by that identity: routes back.
         router.SendMoreFrame(identity).SendFrame([.. "pong"u8]);
         var reply = await ReadMessageAsync(dealer.Messages, TimeSpan.FromSeconds(5), token);
-        reply.Should().NotBeNull();
-        reply.Value[0].ToSequence().ToArray().Should().Equal([.. "pong"u8]);
+        Assert.NotNull(reply);
+        Assert.Equal([.. "pong"u8], reply.Value[0].ToSequence().ToArray());
         reply.Value.Dispose();
     }
 

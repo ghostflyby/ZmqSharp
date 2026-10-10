@@ -8,7 +8,7 @@ Engineering constraints for ZmqSharp.
 
 ## Testing
 
-- Test framework: xUnit; assertions: FluentAssertions.
+- Test framework: xUnit; assertions: xUnit's `Assert` API only.
 - Test project: `ZmqSharp.Tests`, reaching internals via `InternalsVisibleTo`.
 
 ## Code Style

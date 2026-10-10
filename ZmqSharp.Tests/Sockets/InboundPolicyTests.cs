@@ -1,5 +1,4 @@
 using System.Buffers;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 
@@ -21,8 +20,8 @@ public sealed class InboundPolicyTests
 
         var decision = await ZInboundPolicy.PassThrough.DecideAsync(new ZPeer(), message, token);
 
-        decision.Action.Should().Be(ZInboundAction.Deliver);
-        decision.Message.Should().BeNull();
+        Assert.Equal(ZInboundAction.Deliver, decision.Action);
+        Assert.Null(decision.Message);
         message.Dispose();
     }
 
@@ -39,7 +38,7 @@ public sealed class InboundPolicyTests
 
         var decision = await policy.DecideAsync(new ZPeer(), message, token);
 
-        decision.Action.Should().Be(ZInboundAction.Drop);
+        Assert.Equal(ZInboundAction.Drop, decision.Action);
     }
 
     [Fact]
@@ -55,7 +54,7 @@ public sealed class InboundPolicyTests
 
         var decision = await policy.DecideAsync(new ZPeer(), message, token);
 
-        decision.Action.Should().Be(ZInboundAction.Consumed);
+        Assert.Equal(ZInboundAction.Consumed, decision.Action);
     }
 
     [Fact]
@@ -63,9 +62,9 @@ public sealed class InboundPolicyTests
     {
         var type = ZSocketType.ForCustom("FOO");
 
-        type.Name.Should().Be("FOO");
-        type.AcceptsPeer("FOO").Should().BeTrue();
-        type.AcceptsPeer("PAIR").Should().BeFalse();
+        Assert.Equal("FOO", type.Name);
+        Assert.True(type.AcceptsPeer("FOO"));
+        Assert.False(type.AcceptsPeer("PAIR"));
     }
 
     [Theory(Timeout = 10_000)]
@@ -86,11 +85,11 @@ public sealed class InboundPolicyTests
         await client.SendAsync(ZMessage.FromOwned([.. "ping"u8]), token);
 
         var message = await received.Task.WaitAsync(token);
-        message.Count.Should().Be(2);
+        Assert.Equal(2, message.Count);
         byte[] prefix = [.. "!"u8];
         byte[] payload = [.. "ping"u8];
-        message[0].ToSequence().ToArray().Should().Equal(prefix);
-        message[1].ToSequence().ToArray().Should().Equal(payload);
+        Assert.Equal(prefix, message[0].ToSequence().ToArray());
+        Assert.Equal(payload, message[1].ToSequence().ToArray());
         message.Dispose();
     }
 
@@ -123,10 +122,8 @@ public sealed class InboundPolicyTests
         // stream, so the raw frame surface must fail loudly instead of
         // silently delivering nothing (subagent review finding).
         await using var router = new ZRouterSocket(new ZSocketOptions { ReceiveSurface = ZReceiveSurface.Callback });
-        var act = () => router.OnFrame += (_, _) => true;
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*composed inbound policy*");
+        var ex = Assert.Throws<InvalidOperationException>(() => router.OnFrame += (_, _) => true);
+        Assert.Contains("composed inbound policy", ex.Message);
     }
 
     [Fact]
@@ -140,7 +137,7 @@ public sealed class InboundPolicyTests
             return true;
         };
 
-        subscribed.Should().BeFalse();
+        Assert.False(subscribed);
     }
 
     /// <summary>Delivers every message prefixed with "!" (frames moved, 0007 M3).</summary>

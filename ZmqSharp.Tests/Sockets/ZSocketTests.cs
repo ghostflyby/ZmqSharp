@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
@@ -39,9 +38,9 @@ public sealed class ZSocketTests
         }
 
         var received = echo ?? throw new InvalidOperationException("no echo received within timeout");
-        received.Count.Should().Be(2);
-        received[0].ToSequence().ToArray().Should().Equal(frames[0]);
-        received[1].ToSequence().ToArray().Should().Equal(frames[1]);
+        Assert.Equal(2, received.Count);
+        Assert.Equal(frames[0], received[0].ToSequence().ToArray());
+        Assert.Equal(frames[1], received[1].ToSequence().ToArray());
         received.Dispose();
 
         await pump.CancelAsync();
@@ -88,8 +87,8 @@ public sealed class ZSocketTests
 
         await bothReached.Task.WaitAsync(token);
 
-        countA.Should().BeGreaterThanOrEqualTo(1);
-        countB.Should().BeGreaterThanOrEqualTo(1);
+        Assert.True(countA >= 1, $"countA was {countA}, expected at least 1");
+        Assert.True(countB >= 1, $"countB was {countB}, expected at least 1");
 
         void OnPeerMessage(bool peerA)
         {
@@ -147,8 +146,8 @@ public sealed class ZSocketTests
             }
         }
 
-        hasA.Should().BeTrue();
-        hasB.Should().BeTrue();
+        Assert.True(hasA);
+        Assert.True(hasB);
     }
 
     [Fact]
@@ -161,7 +160,7 @@ public sealed class ZSocketTests
 
         await socket.SendAsync(message, token);
 
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 10_000)]
@@ -189,13 +188,13 @@ public sealed class ZSocketTests
             received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
-        received.Should().NotBeNull();
-        received.Value[0].TryGetValue(out ZSegment segment).Should().BeTrue();
-        segment.GetOwnedArray(out var array).Should().BeTrue();
-        array.Should().Equal([.. "hello"u8]);
+        Assert.NotNull(received);
+        Assert.True(received.Value[0].TryGetValue(out ZSegment segment));
+        Assert.True(segment.GetOwnedArray(out var array));
+        Assert.Equal([.. "hello"u8], array);
         var outstandingBeforeDispose = pool.Outstanding;
         received.Value.Dispose();
-        pool.Outstanding.Should().Be(outstandingBeforeDispose);
+        Assert.Equal(outstandingBeforeDispose, pool.Outstanding);
     }
 
     [Theory(Timeout = 10_000)]
@@ -225,12 +224,12 @@ public sealed class ZSocketTests
             received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
-        received.Should().NotBeNull();
-        received.Value.Count.Should().Be(2);
+        Assert.NotNull(received);
+        Assert.Equal(2, received.Value.Count);
         received.Value[0].TryGetValue(out ZSegment first);
-        first.GetOwnedArray(out _).Should().BeFalse();
+        Assert.False(first.GetOwnedArray(out _));
         received.Value[1].TryGetValue(out ZSegment second);
-        second.GetOwnedArray(out _).Should().BeTrue();
+        Assert.True(second.GetOwnedArray(out _));
         received.Value.Dispose();
     }
 
@@ -260,9 +259,9 @@ public sealed class ZSocketTests
             received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
-        received.Should().NotBeNull();
-        received.Value[0].TryGetValue(out ZSegments _).Should().BeTrue();
-        received.Value[0].ToSequence().ToArray().Should().Equal(payload);
+        Assert.NotNull(received);
+        Assert.True(received.Value[0].TryGetValue(out ZSegments _));
+        Assert.Equal(payload, received.Value[0].ToSequence().ToArray());
         received.Value.Dispose();
     }
 
@@ -297,12 +296,12 @@ public sealed class ZSocketTests
             received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
-        received.Should().NotBeNull();
-        received.Value.Count.Should().Be(2);
-        received.Value[0].TryGetValue(out ZSegments _).Should().BeTrue();
-        received.Value[1].TryGetValue(out ZSegments _).Should().BeTrue();
-        received.Value[0].ToSequence().ToArray().Should().Equal(first);
-        received.Value[1].ToSequence().ToArray().Should().Equal(second);
+        Assert.NotNull(received);
+        Assert.Equal(2, received.Value.Count);
+        Assert.True(received.Value[0].TryGetValue(out ZSegments _));
+        Assert.True(received.Value[1].TryGetValue(out ZSegments _));
+        Assert.Equal(first, received.Value[0].ToSequence().ToArray());
+        Assert.Equal(second, received.Value[1].ToSequence().ToArray());
         received.Value.Dispose();
     }
 
@@ -312,12 +311,12 @@ public sealed class ZSocketTests
         var policy = new ZReceiveOptions { ContiguousFrameLimit = 100 };
 
         var small = policy.Decide(new ZReceiveContext { FrameLength = 10 });
-        small.Mode.Should().Be(ZReceiveMode.Pooled);
-        small.Segmented.Should().BeFalse();
+        Assert.Equal(ZReceiveMode.Pooled, small.Mode);
+        Assert.False(small.Segmented);
 
         var large = policy.Decide(new ZReceiveContext { FrameLength = 200 });
-        large.Mode.Should().Be(ZReceiveMode.Pooled);
-        large.Segmented.Should().BeTrue();
+        Assert.Equal(ZReceiveMode.Pooled, large.Mode);
+        Assert.True(large.Segmented);
     }
 
     [Theory(Timeout = 10_000)]
@@ -360,9 +359,9 @@ public sealed class ZSocketTests
         var smallMessage = received.First(message => message[0].ToSequence().Length == small.Length);
         var largeMessage = received.First(message => message[0].ToSequence().Length == large.Length);
         smallMessage[0].TryGetValue(out ZSegment smallSegment);
-        smallSegment.GetOwnedArray(out _).Should().BeFalse();
+        Assert.False(smallSegment.GetOwnedArray(out _));
         largeMessage[0].TryGetValue(out ZSegment largeSegment);
-        largeSegment.GetOwnedArray(out _).Should().BeTrue();
+        Assert.True(largeSegment.GetOwnedArray(out _));
         smallMessage.Dispose();
         largeMessage.Dispose();
     }
@@ -395,12 +394,12 @@ public sealed class ZSocketTests
             received = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
         }
 
-        received.Should().NotBeNull();
+        Assert.NotNull(received);
         received.Value[0].TryGetValue(out ZSegment segment);
-        segment.GetOwnedArray(out _).Should().BeTrue();
+        Assert.True(segment.GetOwnedArray(out _));
         var outstandingBeforeDispose = pool.Outstanding;
         received.Value.Dispose();
-        pool.Outstanding.Should().Be(outstandingBeforeDispose);
+        Assert.Equal(outstandingBeforeDispose, pool.Outstanding);
     }
 
     [Fact]
@@ -408,7 +407,7 @@ public sealed class ZSocketTests
     {
         var socket = new ZPairSocket(new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true } });
         await socket.DisposeAsync();
-        socket.Messages.Completion.IsCompleted.Should().BeTrue();
+        Assert.True(socket.Messages.Completion.IsCompleted);
     }
 
     [Fact(Timeout = 10_000)]
@@ -429,8 +428,9 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var messages = server.Messages;
-        (await peerEnded.Task.WaitAsync(token)).Should().BeOfType<ZeroMqProtocolException>();
-        messages.Completion.IsCompleted.Should().BeFalse();
+        var peerFailure = await peerEnded.Task.WaitAsync(token);
+        Assert.IsType<ZeroMqProtocolException>(peerFailure);
+        Assert.False(messages.Completion.IsCompleted);
     }
 
     [Fact(Timeout = 15_000)]
@@ -451,8 +451,8 @@ public sealed class ZSocketTests
         await raw.GetStream().ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
 
         var failure = await Record.ExceptionAsync(() => connectTask.WaitAsync(token));
-        failure.Should().NotBeNull();
-        (failure is TimeoutException or OperationCanceledException).Should().BeTrue();
+        Assert.NotNull(failure);
+        Assert.True(failure is TimeoutException or OperationCanceledException);
     }
 
     [Fact(Timeout = 10_000)]
@@ -479,7 +479,7 @@ public sealed class ZSocketTests
         await second.ConnectAsync(IPAddress.Loopback, port, token);
         var secondStream = second.GetStream();
         var probe = await secondStream.ReadAsync(new byte[64], token).AsTask().WaitAsync(token);
-        probe.Should().Be(0);
+        Assert.Equal(0, probe);
     }
 
     [Fact(Timeout = 10_000)]
@@ -502,9 +502,8 @@ public sealed class ZSocketTests
         await stream.WriteAsync(v2Greeting, token);
         await stream.FlushAsync(token);
 
-        var failure = await peerEnded.Task.WaitAsync(token);
-        failure.Should().BeOfType<ZeroMqProtocolException>();
-        failure.Message.Should().Contain("ZMTP 2.0 peers are not supported");
+        var failure = Assert.IsType<ZeroMqProtocolException>(await peerEnded.Task.WaitAsync(token));
+        Assert.Contains("ZMTP 2.0 peers are not supported", failure.Message);
     }
 
     [Fact(Timeout = 10_000)]
@@ -528,7 +527,7 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var failure = await peerEnded.Task.WaitAsync(token);
-        failure.Should().BeOfType<ZeroMqProtocolException>();
+        Assert.IsType<ZeroMqProtocolException>(failure);
     }
 
     [Fact]
@@ -537,7 +536,7 @@ public sealed class ZSocketTests
         // The command-size limit is mandatory and cannot be disabled entirely
         // (0008 Slice B completion gate).
         var act = () => new ZSocketOptions { MaxCommandSize = ZSocketOptions.MinMaxCommandSize - 1 };
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Assert.Throws<ArgumentOutOfRangeException>(act);
     }
 
     [Fact]
@@ -547,7 +546,7 @@ public sealed class ZSocketTests
         // not compose a queue, so Messages is unavailable.
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = new TestMessageSink(_ => { }) });
         var act = () => socket.Messages;
-        act.Should().Throw<InvalidOperationException>();
+        Assert.Throws<InvalidOperationException>(act);
     }
 
     [Fact]
@@ -560,8 +559,8 @@ public sealed class ZSocketTests
             MessageSink = new TestMessageSink(_ => { }),
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*queue surface*");
+        var ex = Assert.Throws<InvalidOperationException>(act);
+        Assert.Contains("queue surface", ex.Message);
     }
 
     [Fact]
@@ -572,8 +571,8 @@ public sealed class ZSocketTests
             ReceiveSurface = ZReceiveSurface.Callback,
             MaxFrameLength = 4
         });
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*queue surface*");
+        var ex = Assert.Throws<InvalidOperationException>(act);
+        Assert.Contains("queue surface", ex.Message);
     }
 
     [Fact]
@@ -584,8 +583,8 @@ public sealed class ZSocketTests
         {
             ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
         });
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*never composes a queue*");
+        var ex = Assert.Throws<InvalidOperationException>(act);
+        Assert.Contains("never composes a queue", ex.Message);
     }
 
     [Theory(Timeout = 15_000)]
@@ -606,17 +605,17 @@ public sealed class ZSocketTests
         await client.SendAsync(MessageFactory.Multipart([.. "ping"u8], [.. "pong"u8]), token);
 
         var message = await received.Task.WaitAsync(token);
-        message.Count.Should().Be(2);
-        message[0].ToSequence().ToArray().Should().Equal([.. "ping"u8]);
-        message[1].ToSequence().ToArray().Should().Equal([.. "pong"u8]);
+        Assert.Equal(2, message.Count);
+        Assert.Equal([.. "ping"u8], message[0].ToSequence().ToArray());
+        Assert.Equal([.. "pong"u8], message[1].ToSequence().ToArray());
 
         // The surface owns the message and disposes it; the only remaining
         // rental is the server parser's greeting scratch, released on dispose.
         message.Dispose();
-        pool.Outstanding.Should().Be(1);
+        Assert.Equal(1, pool.Outstanding);
 
         await server.DisposeAsync();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 10_000)]
@@ -653,8 +652,8 @@ public sealed class ZSocketTests
             }
         }
 
-        received.Should().Be(count);
-        server.ReceiveRejections.Should().Be(0);
+        Assert.Equal(count, received);
+        Assert.Equal(0, server.ReceiveRejections);
     }
 
     [Fact]
@@ -664,7 +663,7 @@ public sealed class ZSocketTests
         // (0007 section 1): exactly one consumer of the delivery stream.
         await using var socket = new ZPairSocket(new ZSocketOptions { MessageSink = new TestMessageSink(_ => { }) });
         var act = () => socket.OnFrame += (_, _) => true;
-        act.Should().Throw<InvalidOperationException>();
+        Assert.Throws<InvalidOperationException>(act);
     }
 
     [Theory(Timeout = 20_000)]
@@ -705,12 +704,12 @@ public sealed class ZSocketTests
         // every message actually arrived.
         await allReceived.Task.WaitAsync(token);
 
-        received.Should().HaveCount(100);
+        Assert.Equal(100, received.Count);
         foreach (var message in received)
         {
-            message.Should().HaveCount(3);
-            message[0][0].Should().Be(message[1][0]);
-            message[0][0].Should().Be(message[2][0]);
+            Assert.Equal(3, message.Length);
+            Assert.Equal(message[1][0], message[0][0]);
+            Assert.Equal(message[2][0], message[0][0]);
         }
     }
 
@@ -737,7 +736,7 @@ public sealed class ZSocketTests
         // (Linux), or be dropped before the connection is set up (macOS);
         // in every case the socket must dispose without faulting.
         var ended = await Task.WhenAny(peerEnded.Task, Task.Delay(TimeSpan.FromSeconds(1), token));
-        if (ended == peerEnded.Task) (await peerEnded.Task is null or IOException).Should().BeTrue();
+        if (ended == peerEnded.Task) Assert.True(await peerEnded.Task is null or IOException);
     }
 
     [Theory(Timeout = 30_000)]
@@ -767,7 +766,7 @@ public sealed class ZSocketTests
                 }
             }
 
-            received.Should().BeTrue();
+            Assert.True(received);
         }
     }
 
@@ -795,8 +794,8 @@ public sealed class ZSocketTests
             caught = ex;
         }
 
-        caught.Should().NotBeNull();
-        (caught is IOException or SocketException).Should().BeTrue();
+        Assert.NotNull(caught);
+        Assert.True(caught is IOException or SocketException);
     }
 
     [Fact(Timeout = 10_000)]
@@ -816,7 +815,7 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var act = () => connectTask;
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(act);
     }
 
     [Fact(Timeout = 15_000)]
@@ -836,7 +835,7 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var act = () => connectTask;
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(act);
 
         // RFC 23: the peer must receive an ERROR command before the disconnect.
         var received = new MemoryStream();
@@ -856,7 +855,8 @@ public sealed class ZSocketTests
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
 
-        received.ToArray().AsSpan().IndexOf("ERROR"u8).Should().BeGreaterThanOrEqualTo(0);
+        var errorIndex = received.ToArray().AsSpan().IndexOf("ERROR"u8);
+        Assert.True(errorIndex >= 0, $"errorIndex was {errorIndex}, expected at least 0");
     }
 
     [Fact(Timeout = 10_000)]
@@ -894,7 +894,7 @@ public sealed class ZSocketTests
         await cancellation.CancelAsync();
 
         var act = () => connectTask;
-        await act.Should().ThrowAsync<OperationCanceledException>();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(act);
     }
 
     [Fact(Timeout = 15_000)]
@@ -926,10 +926,9 @@ public sealed class ZSocketTests
             caught = ex;
         }
 
-        caught.Should().NotBeNull();
-        caught.Should().NotBeOfType<TimeoutException>();
-        (caught is OperationCanceledException or IOException or SocketException or ObjectDisposedException).Should()
-            .BeTrue();
+        Assert.NotNull(caught);
+        Assert.IsNotType<TimeoutException>(caught);
+        Assert.True(caught is OperationCanceledException or IOException or SocketException or ObjectDisposedException);
     }
 
     [Fact(Timeout = 10_000)]
@@ -968,7 +967,7 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var act = () => connectTask;
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(act);
     }
 
     [Fact]
@@ -979,7 +978,7 @@ public sealed class ZSocketTests
 
         var act = () => client.ConnectAsync<EndPoint, SynchronousEofTransport>(
             new IPEndPoint(IPAddress.Loopback, 1), token);
-        await act.Should().ThrowAsync<IOException>();
+        await Assert.ThrowsAsync<IOException>(act);
 
         // A failed attempt must not leave a dead peer routable: sending with no
         // established peers drops the message instead of faulting the socket.
@@ -1006,9 +1005,9 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var failure = await peerEnded.Task.WaitAsync(token);
-        failure.Should().BeOfType<InvalidOperationException>();
+        Assert.IsType<InvalidOperationException>(failure);
         await server.DisposeAsync();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 15_000)]
@@ -1034,12 +1033,12 @@ public sealed class ZSocketTests
         await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
         var failure = await peerEnded.Task.WaitAsync(token);
-        var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
-        rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
-        rejected.Rejection.Limit.Should().Be(4);
-        rejected.Rejection.Actual.Should().Be(5);
-        server.ReceiveRejections.Should().Be(1);
-        pool.Outstanding.Should().Be(0);
+        var rejected = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejected.Rejection.Reason);
+        Assert.Equal(4, rejected.Rejection.Limit);
+        Assert.Equal(5, rejected.Rejection.Actual);
+        Assert.Equal(1, server.ReceiveRejections);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 15_000)]
@@ -1065,12 +1064,12 @@ public sealed class ZSocketTests
         await client.SendAsync(MessageFactory.Multipart([.. "aaaaaa"u8], [.. "bbbbbb"u8]), token);
 
         var failure = await peerEnded.Task.WaitAsync(token);
-        var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
-        rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.MessageTooLarge);
-        rejected.Rejection.Limit.Should().Be(10);
-        rejected.Rejection.Actual.Should().Be(12);
-        server.ReceiveRejections.Should().Be(1);
-        pool.Outstanding.Should().Be(0);
+        var rejected = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.MessageTooLarge, rejected.Rejection.Reason);
+        Assert.Equal(10, rejected.Rejection.Limit);
+        Assert.Equal(12, rejected.Rejection.Actual);
+        Assert.Equal(1, server.ReceiveRejections);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 10_000)]
@@ -1102,7 +1101,7 @@ public sealed class ZSocketTests
             }
         }
 
-        first.Should().BeTrue();
+        Assert.True(first);
 
         // The oversized message rejects the peer; later sends must not be
         // delivered to the server.
@@ -1110,7 +1109,7 @@ public sealed class ZSocketTests
         await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), token);
 
         var extra = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), token);
-        extra.Should().BeNull();
+        Assert.Null(extra);
     }
 
     [Theory(Timeout = 25_000)]
@@ -1138,7 +1137,7 @@ public sealed class ZSocketTests
         // close propagation is OS-dependent (Windows/Ubuntu runners can lag),
         // so the wait window is generous.
         var failure = await clientEnded.Task.WaitAsync(token);
-        (failure is null or IOException or SocketException).Should().BeTrue();
+        Assert.True(failure is null or IOException or SocketException);
     }
 
     [Theory(Timeout = 15_000)]
@@ -1163,9 +1162,9 @@ public sealed class ZSocketTests
         // Prove the probe works for in-limit frames.
         await client.SendAsync(ZMessage.FromOwned([.. "ok"u8]), token);
         var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), token);
-        message.Should().NotBeNull();
+        Assert.NotNull(message);
         message.Value.Dispose();
-        pool.Rentals.Should().BeGreaterThan(0);
+        Assert.True(pool.Rentals > 0, $"pool.Rentals was {pool.Rentals}, expected at least 1");
 
         // The over-limit frame is rejected before any allocation; wait for the
         // deterministic rejection signal (the materializer's internal event)
@@ -1176,7 +1175,7 @@ public sealed class ZSocketTests
         pool.Reset();
         await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
         await rejected.Task.WaitAsync(token);
-        pool.Rentals.Should().Be(0);
+        Assert.Equal(0, pool.Rentals);
     }
 
     [Theory(Timeout = 15_000)]
@@ -1204,9 +1203,9 @@ public sealed class ZSocketTests
         await client.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
         var failure = await peerEnded.Task.WaitAsync(token);
-        var rejected = failure.Should().BeOfType<ZReceiveRejectedException>().Which;
-        rejected.Rejection.Reason.Should().Be(ZReceiveRejectionReason.FrameTooLarge);
-        server.ReceiveRejections.Should().Be(1);
+        var rejected = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejected.Rejection.Reason);
+        Assert.Equal(1, server.ReceiveRejections);
     }
 
     [Theory(Timeout = 10_000)]
@@ -1230,13 +1229,13 @@ public sealed class ZSocketTests
         while (received.Count < count)
         {
             var message = await TryReadAsync(server.Messages, TimeSpan.FromMilliseconds(500), token);
-            message.Should().NotBeNull();
+            Assert.NotNull(message);
             received.Add(message.Value[0].ToSequence().ToArray()[0]);
             message.Value.Dispose();
         }
 
-        received.Should().HaveCount(count);
-        received.Should().Equal(Enumerable.Range(0, count).Select(i => (byte)i));
+        Assert.Equal(count, received.Count);
+        Assert.Equal(Enumerable.Range(0, count).Select(i => (byte)i), received);
     }
 
     [Theory(Timeout = 10_000)]
@@ -1275,7 +1274,7 @@ public sealed class ZSocketTests
             }
         }
 
-        reachedB.Should().BeTrue("a full queue on peer A must not pause peer B's delivery");
+        Assert.True(reachedB);
         await pump.CancelAsync();
         try
         {
@@ -1313,14 +1312,14 @@ public sealed class ZSocketTests
         await dropTracking.WaitForDropsAsync(8, TimeSpan.FromSeconds(5));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
-        received.Should().Equal(0, 1);
+        Assert.Equal([0, 1], received);
 
         // The eight dropped messages were disposed by the library, never seen
         // by the consumer (0006 section 2.2).
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
 
         await server.DisposeAsync();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 20_000)]
@@ -1358,10 +1357,10 @@ public sealed class ZSocketTests
         await dropTracking.WaitForDropsAsync(1, TimeSpan.FromSeconds(5));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
-        received.Should().Equal(2, 4);
+        Assert.Equal([2, 4], received);
 
         await server.DisposeAsync();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 20_000)]
@@ -1395,10 +1394,10 @@ public sealed class ZSocketTests
         await dropTracking.WaitForDropsAsync(1, TimeSpan.FromSeconds(5));
 
         var received = await ReadAllAsync(server.Messages, TimeSpan.FromMilliseconds(200), token);
-        received.Should().Equal(3, 4);
+        Assert.Equal([3, 4], received);
 
         await server.DisposeAsync();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 25_000)]
@@ -1434,7 +1433,7 @@ public sealed class ZSocketTests
         await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
 
         await server.DisposeAsync();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Theory(Timeout = 20_000)]
@@ -1496,7 +1495,7 @@ public sealed class ZSocketTests
         // establishment gate and has dequeued nothing. The handshake's pool
         // rents are transient (released when establishment completes), so
         // only the buffered messages remain outstanding.
-        pool.Outstanding.Should().Be(2);
+        Assert.Equal(2, pool.Outstanding);
 
         await client.DisposeAsync();
 
@@ -1594,8 +1593,8 @@ public sealed class ZSocketTests
             var writeFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(message, token).AsTask());
             if (writeFailure is not null)
             {
-                writeFailure.Should().BeOfType<ChannelClosedException>();
-                writeFailure.InnerException.Should().BeOfType<ZeroMqProtocolException>();
+                var closed = Assert.IsType<ChannelClosedException>(writeFailure);
+                Assert.IsType<ZeroMqProtocolException>(closed.InnerException);
                 message.Dispose();
             }
         }
@@ -1608,17 +1607,17 @@ public sealed class ZSocketTests
         // completion signal: on a completed channel it resolves immediately,
         // surfacing the completion error (0006 3.5).
         var connectFailure = await Record.ExceptionAsync(() => connectTask.WaitAsync(token));
-        connectFailure.Should().BeOfType<ZeroMqProtocolException>();
+        Assert.IsType<ZeroMqProtocolException>(connectFailure);
 
         var waitFailure = await Record.ExceptionAsync(() => outbound.WaitToWriteAsync(token).AsTask());
-        waitFailure.Should().BeOfType<ZeroMqProtocolException>();
+        Assert.IsType<ZeroMqProtocolException>(waitFailure);
 
         // The completion is a terminal state, so a single write now fails
         // deterministically with the channel-closed failure.
         var probe = MessageFactory.PooledSingleFrame(pool, [.. "probe"u8]);
         var completedWriteFailure = await Record.ExceptionAsync(() => outbound.WriteAsync(probe, token).AsTask());
-        completedWriteFailure.Should().BeOfType<ChannelClosedException>();
-        completedWriteFailure.As<ChannelClosedException>().InnerException.Should().BeOfType<ZeroMqProtocolException>();
+        var completed = Assert.IsType<ChannelClosedException>(completedWriteFailure);
+        Assert.IsType<ZeroMqProtocolException>(completed.InnerException);
         probe.Dispose(); // never accepted: the channel is completed, so it must not leak
 
         await client.DisposeAsync();
@@ -1656,7 +1655,7 @@ public sealed class ZSocketTests
         // no-op. Debug boxes async state machines per call (a bare
         // synchronous-completing async ValueTask measures ~48 bytes/call
         // there), so the absolute gate only holds in Release (0006 3.6).
-        allocated.Should().BeLessThan(4096);
+        Assert.True(allocated < 4096, $"allocated was {allocated}, expected less than 4096");
 #else
         _ = allocated;
 #endif
@@ -1709,8 +1708,8 @@ public sealed class ZSocketTests
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        allocated.Should().BeLessThan(4096);
-        received.Should().Be(count);
+        Assert.True(allocated < 4096, $"allocated was {allocated}, expected less than 4096");
+        Assert.Equal(count, received);
     }
 
     [Fact(Timeout = 20_000)]
@@ -1780,7 +1779,7 @@ public sealed class ZSocketTests
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
 
-        failures.Should().BeEmpty();
+        Assert.Empty(failures);
 
         await server.DisposeAsync();
         await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
@@ -1809,7 +1808,7 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var act = () => connectTask;
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(act);
     }
 
     [Fact(Timeout = 10_000)]
@@ -1830,7 +1829,7 @@ public sealed class ZSocketTests
         await stream.FlushAsync(token);
 
         var act = () => connectTask;
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(act);
     }
 
     [Fact(Timeout = 30_000)]
@@ -1945,8 +1944,8 @@ public sealed class ZSocketTests
         {
             await client.SendAsync(ZMessage.FromOwned([payload]), token);
             var message = await TryReadAsync(messages, TimeSpan.FromSeconds(1), token);
-            message.Should().NotBeNull();
-            message.Value[0].ToSequence().ToArray()[0].Should().Be(payload);
+            Assert.NotNull(message);
+            Assert.Equal(payload, message.Value[0].ToSequence().ToArray()[0]);
             message.Value.Dispose();
         }
     }
@@ -2025,7 +2024,7 @@ public sealed class ZSocketTests
             token.ThrowIfCancellationRequested();
         }
 
-        finished.Should().BeSameAs(write, "a drop-mode producer must not block; the write budget was {0}", budget);
+        Assert.Same(write, finished);
         await write;
     }
 

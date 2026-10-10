@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Net;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.AllocationTests;
@@ -96,7 +95,8 @@ public class ReceiveAllocationTests
         var deltas = WindowDeltas(sink);
 
         // The counter on one thread is monotonic while this test owns it.
-        deltas.Min().Should().BeGreaterThanOrEqualTo(0);
+        var minDelta = deltas.Min();
+        Assert.True(minDelta >= 0, $"minimum delta {minDelta} should be >= 0");
 
         AssertPerMessageCostBounded(deltas, medianCeiling: 512);
     }
@@ -118,7 +118,7 @@ public class ReceiveAllocationTests
 
         // One rent per single-frame message (0008 Pooled materialization);
         // the +2 covers the parser's initial scratch rent and the handshake.
-        pool.Rentals.Should().Be(count + 2);
+        Assert.Equal(count + 2, pool.Rentals);
     }
 
     [Fact(Timeout = 15_000)]
@@ -146,7 +146,7 @@ public class ReceiveAllocationTests
         // whatever the host already allocated on that thread (under
         // Microsoft.Testing.Platform, discovery and other tests share the same
         // pool) rather than anything about this delivery.
-        sink.Samples[0].Should().BeGreaterThan(0);
+        Assert.True(sink.Samples[0] > 0, $"first sample {sink.Samples[0]} should be > 0");
     }
 
     [Fact(Timeout = 15_000)]
@@ -193,7 +193,8 @@ public class ReceiveAllocationTests
         await sink.WaitForAsync(MessageCount);
 
         var deltas = WindowDeltas(sink);
-        deltas.Min().Should().BeGreaterThanOrEqualTo(0);
+        var minDelta = deltas.Min();
+        Assert.True(minDelta >= 0, $"minimum delta {minDelta} should be >= 0");
 
         // ~2 pooled rents per two-frame message; the absolute gates are Release
         // only (see AssertPerMessageCostBounded).
@@ -216,8 +217,7 @@ public class ReceiveAllocationTests
         // a different thread than the release drain; the measured window
         // therefore starts after the sentinel.
         var windowThreads = sink.ThreadIds[(WarmupCount + 1)..].Distinct().ToArray();
-        windowThreads.Should().ContainSingle(
-            "the measured window must run on a single pump thread for the thread-local deltas to be valid");
+        Assert.True(windowThreads.Length == 1, $"the measured window must run on a single pump thread for the thread-local deltas to be valid, but saw {windowThreads.Length} distinct threads");
 
         var deltas = new long[MessageCount - WarmupCount - 2];
         for (var i = WarmupCount + 2; i < MessageCount; i++)
@@ -250,22 +250,20 @@ public class ReceiveAllocationTests
     {
 #if !DEBUG
         var excursions = deltas.Where(d => d > PerMessageCeiling).ToArray();
-        excursions.Length.Should().BeLessThanOrEqualTo(
-            RuntimeEventAllowance,
-            "one-off JIT/OSR allocations are tolerated, but a per-message regression moves every "
-            + "delta past the {0} B ceiling and overshoots this count by orders of magnitude",
-            PerMessageCeiling);
+        Assert.True(excursions.Length <= RuntimeEventAllowance,
+            $"expected at most {RuntimeEventAllowance} excursions past the {PerMessageCeiling} B "
+            + $"ceiling, but found {excursions.Length}");
 
         // Asserted as a maximum rather than per-element so a failure names the
         // worst delivery instead of an opaque loop variable.
         var worstExcursion = excursions.Length == 0 ? 0 : excursions.Max();
-        worstExcursion.Should().BeLessThanOrEqualTo(
-            RuntimeEventCeiling,
-            "a single delivery allocating more than {0} B is a regression, not a runtime event",
-            RuntimeEventCeiling);
+        Assert.True(worstExcursion <= RuntimeEventCeiling,
+            $"a single delivery allocating more than {RuntimeEventCeiling} B is a regression, "
+            + $"not a runtime event; worst excursion was {worstExcursion}");
 
         // The median reflects the steady per-message pool cost, not a heavy tail.
-        Median(deltas).Should().BeLessThanOrEqualTo(medianCeiling);
+        var median = Median(deltas);
+        Assert.True(median <= medianCeiling, $"median delta {median} should be <= {medianCeiling}");
 #else
         // Debug boxes async state machines per delivery (measured: ~552 B per
         // send), so the absolute per-message gates only hold in Release

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
@@ -33,14 +32,14 @@ public sealed class ZSocketConnectionTests
             _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
-            session.Should().NotBeNull();
+            Assert.NotNull(session);
             using var sender = new ZmtpSession(client);
 
             await sender.SendFrameAsync("hello"u8.ToArray(), more: false, token: token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            recorder.Frames.Should().HaveCount(1);
-            recorder.Frames[0].Should().Equal([.. "hello"u8]);
+            Assert.Single(recorder.Frames);
+            Assert.Equal([.. "hello"u8], recorder.Frames[0]);
         }
     }
 
@@ -56,7 +55,7 @@ public sealed class ZSocketConnectionTests
             _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
-            session.Should().NotBeNull();
+            Assert.NotNull(session);
             using var sender = new ZmtpSession(client);
 
             // A multi-segment frame exercises the buffer-list scatter write:
@@ -65,8 +64,8 @@ public sealed class ZSocketConnectionTests
             await sender.SendAsync(message, token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            recorder.Frames.Should().HaveCount(1);
-            recorder.Frames[0].Should().Equal([.. "hello!"u8]);
+            Assert.Single(recorder.Frames);
+            Assert.Equal([.. "hello!"u8], recorder.Frames[0]);
         }
     }
 
@@ -82,15 +81,15 @@ public sealed class ZSocketConnectionTests
             _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
-            session.Should().NotBeNull();
+            Assert.NotNull(session);
             using var sender = new ZmtpSession(client);
 
             var payload = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
             await sender.SendFrameAsync(payload, more: false, token: token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            recorder.Frames.Should().HaveCount(1);
-            recorder.Frames[0].Should().Equal(payload);
+            Assert.Single(recorder.Frames);
+            Assert.Equal(payload, recorder.Frames[0]);
         }
     }
 
@@ -108,8 +107,8 @@ public sealed class ZSocketConnectionTests
 
             var buffer = new byte[6];
             var read = await server.ReadAsync(buffer, token);
-            read.Should().Be(6);
-            buffer.Should().Equal([.. "direct"u8]);
+            Assert.Equal(6, read);
+            Assert.Equal([.. "direct"u8], buffer);
         }
     }
 
@@ -127,14 +126,14 @@ public sealed class ZSocketConnectionTests
             _ = Task.Run(() => ZmtpTestRunner.RunParserAsync(server, recorder), token);
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
-            session.Should().NotBeNull();
+            Assert.NotNull(session);
             using var sender = new ZmtpSession(client);
 
             await sender.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false, token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
-            recorder.Frames.Should().HaveCount(1);
-            recorder.Frames[0].Should().BeEmpty();
+            Assert.Single(recorder.Frames);
+            Assert.Empty(recorder.Frames[0]);
         }
     }
 
@@ -165,9 +164,9 @@ public sealed class ZSocketConnectionTests
             using var parser = new ZmtpParser(reader, (frame, _) =>
             {
                 var content = frame.ToSequence().ToArray();
-                content.Length.Should().Be(first.Length + second.Length);
-                content.AsSpan(0, first.Length).SequenceEqual(first).Should().BeTrue();
-                content.AsSpan(first.Length).SequenceEqual(second).Should().BeTrue();
+                Assert.Equal(first.Length + second.Length, content.Length);
+                Assert.True(content.AsSpan(0, first.Length).SequenceEqual(first));
+                Assert.True(content.AsSpan(first.Length).SequenceEqual(second));
                 delivered++;
                 return ValueTask.FromResult(true);
             });
@@ -175,7 +174,7 @@ public sealed class ZSocketConnectionTests
             await session.SendAsync(message, token);
             writer.Abort();
             await receiving.WaitAsync(token);
-            delivered.Should().Be(1);
+            Assert.Equal(1, delivered);
         }
         finally
         {

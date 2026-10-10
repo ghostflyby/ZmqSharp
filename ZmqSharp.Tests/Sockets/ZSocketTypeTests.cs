@@ -1,4 +1,3 @@
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 
@@ -36,8 +35,7 @@ public sealed class ZSocketTypeTests
         var type = BuiltIn(localName);
 
         foreach (var peerName in AllBuiltInNames)
-            type.AcceptsPeer(peerName).Should().Be(Matrix.Accepts(localName, peerName),
-                $"'{localName}' should {(Matrix.Accepts(localName, peerName) ? "accept" : "reject")} peer '{peerName}'");
+            Assert.Equal(Matrix.Accepts(localName, peerName), type.AcceptsPeer(peerName));
     }
 
     [Theory]
@@ -57,7 +55,7 @@ public sealed class ZSocketTypeTests
         // A name outside the built-in set is a custom type; a built-in endpoint
         // never accepts one (custom types interop only between ZmqSharp
         // endpoints advertising the same name, 0015 section 2.3).
-        BuiltIn(localName).AcceptsPeer("CUSTOM").Should().BeFalse();
+        Assert.False(BuiltIn(localName).AcceptsPeer("CUSTOM"));
     }
 
     [Fact]
@@ -69,8 +67,8 @@ public sealed class ZSocketTypeTests
             AcceptsPeer = peerType => peerType == "FOO"
         };
 
-        type.AcceptsPeer("FOO").Should().BeTrue();
-        type.AcceptsPeer("PAIR").Should().BeFalse();
+        Assert.True(type.AcceptsPeer("FOO"));
+        Assert.False(type.AcceptsPeer("PAIR"));
     }
 
     [Fact]
@@ -78,7 +76,8 @@ public sealed class ZSocketTypeTests
     {
         var act = () => new ZSocketType { Name = "", AcceptsPeer = _ => true };
 
-        act.Should().Throw<ArgumentException>().WithMessage("*not be empty*");
+        var ex = Assert.Throws<ArgumentException>(act);
+        Assert.Contains("not be empty", ex.Message);
     }
 
     [Fact]
@@ -86,7 +85,8 @@ public sealed class ZSocketTypeTests
     {
         var act = () => new ZSocketType { Name = new string('X', 256), AcceptsPeer = _ => true };
 
-        act.Should().Throw<ArgumentException>().WithMessage("*255*");
+        var ex = Assert.Throws<ArgumentException>(act);
+        Assert.Contains("255", ex.Message);
     }
 
     [Fact]
@@ -94,7 +94,8 @@ public sealed class ZSocketTypeTests
     {
         var act = () => new ZSocketType { Name = "FOÖ", AcceptsPeer = _ => true };
 
-        act.Should().Throw<ArgumentException>().WithMessage("*ASCII*");
+        var ex = Assert.Throws<ArgumentException>(act);
+        Assert.Contains("ASCII", ex.Message);
     }
 
     private static ZSocketType BuiltIn(string name) => name switch

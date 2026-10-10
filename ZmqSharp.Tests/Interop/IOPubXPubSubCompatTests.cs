@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -39,7 +38,7 @@ public sealed class IOPubXPubSubCompatTests
         // The XPUB publishes the topic; the SUB client must receive it.
         xpub.SendFrame(Concat("news", "headline"));
         var message = await received.Reader.ReadAsync(token);
-        message[0].ToSequence().ToArray().Should().Equal(Concat("news", "headline"));
+        Assert.Equal(Concat("news", "headline"), message[0].ToSequence().ToArray());
         message.Dispose();
     }
 
@@ -62,7 +61,7 @@ public sealed class IOPubXPubSubCompatTests
 
         await xpub.SendAsync(ZMessage.FromOwned(Concat("news", "headline")), token);
         var received = InteropHelpers.ReceiveFrame(sub, TimeSpan.FromSeconds(5));
-        received.Should().Equal(Concat("news", "headline"));
+        Assert.Equal(Concat("news", "headline"), received);
     }
 
     [Fact(Timeout = 20_000)]
@@ -84,7 +83,7 @@ public sealed class IOPubXPubSubCompatTests
 
         xpub.SendFrame(Concat("news", "x"));
         var message = await received.Reader.ReadAsync(token);
-        message[0].ToSequence().ToArray().Should().Equal(Concat("news", "x"));
+        Assert.Equal(Concat("news", "x"), message[0].ToSequence().ToArray());
         message.Dispose();
     }
 

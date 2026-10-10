@@ -1,4 +1,3 @@
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Security.Curve.Tests;
@@ -44,11 +43,11 @@ public sealed class LibsodiumKnownVectorTests
 
         var derived = new byte[32];
         bc.DeriveSharedSecret(Sk1, Pk2, derived);
-        derived.Should().Equal(LibsodiumBeforenm);
+        Assert.Equal(LibsodiumBeforenm, derived);
 
         // The derivation is symmetric, like X25519 itself.
         bc.DeriveSharedSecret(Sk2, Pk1, derived);
-        derived.Should().Equal(LibsodiumBeforenm);
+        Assert.Equal(LibsodiumBeforenm, derived);
     }
 
     [Fact]
@@ -58,7 +57,7 @@ public sealed class LibsodiumKnownVectorTests
 
         var boxed = new byte[16 + Plain.Length];
         bc.Box(Plain, Nonce, Sk1, Pk2, boxed);
-        boxed.Should().Equal(LibsodiumBox);
+        Assert.Equal(LibsodiumBox, boxed);
     }
 
     [Fact]
@@ -67,9 +66,9 @@ public sealed class LibsodiumKnownVectorTests
         var bc = new BouncyCastleCurveCrypto();
 
         var opened = new byte[LibsodiumBox.Length - 16];
-        bc.TryUnbox(LibsodiumBox, Nonce, Sk2, Pk1, opened, out var written).Should().BeTrue();
-        written.Should().Be(Plain.Length);
-        opened.Should().Equal(Plain);
+        Assert.True(bc.TryUnbox(LibsodiumBox, Nonce, Sk2, Pk1, opened, out var written));
+        Assert.Equal(Plain.Length, written);
+        Assert.Equal(Plain, opened);
     }
 
     [Fact]
@@ -79,9 +78,9 @@ public sealed class LibsodiumKnownVectorTests
         bc.GenerateKeyPair(out var wrongSecret, out _);
 
         var opened = new byte[LibsodiumBox.Length - 16];
-        bc.TryUnbox(LibsodiumBox, Nonce, wrongSecret.Span, Pk1, opened, out _).Should().BeFalse();
+        Assert.False(bc.TryUnbox(LibsodiumBox, Nonce, wrongSecret.Span, Pk1, opened, out _));
         // The destination must be untouched on a failed open (0027 D5).
-        opened.Should().OnlyContain(b => b == 0);
+        Assert.All(opened, b => Assert.Equal(0, b));
     }
 
     [Fact]
@@ -95,12 +94,12 @@ public sealed class LibsodiumKnownVectorTests
 
         var sealedMessage = new byte[16 + "secret box test message"u8.Length];
         bc.SecretBox("secret box test message"u8, nonce, key, sealedMessage);
-        sealedMessage.Should().Equal(libsodium);
+        Assert.Equal(libsodium, sealedMessage);
 
         var opened = new byte["secret box test message"u8.Length];
-        bc.TrySecretBoxOpen(libsodium, nonce, key, opened, out var written).Should().BeTrue();
-        written.Should().Be("secret box test message"u8.Length);
-        opened.Should().Equal("secret box test message"u8.ToArray());
+        Assert.True(bc.TrySecretBoxOpen(libsodium, nonce, key, opened, out var written));
+        Assert.Equal("secret box test message"u8.Length, written);
+        Assert.Equal("secret box test message"u8.ToArray(), opened);
     }
 
     [Fact]
@@ -108,7 +107,7 @@ public sealed class LibsodiumKnownVectorTests
     {
         var bc = new BouncyCastleCurveCrypto();
         bc.GenerateKeyPair(out var publicKey, out var secretKey);
-        publicKey.Span.Should().HaveCount(32);
-        secretKey.Span.Should().HaveCount(32);
+        Assert.Equal(32, publicKey.Span.Length);
+        Assert.Equal(32, secretKey.Span.Length);
     }
 }

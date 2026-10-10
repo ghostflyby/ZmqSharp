@@ -1,5 +1,4 @@
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Tests.Sockets;
@@ -21,9 +20,9 @@ public sealed class BoundedChannelDropTests
 
         channel.Writer.TryWrite(1);
         channel.Writer.TryWrite(2);
-        channel.Writer.TryWrite(3).Should().BeTrue();
+        Assert.True(channel.Writer.TryWrite(3));
 
-        dropped.Should().Equal(3);
+        Assert.Equal([3], dropped);
     }
 
     [Fact]
@@ -36,13 +35,13 @@ public sealed class BoundedChannelDropTests
 
         channel.Writer.TryWrite(1);
         channel.Writer.TryWrite(2);
-        channel.Writer.TryWrite(3).Should().BeTrue();
+        Assert.True(channel.Writer.TryWrite(3));
 
-        dropped.Should().Equal(2);
-        channel.Reader.TryRead(out var first).Should().BeTrue();
-        first.Should().Be(1);
-        channel.Reader.TryRead(out var second).Should().BeTrue();
-        second.Should().Be(3);
+        Assert.Equal([2], dropped);
+        Assert.True(channel.Reader.TryRead(out var first));
+        Assert.Equal(1, first);
+        Assert.True(channel.Reader.TryRead(out var second));
+        Assert.Equal(3, second);
     }
 
     [Fact]
@@ -55,12 +54,12 @@ public sealed class BoundedChannelDropTests
 
         channel.Writer.TryWrite(1);
         channel.Writer.TryWrite(2);
-        channel.Writer.TryWrite(3).Should().BeTrue();
+        Assert.True(channel.Writer.TryWrite(3));
 
-        dropped.Should().Equal(1);
-        channel.Reader.TryRead(out var first).Should().BeTrue();
-        first.Should().Be(2);
-        channel.Reader.TryRead(out var second).Should().BeTrue();
-        second.Should().Be(3);
+        Assert.Equal([1], dropped);
+        Assert.True(channel.Reader.TryRead(out var first));
+        Assert.Equal(2, first);
+        Assert.True(channel.Reader.TryRead(out var second));
+        Assert.Equal(3, second);
     }
 }

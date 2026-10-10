@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Transports;
 
@@ -29,12 +28,12 @@ public sealed class EndpointLifecycleTests
         var second = listener
             ? socket.UnbindAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, token).AsTask()
             : socket.DisconnectAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, token).AsTask();
-        first.IsCompleted.Should().BeFalse();
-        second.IsCompleted.Should().BeFalse();
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
         endpoint.Release.TrySetResult();
         await Task.WhenAll(first, second).WaitAsync(token);
-        endpoint.Disposals.Should().Be(1);
-        socket.PeerSnapshot.Should().BeEmpty();
+        Assert.Equal(1, endpoint.Disposals);
+        Assert.Empty(socket.PeerSnapshot);
     }
 
     [Theory(Timeout = 20_000)]
@@ -51,16 +50,16 @@ public sealed class EndpointLifecycleTests
         await endpoint.Parked.Task.WaitAsync(token);
         if (listener) await socket.UnbindAsync<ControlledEndpoint, ControlledTransport<Second>>(endpoint, token);
         else await socket.DisconnectAsync<ControlledEndpoint, ControlledTransport<Second>>(endpoint, token);
-        endpoint.Stopping.Task.IsCompleted.Should().BeFalse();
+        Assert.False(endpoint.Stopping.Task.IsCompleted);
 
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
-        await FluentActions.Awaiting(async () =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
             if (listener) await socket.UnbindAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, cancellation.Token);
             else await socket.DisconnectAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, cancellation.Token);
-        }).Should().ThrowAsync<OperationCanceledException>();
-        endpoint.Stopping.Task.IsCompleted.Should().BeFalse();
+        });
+        Assert.False(endpoint.Stopping.Task.IsCompleted);
 
         using var waitCancellation = new CancellationTokenSource();
         var waiting = listener
@@ -68,11 +67,11 @@ public sealed class EndpointLifecycleTests
             : socket.DisconnectAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, waitCancellation.Token).AsTask();
         await endpoint.Stopping.Task.WaitAsync(token);
         await waitCancellation.CancelAsync();
-        await FluentActions.Awaiting(() => waiting).Should().ThrowAsync<OperationCanceledException>();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
         endpoint.Release.TrySetResult();
         if (listener) await socket.UnbindAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, token);
         else await socket.DisconnectAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, token);
-        endpoint.Disposals.Should().Be(1);
+        Assert.Equal(1, endpoint.Disposals);
     }
 
     [Fact(Timeout = 30_000)]
@@ -86,11 +85,11 @@ public sealed class EndpointLifecycleTests
         await endpoint.Parked.Task.WaitAsync(token);
         var disconnecting = socket.DisconnectAsync<ControlledEndpoint, ControlledTransport<First>>(endpoint, token).AsTask();
         await endpoint.Stopping.Task.WaitAsync(token);
-        disconnecting.IsCompleted.Should().BeFalse();
+        Assert.False(disconnecting.IsCompleted);
         endpoint.Release.TrySetResult();
         await disconnecting.WaitAsync(token);
-        await FluentActions.Awaiting(() => connecting).Should().ThrowAsync<OperationCanceledException>()
-            .Where(failure => !token.IsCancellationRequested);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connecting);
+        Assert.False(token.IsCancellationRequested);
     }
 
     [Fact]
@@ -115,12 +114,12 @@ public sealed class EndpointLifecycleTests
         await server.UnbindAsync(address, token);
         await client.SendAsync("still connected"u8.ToArray(), token);
         using var message = await server.Messages.ReadAsync(token);
-        message[0].ToSequence().ToArray().Should().Equal("still connected"u8.ToArray());
+        Assert.Equal("still connected"u8.ToArray(), message[0].ToSequence().ToArray());
         var ended = false;
         client.PeerEnded += (_, _) => ended = true;
         await client.DisconnectAsync(address, token);
-        ended.Should().BeTrue();
-        client.PeerSnapshot.Should().BeEmpty();
+        Assert.True(ended);
+        Assert.Empty(client.PeerSnapshot);
         await client.DisconnectAsync(address, token);
         if (kind == TransportKind.Ipc)
         {
@@ -149,8 +148,8 @@ public sealed class EndpointLifecycleTests
         await server.SendAsync("second"u8.ToArray(), token);
         await pool.WaitForOutstandingAtLeastAsync(baseline + 2, TimeSpan.FromSeconds(10));
         await receiver.DisconnectAsync(address, token);
-        pool.Outstanding.Should().Be(0);
-        receiver.Messages.TryRead(out _).Should().BeFalse();
+        Assert.Equal(0, pool.Outstanding);
+        Assert.False(receiver.Messages.TryRead(out _));
     }
 
     [Theory(Timeout = 20_000)]
@@ -170,9 +169,9 @@ public sealed class EndpointLifecycleTests
         endpoint.FactoryRelease.TrySetResult();
         var failure = await Record.ExceptionAsync(() => setup.WaitAsync(token));
         // Accept the disposal outcome and a stop-driven cancellation, never the test's own timeout cancellation.
-        (failure is ObjectDisposedException || (failure is OperationCanceledException && !token.IsCancellationRequested)).Should().BeTrue();
-        endpoint.Disposals.Should().Be(1);
-        endpoint.Parked.Task.IsCompleted.Should().BeFalse();
+        Assert.True(failure is ObjectDisposedException || (failure is OperationCanceledException && !token.IsCancellationRequested));
+        Assert.Equal(1, endpoint.Disposals);
+        Assert.False(endpoint.Parked.Task.IsCompleted);
     }
 
     [Fact(Timeout = 20_000)]
@@ -187,10 +186,10 @@ public sealed class EndpointLifecycleTests
         await endpoint.FactoryEntered.Task.WaitAsync(token);
         await cancellation.CancelAsync();
         endpoint.FactoryRelease.TrySetResult();
-        await FluentActions.Awaiting(() => binding.WaitAsync(token)).Should().ThrowAsync<OperationCanceledException>()
-            .Where(failure => !token.IsCancellationRequested);
-        endpoint.Disposals.Should().Be(1);
-        endpoint.Parked.Task.IsCompleted.Should().BeFalse();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => binding.WaitAsync(token));
+        Assert.False(token.IsCancellationRequested);
+        Assert.Equal(1, endpoint.Disposals);
+        Assert.False(endpoint.Parked.Task.IsCompleted);
     }
 
     private sealed class ReleaseOnDispose(ControlledEndpoint endpoint) : IDisposable

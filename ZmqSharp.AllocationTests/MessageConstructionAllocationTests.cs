@@ -1,5 +1,4 @@
 using System.Buffers;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.AllocationTests;
@@ -20,8 +19,8 @@ public class MessageConstructionAllocationTests
         var message = ZMessage.FromOwned(frames);
 
         // Zero-copy: the message wraps the caller's arrays; nothing is rented.
-        pool.Rentals.Should().Be(0);
-        message.Count.Should().Be(2);
+        Assert.Equal(0, pool.Rentals);
+        Assert.Equal(2, message.Count);
         message.Dispose();
     }
 
@@ -35,9 +34,9 @@ public class MessageConstructionAllocationTests
 
         // The message's first frame content is the caller's array itself
         // (reference identity, not a copy).
-        message[0].TryGetValue(out ZSegment segment).Should().BeTrue();
-        segment.GetOwnedArray(out var backing).Should().BeTrue();
-        backing.Should().BeSameAs(before);
+        Assert.True(message[0].TryGetValue(out ZSegment segment));
+        Assert.True(segment.GetOwnedArray(out var backing));
+        Assert.Same(before, backing);
         message.Dispose();
     }
 
@@ -65,7 +64,7 @@ public class MessageConstructionAllocationTests
         var message = ZMessage.Copy(source);
         source[0] = (byte)'X';
 
-        message[0].ToSequence().ToArray().Should().Equal([.. "payload"u8]);
+        Assert.Equal([.. "payload"u8], message[0].ToSequence().ToArray());
         message.Dispose();
     }
 }

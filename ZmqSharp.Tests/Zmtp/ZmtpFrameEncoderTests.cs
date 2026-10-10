@@ -1,4 +1,3 @@
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
@@ -23,11 +22,11 @@ public sealed class ZmtpFrameEncoderTests
         var recorder = new FrameRecorder();
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        recorder.Frames.Should().HaveCount(3);
-        recorder.Frames[0].Should().Equal([.. "A"u8]);
-        recorder.Frames[1].Should().Equal([.. "B"u8]);
-        recorder.Frames[2].Should().Equal([.. "C"u8]);
-        recorder.MoreFlags.Should().Equal(true, true, false);
+        Assert.Equal(3, recorder.Frames.Count);
+        Assert.Equal([.. "A"u8], recorder.Frames[0]);
+        Assert.Equal([.. "B"u8], recorder.Frames[1]);
+        Assert.Equal([.. "C"u8], recorder.Frames[2]);
+        Assert.Equal([true, true, false], recorder.MoreFlags);
     }
 
     [Fact]
@@ -44,8 +43,8 @@ public sealed class ZmtpFrameEncoderTests
         var recorder = new FrameRecorder();
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        recorder.Frames.Should().HaveCount(1);
-        recorder.Frames[0].Should().Equal(payload);
+        Assert.Single(recorder.Frames);
+        Assert.Equal(payload, recorder.Frames[0]);
     }
 
     [Fact]
@@ -61,8 +60,8 @@ public sealed class ZmtpFrameEncoderTests
         var recorder = new FrameRecorder();
         await ZmtpTestRunner.RunParserAsync(connection, recorder);
 
-        recorder.Frames.Should().HaveCount(1);
-        recorder.Frames[0].Should().Equal([.. "hello!"u8]);
+        Assert.Single(recorder.Frames);
+        Assert.Equal([.. "hello!"u8], recorder.Frames[0]);
     }
 
     [Fact]
@@ -77,11 +76,11 @@ public sealed class ZmtpFrameEncoderTests
         var longBody = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
         await encoder.WriteCommandAsync(longBody, TestContext.Current.CancellationToken);
 
-        sink.Writes.Should().HaveCount(2);
-        sink.Writes[0].SelectMany(segment => segment.ToArray())
-            .Should().Equal(ZmtpTestData.Frame("READY"u8.ToArray(), command: true));
-        sink.Writes[1].SelectMany(segment => segment.ToArray())
-            .Should().Equal(ZmtpTestData.Frame(longBody, command: true));
+        Assert.Equal(2, sink.Writes.Count);
+        Assert.Equal(ZmtpTestData.Frame("READY"u8.ToArray(), command: true),
+            sink.Writes[0].SelectMany(segment => segment.ToArray()));
+        Assert.Equal(ZmtpTestData.Frame(longBody, command: true),
+            sink.Writes[1].SelectMany(segment => segment.ToArray()));
     }
 
     [Fact]
@@ -106,18 +105,18 @@ public sealed class ZmtpFrameEncoderTests
         };
 
         // Each write concatenates to the exact wire frame (header + payload).
-        sink.Writes.Should().HaveCount(4);
+        Assert.Equal(4, sink.Writes.Count);
         for (var i = 0; i < 4; i++)
         {
             var wire = ZmtpTestData.Frame(expected[i].Frame, more: expected[i].More);
-            sink.Writes[i].SelectMany(segment => segment.ToArray()).Should().Equal(wire);
+            Assert.Equal(wire, sink.Writes[i].SelectMany(segment => segment.ToArray()));
         }
 
         // The first three frames carry the MORE flag; the last does not.
-        sink.Writes[0][0].Span[0].Should().Be((byte)ZmtpFrameFlags.More);
-        sink.Writes[1][0].Span[0].Should().Be((byte)ZmtpFrameFlags.More);
-        sink.Writes[2][0].Span[0].Should().Be((byte)ZmtpFrameFlags.More);
-        sink.Writes[3][0].Span[0].Should().Be((byte)ZmtpFrameFlags.None);
+        Assert.Equal((byte)ZmtpFrameFlags.More, sink.Writes[0][0].Span[0]);
+        Assert.Equal((byte)ZmtpFrameFlags.More, sink.Writes[1][0].Span[0]);
+        Assert.Equal((byte)ZmtpFrameFlags.More, sink.Writes[2][0].Span[0]);
+        Assert.Equal((byte)ZmtpFrameFlags.None, sink.Writes[3][0].Span[0]);
     }
 
     [Fact]
@@ -131,11 +130,11 @@ public sealed class ZmtpFrameEncoderTests
 
         // One write per frame, one segment per original segment, with the
         // 2-byte short header first and the original MORE-less flags.
-        sink.Writes.Should().HaveCount(1);
-        sink.Writes[0].Should().HaveCount(4);
-        sink.Writes[0][0].ToArray().Should().Equal([0x00, 0x06]);
-        sink.Writes[0][1].ToArray().Should().Equal([.. "hel"u8]);
-        sink.Writes[0][2].ToArray().Should().Equal([.. "lo"u8]);
-        sink.Writes[0][3].ToArray().Should().Equal([.. "!"u8]);
+        Assert.Single(sink.Writes);
+        Assert.Equal(4, sink.Writes[0].Length);
+        Assert.Equal([0x00, 0x06], sink.Writes[0][0].ToArray());
+        Assert.Equal([.. "hel"u8], sink.Writes[0][1].ToArray());
+        Assert.Equal([.. "lo"u8], sink.Writes[0][2].ToArray());
+        Assert.Equal([.. "!"u8], sink.Writes[0][3].ToArray());
     }
 }

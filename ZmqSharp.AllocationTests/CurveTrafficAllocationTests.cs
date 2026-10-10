@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Zmtp;
 
@@ -21,9 +20,9 @@ public class CurveTrafficAllocationTests
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < count; i++) await session.SendAsync(message, TestContext.Current.CancellationToken);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Environment.CurrentManagedThreadId.Should().Be(thread);
+        Assert.Equal(thread, Environment.CurrentManagedThreadId);
 #if !DEBUG
-        allocated.Should().BeInRange(0, 1023);
+        Assert.InRange(allocated, 0, 1023);
 #endif
         var wire = raw.Recorded;
         var bodies = new ZmtpFrameData[count + warmup];
@@ -42,9 +41,9 @@ public class CurveTrafficAllocationTests
         before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = warmup; i < bodies.Length; i++) codec.Decode(bodies[i]);
         allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Environment.CurrentManagedThreadId.Should().Be(thread);
+        Assert.Equal(thread, Environment.CurrentManagedThreadId);
 #if !DEBUG
-        allocated.Should().BeInRange(0, 1023);
+        Assert.InRange(allocated, 0, 1023);
 #endif
     }
 
@@ -73,10 +72,10 @@ public class CurveTrafficAllocationTests
             return ValueTask.FromResult(true);
         }, codec);
         await parser.ParseAsync(TestContext.Current.CancellationToken);
-        seen.Should().Be(count + warmup);
-        Environment.CurrentManagedThreadId.Should().Be(thread);
+        Assert.Equal(count + warmup, seen);
+        Assert.Equal(thread, Environment.CurrentManagedThreadId);
 #if !DEBUG
-        allocated.Should().BeInRange(0, 1023);
+        Assert.InRange(allocated, 0, 1023);
 #endif
     }
 }

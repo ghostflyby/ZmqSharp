@@ -1,5 +1,4 @@
 using System.Buffers;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
@@ -35,20 +34,20 @@ public sealed class CoordinatorTests
         {
             replies.Add(peer);
             using var reply = ZDelimiterFraming.Decode(message, "reply");
-            reply[0].ToSequence().ToArray().Should().Equal("reply"u8.ToArray());
+            Assert.Equal("reply"u8.ToArray(), reply[0].ToSequence().ToArray());
             return ValueTask.CompletedTask;
         });
         coordinator = core;
         var one = core.DecideAsync(first, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token).AsTask();
         await entered.Task.WaitAsync(token);
         var two = core.DecideAsync(second, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token).AsTask();
-        handled.Should().Equal(first);
-        two.IsCompleted.Should().BeFalse();
+        Assert.Equal([first], handled);
+        Assert.False(two.IsCompleted);
         release.TrySetResult();
         await Task.WhenAll(one, two).WaitAsync(token);
-        handled.Should().Equal(first, second);
-        replies.Should().Equal(first, second);
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal([first, second], handled);
+        Assert.Equal([first, second], replies);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     [Fact]
@@ -66,8 +65,8 @@ public sealed class CoordinatorTests
         var active = core.DecideAsync(new ZPeer(), ZDelimiterFraming.Encode(ZMessage.Copy("active"u8.ToArray())), token).AsTask();
         var waiting = core.DecideAsync(new ZPeer(), ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), cancellation.Token).AsTask();
         await cancellation.CancelAsync();
-        await FluentActions.Awaiting(() => waiting).Should().ThrowAsync<OperationCanceledException>();
-        pool.Outstanding.Should().Be(0);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        Assert.Equal(0, pool.Outstanding);
         release.TrySetResult();
         await active;
     }
@@ -81,15 +80,15 @@ public sealed class CoordinatorTests
         var forwarded = new List<ZMessage>();
         var core = new XPubCoordinator(() => [source, other], (peer, message) =>
         {
-            peer.Should().BeSameAs(other);
+            Assert.Same(other, peer);
             forwarded.Add(message);
         });
         byte[] subscription = [1, 65];
         using var incoming = ZMessage.FromOwned(subscription);
         var decision = await core.DecideAsync(source, incoming, token);
-        decision.Action.Should().Be(ZInboundAction.Deliver);
+        Assert.Equal(ZInboundAction.Deliver, decision.Action);
         subscription[1] = 66;
         using var copy = forwarded.Single();
-        copy[0].ToSequence().ToArray().Should().Equal(1, 65);
+        Assert.Equal([1, 65], copy[0].ToSequence().ToArray());
     }
 }

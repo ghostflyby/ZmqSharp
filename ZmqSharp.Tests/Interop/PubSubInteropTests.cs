@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -31,11 +30,11 @@ public sealed class PubSubInteropTests
 
         await pub.SendAsync(ZMessage.FromOwned(Concat("news", "item-1")), token);
         var received = InteropHelpers.ReceiveFrame(sub, TimeSpan.FromSeconds(5));
-        received.Should().Equal(Concat("news", "item-1"));
+        Assert.Equal(Concat("news", "item-1"), received);
 
         // A non-matching topic is not delivered.
         await pub.SendAsync(ZMessage.FromOwned(Concat("sport", "item")), token);
-        sub.TryReceiveFrameBytes(TimeSpan.FromMilliseconds(300), out _).Should().BeFalse();
+        Assert.False(sub.TryReceiveFrameBytes(TimeSpan.FromMilliseconds(300), out _));
     }
 
     [Fact(Timeout = 20_000)]
@@ -58,8 +57,8 @@ public sealed class PubSubInteropTests
 
         pub.SendFrame(Concat("news", "headline"));
         var message = await channel.Reader.ReadAsync(token);
-        message.Count.Should().Be(1);
-        message[0].ToSequence().ToArray().Should().Equal(Concat("news", "headline"));
+        Assert.Single(message);
+        Assert.Equal(Concat("news", "headline"), message[0].ToSequence().ToArray());
         message.Dispose();
 
         // Unsubscribe propagates the 0x00 frame; the filter then drops the
@@ -69,7 +68,7 @@ public sealed class PubSubInteropTests
         var drainTask = channel.Reader.ReadAsync(token).AsTask();
         var idle = Task.Delay(300, token);
         var first = await Task.WhenAny(drainTask, idle);
-        first.Should().Be(idle);
+        Assert.Same(idle, first);
     }
 
     private static byte[] Concat(string topic, string payload)

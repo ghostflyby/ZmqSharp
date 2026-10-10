@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -33,8 +32,8 @@ public sealed class BorrowedSendTests
         await client.SendAsync(payload, token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal(payload);
+        Assert.NotNull(message);
+        Assert.Equal(payload, message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -56,8 +55,8 @@ public sealed class BorrowedSendTests
         await client.SendAsync(manager.Memory, token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "manager-backed"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "manager-backed"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -80,8 +79,8 @@ public sealed class BorrowedSendTests
         payload[0] = (byte)'X';
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "before"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "before"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -100,10 +99,10 @@ public sealed class BorrowedSendTests
         await dealer.SendAsync("hello"u8.ToArray(), token);
 
         var message = new NetMQMessage();
-        router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
-        message.Should().NotBeNull();
-        message.FrameCount.Should().Be(2); // routing id + payload
-        message[1].ToByteArray().Should().Equal([.. "hello"u8]);
+        Assert.True(router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message));
+        Assert.NotNull(message);
+        Assert.Equal(2, message.FrameCount); // routing id + payload
+        Assert.Equal([.. "hello"u8], message[1].ToByteArray());
     }
 
     [Fact(Timeout = 15_000)]
@@ -127,11 +126,11 @@ public sealed class BorrowedSendTests
         await client.SendAsync("borrowed"u8.ToArray(), token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
+        Assert.NotNull(message);
         message.Value.Dispose();
 
         // Zero-copy borrow: nothing rented from the send-side pool.
-        pool.Rentals.Should().Be(baseline);
+        Assert.Equal(baseline, pool.Rentals);
     }
 
     private static async Task<ZMessage?> ReadMessageAsync(

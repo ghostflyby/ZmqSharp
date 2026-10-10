@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -36,15 +35,15 @@ public sealed class XPubXSubInteropTests
         xsub.SendFrame([0x01, .. "news"u8]);
         var observed = await subscriptions.Reader.ReadAsync(token);
         var observedFrame = observed[0].ToSequence().ToArray();
-        observedFrame[0].Should().Be(0x01);
-        observedFrame.AsSpan(1).SequenceEqual("news"u8).Should().BeTrue();
+        Assert.Equal(0x01, observedFrame[0]);
+        Assert.True(observedFrame.AsSpan(1).SequenceEqual("news"u8));
         observed.Dispose();
 
         // Publish a topic; the NetMQ XSub receives it (single frame).
         var payload = Encoding.ASCII.GetBytes("news").Concat(Encoding.ASCII.GetBytes("!")).ToArray();
         await xpub.SendAsync(ZMessage.FromOwned(payload), token);
         var received = InteropHelpers.ReceiveFrame(xsub, TimeSpan.FromSeconds(5));
-        received.Should().Equal(payload);
+        Assert.Equal(payload, received);
     }
 
     [Fact(Timeout = 20_000)]
@@ -67,7 +66,7 @@ public sealed class XPubXSubInteropTests
         var payload = Encoding.ASCII.GetBytes("any-thing");
         xpub.SendFrame(payload);
         var message = await received.Reader.ReadAsync(token);
-        message[0].ToSequence().ToArray().Should().Equal(payload);
+        Assert.Equal(payload, message[0].ToSequence().ToArray());
         message.Dispose();
     }
 

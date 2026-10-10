@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -40,17 +39,17 @@ public sealed class MultipartSendTests
         await dealer.SendAsync(frames, token);
 
         var message = new NetMQMessage();
-        router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
-        message.Should().NotBeNull();
+        Assert.True(router.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message));
+        Assert.NotNull(message);
         // The NetMQ ROUTER prefixes the peer's routing id, so the wire frame
         // count is the five payload frames plus the identity frame.
-        message.FrameCount.Should().Be(6);
-        message[0].ToByteArray().Should().NotBeEmpty();
-        message[1].ToByteArray().Should().Equal([.. "identity"u8]);
-        message[2].ToByteArray().Should().Equal([.. "hmac"u8]);
-        message[3].ToByteArray().Should().Equal([.. "header"u8]);
-        message[4].ToByteArray().Should().Equal([.. "parent"u8]);
-        message[5].ToByteArray().Should().Equal([.. "content"u8]);
+        Assert.Equal(6, message.FrameCount);
+        Assert.NotEmpty(message[0].ToByteArray());
+        Assert.Equal([.. "identity"u8], message[1].ToByteArray());
+        Assert.Equal([.. "hmac"u8], message[2].ToByteArray());
+        Assert.Equal([.. "header"u8], message[3].ToByteArray());
+        Assert.Equal([.. "parent"u8], message[4].ToByteArray());
+        Assert.Equal([.. "content"u8], message[5].ToByteArray());
     }
 
     [Fact(Timeout = 15_000)]
@@ -75,9 +74,9 @@ public sealed class MultipartSendTests
         await client.SendAsync(sequence, token);
 
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value.Count.Should().Be(1);
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "abcdef"u8]);
+        Assert.NotNull(message);
+        Assert.Single(message.Value);
+        Assert.Equal([.. "abcdef"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -101,8 +100,8 @@ public sealed class MultipartSendTests
         ];
         var reply = await req.RequestAsync(request, token);
 
-        reply.Count.Should().Be(1);
-        reply[0].ToSequence().ToArray().Should().Equal([.. "reply"u8]);
+        var item = Assert.Single(reply);
+        Assert.Equal([.. "reply"u8], item.ToSequence().ToArray());
         reply.Dispose();
     }
 
@@ -131,11 +130,11 @@ public sealed class MultipartSendTests
         ReadOnlyMemory<byte>[] replyFrames = ["part-1"u8.ToArray(), "part-2"u8.ToArray()];
         await router.SendAsync(identity, replyFrames, token);
         var message = new NetMQMessage();
-        dealer.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message).Should().BeTrue();
-        message.Should().NotBeNull();
-        message.FrameCount.Should().Be(2);
-        message[0].ToByteArray().Should().Equal([.. "part-1"u8]);
-        message[1].ToByteArray().Should().Equal([.. "part-2"u8]);
+        Assert.True(dealer.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref message));
+        Assert.NotNull(message);
+        Assert.Equal(2, message.FrameCount);
+        Assert.Equal([.. "part-1"u8], message[0].ToByteArray());
+        Assert.Equal([.. "part-2"u8], message[1].ToByteArray());
     }
 
     private static async Task<ZMessage?> ReadMessageAsync(

@@ -1,5 +1,4 @@
 using System.Buffers;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 
@@ -29,13 +28,13 @@ public sealed class RequestLifecycleIntegrationTests
         var request = requester.RequestAsync("first"u8.ToArray(), cancelRequest.Token);
         await received.Task.WaitAsync(token);
         await cancelRequest.CancelAsync();
-        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<OperationCanceledException>();
-        requester.PeerSnapshot.Should().BeEmpty();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(token));
+        Assert.Empty(requester.PeerSnapshot);
         await requester.DisconnectAsync(address, token);
         respond = true;
         await requester.ConnectAsync(address, token);
         using var reply = await requester.RequestAsync("second"u8.ToArray(), token);
-        reply[0].ToSequence().ToArray().Should().Equal("reply"u8.ToArray());
+        Assert.Equal("reply"u8.ToArray(), reply[0].ToSequence().ToArray());
     }
 
     [Theory(Timeout = 10_000)]
@@ -58,10 +57,11 @@ public sealed class RequestLifecycleIntegrationTests
         var request = requester.RequestAsync("request"u8.ToArray(), token);
         using var incoming = await received.Task.WaitAsync(token);
         await responder.SendMalformedAsync(token);
-        await FluentActions.Awaiting(() => request.WaitAsync(token)).Should().ThrowAsync<ZeroMqProtocolException>();
-        (await ended.Task.WaitAsync(token)).Should().BeOfType<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(() => request.WaitAsync(token));
+        var failure = await ended.Task.WaitAsync(token);
+        Assert.IsType<ZeroMqProtocolException>(failure);
         await requester.DisconnectAsync(address, token);
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 
     private sealed class RequestCaptureSink(TaskCompletionSource<ZMessage> received) : IPatternSink

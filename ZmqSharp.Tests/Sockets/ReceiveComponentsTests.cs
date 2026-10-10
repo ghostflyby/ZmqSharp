@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Patterns;
 using ZmqSharp.Sockets;
@@ -19,7 +18,7 @@ public sealed class ReceiveComponentsTests
         var first = wake.Capture();
         wake.Wake();
         await first.WaitAsync(token);
-        wake.Capture().IsCompleted.Should().BeFalse();
+        Assert.False(wake.Capture().IsCompleted);
     }
 
     [Fact(Timeout = 10_000)]
@@ -35,11 +34,11 @@ public sealed class ReceiveComponentsTests
             if (++inspections == 1) wake.Wake();
             return [];
         }, wake, finished.Task);
-        (await reader.WaitToReadAsync(token).AsTask()).Should().BeTrue();
+        Assert.True(await reader.WaitToReadAsync(token).AsTask());
         var waiting = reader.WaitToReadAsync(token).AsTask();
-        waiting.IsCompleted.Should().BeFalse();
+        Assert.False(waiting.IsCompleted);
         finished.TrySetResult();
-        (await waiting.WaitAsync(token)).Should().BeFalse();
+        Assert.False(await waiting.WaitAsync(token));
     }
 
     [Fact]
@@ -54,19 +53,19 @@ public sealed class ReceiveComponentsTests
             Queue = Channel.CreateUnbounded<ZMessage>()
         };
         var queue = record.Queue;
-        queue.Writer.TryWrite(ZMessage.FromPooled(pool.Rent(8))).Should().BeTrue();
+        Assert.True(queue.Writer.TryWrite(ZMessage.FromPooled(pool.Rent(8))));
         var reader = new AggregateReader(() => [record], new WakeGate(), Task.CompletedTask);
         record.Phase = PeerPhase.Stopping;
-        reader.TryRead(out _).Should().BeFalse();
-        pool.Outstanding.Should().Be(1);
+        Assert.False(reader.TryRead(out _));
+        Assert.Equal(1, pool.Outstanding);
         lock (record.ReadLock)
         {
-            queue.Reader.TryRead(out var held).Should().BeTrue();
+            Assert.True(queue.Reader.TryRead(out var held));
             held.Dispose();
             record.Queue = null;
         }
 
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
         await registration.FinishAsync();
     }
 
@@ -102,8 +101,8 @@ public sealed class ReceiveComponentsTests
         }, token);
         start.TrySetResult();
         await Task.WhenAll(reading, reclaiming).WaitAsync(token);
-        owners.Should().OnlyContain(owner => owner.Disposals == 1);
-        surface.Messages.TryRead(out _).Should().BeFalse();
+        Assert.All(owners, owner => Assert.Equal(1, owner.Disposals));
+        Assert.False(surface.Messages.TryRead(out _));
         await registration.FinishAsync();
     }
 
@@ -126,8 +125,8 @@ public sealed class ReceiveComponentsTests
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
         using var parser = new ZmtpParser(new HeaderThenFailure(), (_, _) =>
             throw new InvalidOperationException("frame must not be delivered"), materializer.CreateAllocator(), pool);
-        await FluentActions.Awaiting(() => parser.ParseAsync(token).AsTask()).Should().ThrowAsync<IOException>();
-        pool.Outstanding.Should().Be(0);
+        await Assert.ThrowsAsync<IOException>(() => parser.ParseAsync(token).AsTask());
+        Assert.Equal(0, pool.Outstanding);
     }
 
     private sealed class HeaderThenFailure : IZByteReader
@@ -155,15 +154,15 @@ public sealed class ReceiveComponentsTests
         });
         var materializer = new ReceiveMaterializer(pool, policy, 8, 12, 2, () => rejected++);
         var allocate = materializer.CreateAllocator();
-        using (var first = allocate(8, true)) first.ToSequence().Length.Should().Be(8);
-        FluentActions.Invoking(() => allocate(8, false)).Should().Throw<ZReceiveRejectedException>();
-        decisions.Should().HaveCount(1);
-        rejected.Should().Be(1);
-        pool.Outstanding.Should().Be(0);
+        using (var first = allocate(8, true)) Assert.Equal(8, first.ToSequence().Length);
+        Assert.Throws<ZReceiveRejectedException>(() => allocate(8, false));
+        Assert.Single(decisions);
+        Assert.Equal(1, rejected);
+        Assert.Equal(0, pool.Outstanding);
         materializer.Reset();
         using var next = allocate(4, false);
-        decisions[1].FrameIndex.Should().Be(0);
-        decisions[1].AccumulatedLength.Should().Be(4);
+        Assert.Equal(0, decisions[1].FrameIndex);
+        Assert.Equal(4, decisions[1].AccumulatedLength);
     }
 
     [Fact]
@@ -173,9 +172,9 @@ public sealed class ReceiveComponentsTests
         var materializer = new ReceiveMaterializer(pool,
             new ZReceiveOptions { ContiguousFrameLimit = 1 }, int.MaxValue, int.MaxValue, 10, () => { });
         var frame = materializer.CreateAllocator()(20_000, false);
-        frame.Count.Should().Be(3);
-        pool.Outstanding.Should().Be(3);
+        Assert.Equal(3, frame.Count);
+        Assert.Equal(3, pool.Outstanding);
         frame.Dispose();
-        pool.Outstanding.Should().Be(0);
+        Assert.Equal(0, pool.Outstanding);
     }
 }

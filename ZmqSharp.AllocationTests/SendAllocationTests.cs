@@ -1,5 +1,4 @@
 using System.Net;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.AllocationTests;
@@ -53,16 +52,14 @@ public class SendAllocationTests
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        windowThreadStable.Should().BeTrue(
-            "the thread-local GC delta is only valid while the whole measured window runs on one thread");
+        Assert.True(windowThreadStable, "the thread-local GC delta is only valid while the whole measured window runs on one thread");
 
         // A real per-message allocation would be ~48 bytes minimum (a boxed
         // state machine); a whole-message budget of a few hundred bytes with
         // amortized warm-up noise proves the steady state is allocation-free.
 #if !DEBUG
-        allocated.Should().BeGreaterThanOrEqualTo(0,
-            "a negative delta means the window spanned two threads, not that the path allocated nothing");
-        allocated.Should().BeLessThan(1024);
+        Assert.True(allocated >= 0, $"expected a non-negative allocation delta but got {allocated} B; a negative delta means the window spanned two threads, not that the path allocated nothing");
+        Assert.True(allocated < 1024, $"expected the allocation delta to stay below 1024 B but got {allocated} B");
 #else
         // Debug boxes async state machines per call (~48 B), so the absolute
         // gate only holds in Release (0006 3.6); the CI run is Release.

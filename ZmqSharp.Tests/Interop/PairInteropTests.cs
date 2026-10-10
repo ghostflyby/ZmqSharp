@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using FluentAssertions;
 using NetMQ;
 using NetMQ.Sockets;
 using Xunit;
@@ -31,13 +30,13 @@ public sealed class PairInteropTests
         // ZmqSharp -> NetMQ.
         await server.SendAsync(ZMessage.FromOwned([.. "ping"u8]), token);
         var received = InteropHelpers.ReceiveFrame(peer, TimeSpan.FromSeconds(5));
-        received.Should().Equal([.. "ping"u8]);
+        Assert.Equal([.. "ping"u8], received);
 
         // NetMQ -> ZmqSharp.
         peer.SendFrame([.. "pong"u8]);
         var message = await ReadMessageAsync(server.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "pong"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "pong"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -56,14 +55,14 @@ public sealed class PairInteropTests
         // NetMQ -> ZmqSharp.
         peer.SendFrame([.. "hello"u8]);
         var message = await ReadMessageAsync(client.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "hello"u8]);
+        Assert.NotNull(message);
+        Assert.Equal([.. "hello"u8], message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
 
         // ZmqSharp -> NetMQ.
         await client.SendAsync(ZMessage.FromOwned([.. "world"u8]), token);
         var received = InteropHelpers.ReceiveFrame(peer, TimeSpan.FromSeconds(5));
-        received.Should().Equal([.. "world"u8]);
+        Assert.Equal([.. "world"u8], received);
     }
 
     [Fact(Timeout = 20_000)]
@@ -81,12 +80,12 @@ public sealed class PairInteropTests
         // ZmqSharp -> NetMQ multipart.
         await socket.SendAsync(MessageFactory.Multipart([.. "a"u8], [.. "b"u8], [.. "c"u8]), token);
         var frames = new NetMQMessage();
-        peer.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref frames).Should().BeTrue();
-        frames.Should().NotBeNull();
-        frames.FrameCount.Should().Be(3);
-        frames[0].ToByteArray().Should().Equal([.. "a"u8]);
-        frames[1].ToByteArray().Should().Equal([.. "b"u8]);
-        frames[2].ToByteArray().Should().Equal([.. "c"u8]);
+        Assert.True(peer.TryReceiveMultipartMessage(TimeSpan.FromSeconds(5), ref frames));
+        Assert.NotNull(frames);
+        Assert.Equal(3, frames.FrameCount);
+        Assert.Equal([.. "a"u8], frames[0].ToByteArray());
+        Assert.Equal([.. "b"u8], frames[1].ToByteArray());
+        Assert.Equal([.. "c"u8], frames[2].ToByteArray());
 
         // NetMQ -> ZmqSharp multipart.
         var reply = new NetMQMessage();
@@ -95,10 +94,10 @@ public sealed class PairInteropTests
         peer.SendMultipartMessage(reply);
 
         var message = await ReadMessageAsync(socket.Messages, TimeSpan.FromSeconds(5), token);
-        message.Should().NotBeNull();
-        message.Value.Count.Should().Be(2);
-        message.Value[0].ToSequence().ToArray().Should().Equal([.. "x"u8]);
-        message.Value[1].ToSequence().ToArray().Should().Equal([.. "y"u8]);
+        Assert.NotNull(message);
+        Assert.Equal(2, message.Value.Count);
+        Assert.Equal([.. "x"u8], message.Value[0].ToSequence().ToArray());
+        Assert.Equal([.. "y"u8], message.Value[1].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -120,13 +119,13 @@ public sealed class PairInteropTests
         // ZmqSharp -> NetMQ long frame (crosses many TCP segments).
         await socket.SendAsync(ZMessage.FromOwned(payload), token);
         var received = InteropHelpers.ReceiveFrame(peer, TimeSpan.FromSeconds(10));
-        received.Should().Equal(payload);
+        Assert.Equal(payload, received);
 
         // NetMQ -> ZmqSharp long frame.
         peer.SendFrame(payload);
         var message = await ReadMessageAsync(socket.Messages, TimeSpan.FromSeconds(10), token);
-        message.Should().NotBeNull();
-        message.Value[0].ToSequence().ToArray().Should().Equal(payload);
+        Assert.NotNull(message);
+        Assert.Equal(payload, message.Value[0].ToSequence().ToArray());
         message.Value.Dispose();
     }
 
@@ -148,7 +147,7 @@ public sealed class PairInteropTests
         peer.Close();
 
         var failure = await peerEnded.Task.WaitAsync(token);
-        (failure is null or IOException or SocketException).Should().BeTrue();
+        Assert.True(failure is null or IOException or SocketException);
     }
 
     private static async Task<ZMessage?> ReadMessageAsync(

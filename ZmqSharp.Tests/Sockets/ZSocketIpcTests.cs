@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using FluentAssertions;
 using Xunit;
 
 namespace ZmqSharp.Tests.Sockets;
@@ -24,10 +23,10 @@ public sealed class ZSocketIpcTests
         var socket = new ZPairSocket();
         await socket.BindAsync($"ipc://{path}", token);
 
-        File.Exists(path).Should().BeTrue("binding an ipc endpoint creates the filesystem entry");
+        Assert.True(File.Exists(path));
 
         await socket.DisposeAsync();
-        File.Exists(path).Should().BeFalse("disposing the bound socket unlinks the path (0015 section 5.2)");
+        Assert.False(File.Exists(path));
     }
 
     [Theory]
@@ -43,7 +42,7 @@ public sealed class ZSocketIpcTests
         // The unlink on dispose freed the path, so a later bind of the same
         // path must succeed instead of failing with EADDRINUSE.
         await using var second = new ZPairSocket();
-        await FluentActions.Awaiting(() => second.BindAsync($"ipc://{path}", token)).Should().NotThrowAsync();
+        await second.BindAsync($"ipc://{path}", token);
     }
 
     [Theory(Timeout = 10_000)]
@@ -54,8 +53,8 @@ public sealed class ZSocketIpcTests
         await using var client = new ZPairSocket();
 
         var failure = await Record.ExceptionAsync(() => client.ConnectAsync($"ipc://{path}", token).WaitAsync(token));
-        failure.Should().NotBeNull();
-        (failure is SocketException or IOException).Should().BeTrue();
+        Assert.NotNull(failure);
+        Assert.True(failure is SocketException or IOException);
     }
 
     [Fact]
@@ -70,8 +69,7 @@ public sealed class ZSocketIpcTests
         await socket.BindAsync($"ipc://{name}", token);
         try
         {
-            File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeTrue(
-                "a relative ipc path resolves against the system temp directory");
+            Assert.True(File.Exists(Path.Combine(Path.GetTempPath(), name)));
         }
         finally
         {
@@ -111,8 +109,8 @@ public sealed class ZSocketIpcTests
         }
 
         await bothReached.Task.WaitAsync(token);
-        countA.Should().BeGreaterThanOrEqualTo(1);
-        countB.Should().BeGreaterThanOrEqualTo(1);
+        Assert.True(countA >= 1, $"countA was {countA}, expected at least 1");
+        Assert.True(countB >= 1, $"countB was {countB}, expected at least 1");
 
         void OnPeerMessage(bool peerA)
         {
@@ -149,15 +147,14 @@ public sealed class ZSocketIpcTests
         await using var server = new ZPairSocket(new ZSocketOptions { MessageSink = new TestSink(message => received.TrySetResult(message)) });
         await server.BindAsync(endpoint, token);
 
-        File.Exists(Path.Combine(Path.GetTempPath(), name)).Should().BeFalse(
-            "an abstract namespace bind creates no filesystem entry");
+        Assert.False(File.Exists(Path.Combine(Path.GetTempPath(), name)));
 
         await using var client = new ZPairSocket();
         await client.ConnectAsync(endpoint, token);
         await client.SendAsync(ZMessage.FromOwned([.. "hi"u8]), token);
 
         var message = await received.Task.WaitAsync(token);
-        message[0].ToSequence().ToArray().Should().Equal([.. "hi"u8]);
+        Assert.Equal((byte[])[.. "hi"u8], message[0].ToSequence().ToArray());
         message.Dispose();
 
         // Disposing the bound socket cleans up the abstract address implicitly.

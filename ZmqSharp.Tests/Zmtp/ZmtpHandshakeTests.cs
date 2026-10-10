@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using FluentAssertions;
 using Xunit;
 using ZmqSharp.Security;
 using ZmqSharp.Sockets;
@@ -24,8 +23,8 @@ public sealed class ZmtpHandshakeTests
     [Fact]
     public void NullMechanism_IsRoleless_AndAdvertisesZero()
     {
-        ZNullMechanism.Instance.Role.Should().Be(ZMechanismRole.None);
-        ZmtpGreeting.Build("NULL", ZNullMechanism.Instance.Role)[32].Should().Be(0);
+        Assert.Equal(ZMechanismRole.None, ZNullMechanism.Instance.Role);
+        Assert.Equal(0, ZmtpGreeting.Build("NULL", ZNullMechanism.Instance.Role)[32]);
     }
 
     [Fact]
@@ -36,9 +35,9 @@ public sealed class ZmtpHandshakeTests
 
         var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
-        result.Should().NotBeNull();
-        result.Value.Codec.Should().BeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("PAIR");
+        Assert.NotNull(result);
+        Assert.Null(result.Value.Codec);
+        Assert.Equal("PAIR", ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span));
     }
 
     [Fact]
@@ -50,8 +49,8 @@ public sealed class ZmtpHandshakeTests
 
         var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
-        result.Should().NotBeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("DEALER");
+        Assert.NotNull(result);
+        Assert.Equal("DEALER", ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span));
     }
 
     [Fact]
@@ -67,8 +66,8 @@ public sealed class ZmtpHandshakeTests
 
         var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
-        result.Should().NotBeNull();
-        ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span).Should().Be("CUSTOM");
+        Assert.NotNull(result);
+        Assert.Equal("CUSTOM", ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span));
     }
 
     [Fact]
@@ -76,9 +75,10 @@ public sealed class ZmtpHandshakeTests
     {
         var body = ZmtpTestData.ReadyBodyWithProperties(("Identity", "abc"));
 
-        var act = () => ZmtpCommandCodec.ParseReadySocketType(body.AsSpan()[(1 + ReadyName.Length)..]);
+        var ex = Assert.Throws<ZeroMqProtocolException>(
+            () => ZmtpCommandCodec.ParseReadySocketType(body.AsSpan()[(1 + ReadyName.Length)..]));
 
-        act.Should().Throw<ZeroMqProtocolException>().WithMessage("*missing a valid Socket-Type*");
+        Assert.Contains("missing a valid Socket-Type", ex.Message);
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class ZmtpHandshakeTests
 
         var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
 
-        result.Should().NotBeNull();
+        Assert.NotNull(result);
     }
 
     [Fact]
@@ -138,9 +138,9 @@ public sealed class ZmtpHandshakeTests
     {
         using var connection = NewConnection(ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Error("boom")));
         using var handshake = NewHandshake(connection);
-        var act = () => handshake.EstablishAsync().AsTask();
+        var ex = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
 
-        await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*boom*");
+        Assert.Contains("boom", ex.Message);
     }
 
     [Fact]
@@ -180,8 +180,7 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), ZmtpTestData.Frame([.. "data"u8])));
         using var handshake = NewHandshake(connection);
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAsync<ZeroMqProtocolException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
     }
 
     [Fact]
@@ -219,7 +218,7 @@ public sealed class ZmtpHandshakeTests
 
         // No body follows the header, so the handshake ends at EOF; the size
         // check must not reject the boundary value itself.
-        (await handshake.EstablishAsync(TestContext.Current.CancellationToken)).Should().BeNull();
+        Assert.Null(await handshake.EstablishAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -229,8 +228,8 @@ public sealed class ZmtpHandshakeTests
             ZmtpTestData.Greeting(), CommandFrameHeader(MaxCommandSize + 1)));
         using var handshake = NewHandshake(connection);
 
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>().WithMessage("*exceeds maximum size*");
+        var ex = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        Assert.Contains("exceeds maximum size", ex.Message);
     }
 
     [Fact]
@@ -239,7 +238,7 @@ public sealed class ZmtpHandshakeTests
         using var connection = NewConnection(ZmtpTestData.Greeting());
         using var handshake = NewHandshake(connection);
 
-        (await handshake.EstablishAsync(TestContext.Current.CancellationToken)).Should().BeNull();
+        Assert.Null(await handshake.EstablishAsync(TestContext.Current.CancellationToken));
     }
 
     private static ZConnection NewConnection(byte[] peerBytes)
@@ -268,8 +267,7 @@ public sealed class ZmtpHandshakeTests
     {
         using var connection = NewConnection(peerBytes);
         using var handshake = NewHandshake(connection);
-        var act = () => handshake.EstablishAsync().AsTask();
-        await act.Should().ThrowAsync<ZeroMqProtocolException>();
+        await Assert.ThrowsAnyAsync<ZeroMqProtocolException>(() => handshake.EstablishAsync().AsTask());
     }
 
     private static async Task AssertHandshakeCommandRejectedAsync(byte[] body)
