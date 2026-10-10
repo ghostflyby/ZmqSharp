@@ -27,7 +27,7 @@ public sealed class ZPlainMechanismTests
         // Server side of the wire: greeting + WELCOME + READY (no HELLO).
         var token = TestContext.Current.CancellationToken;
         var peerBytes = ZmtpTestData.Concat(
-            ZmtpTestData.Greeting("PLAIN"), WelcomeFrame(), ZmtpTestData.Ready("PAIR"));
+            ZmtpTestData.Greeting("PLAIN"), WelcomeFrame(), ZmtpTestData.Ready());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
         using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
@@ -74,7 +74,7 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", null));
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) => true));
+        using var handshake = NewHandshake(connection, new ZPlainMechanism((_, _) => true));
 
         var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZMechanismException>()
@@ -85,9 +85,9 @@ public sealed class ZPlainMechanismTests
     public async Task Server_UnexpectedCommandInsteadOfHello_Throws()
     {
         var peerBytes = ZmtpTestData.Concat(
-            ZmtpTestData.Greeting("PLAIN"), ZmtpTestData.Ready("PAIR"));
+            ZmtpTestData.Greeting("PLAIN"), ZmtpTestData.Ready());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) => true));
+        using var handshake = NewHandshake(connection, new ZPlainMechanism((_, _) => true));
 
         var act = () => handshake.EstablishAsync().AsTask();
         await act.Should().ThrowAsync<ZMechanismException>().WithMessage("*expected HELLO*");
@@ -124,7 +124,7 @@ public sealed class ZPlainMechanismTests
     [Fact]
     public void ServerConfiguration_SelectsServerRole()
     {
-        var server = new ZPlainMechanism((user, pass) => true);
+        var server = new ZPlainMechanism((_, _) => true);
         server.Role.Should().Be(ZMechanismRole.Server);
         server.CreateSession().Should().NotBeNull();
     }

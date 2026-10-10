@@ -230,7 +230,7 @@ public sealed class EndpointLifecycleTests
             Parked.TrySetResult();
             try
             {
-                await Task.Delay(System.Threading.Timeout.Infinite, token);
+                await Task.Delay(Timeout.Infinite, token);
             }
             catch (OperationCanceledException)
             {
@@ -270,7 +270,7 @@ public sealed class EndpointLifecycleTests
 
     private sealed class ControlledConnection(ControlledEndpoint endpoint) : IZConnection
     {
-        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int position;
 
         public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)

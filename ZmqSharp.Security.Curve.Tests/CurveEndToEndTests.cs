@@ -75,8 +75,8 @@ public sealed class CurveEndToEndTests
     {
         var token = TestContext.Current.CancellationToken;
         var crypto = new BouncyCastleCurveCrypto();
-        crypto.GenerateKeyPair(out var serverPublic, out var serverSecret);
-        crypto.GenerateKeyPair(out var clientPublic, out var clientSecret);
+        crypto.GenerateKeyPair(out _, out var serverSecret);
+        crypto.GenerateKeyPair(out _, out var clientSecret);
         crypto.GenerateKeyPair(out var wrongPublic, out _);
 
         await using var server = new ZPairSocket(new ZSocketOptions

@@ -683,7 +683,7 @@ public sealed class ZSocketTests
         var allReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivered = 0;
         var current = new List<byte[]>();
-        server.OnFrame += (frame, ct) =>
+        server.OnFrame += (frame, _) =>
         {
             frame.TryGetValue(out ZSegment segment);
             current.Add(segment.Memory.ToArray());
@@ -978,7 +978,7 @@ public sealed class ZSocketTests
         await using var client = new ZPairSocket();
 
         var act = () => client.ConnectAsync<EndPoint, SynchronousEofTransport>(
-            new IPEndPoint(IPAddress.Loopback, 1));
+            new IPEndPoint(IPAddress.Loopback, 1), token);
         await act.Should().ThrowAsync<IOException>();
 
         // A failed attempt must not leave a dead peer routable: sending with no
@@ -1480,8 +1480,10 @@ public sealed class ZSocketTests
         });
 
         // The raw peer never answers READY, so the send pump blocks on the
-        // establishment gate and the outbound channel backs up.
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
+        // establishment gate and the outbound channel backs up. The connect
+        // task stays pending by design: establishment completes only when the
+        // test itself drives (or abandons) the peer, so it is unobserved.
+        _ = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
         using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
         await stream.ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
@@ -1522,8 +1524,10 @@ public sealed class ZSocketTests
         });
 
         // The raw peer never answers READY, so the send pump dequeues the
-        // first message and blocks on the establishment gate.
-        var connectTask = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
+        // first message and blocks on the establishment gate. The connect
+        // task stays pending by design: establishment completes only when the
+        // test itself drives (or abandons) the peer, so it is unobserved.
+        _ = client.ConnectAsync($"tcp://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}", token);
         using var raw = await acceptTask.AsTask().WaitAsync(token);
         var stream = raw.GetStream();
         await stream.ReadExactlyAsync(new byte[64], token).AsTask().WaitAsync(token);
@@ -1719,7 +1723,7 @@ public sealed class ZSocketTests
         // ipc concurrency coverage is provided by ZSocketIpcTests and the
         // parameterized concurrent-send suites.
         using var pool = new CountingMemoryPool();
-        await using var server = new ZPairSocket(new ZSocketOptions
+        var server = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
             ReceiveQueueFactory = new BoundedChannelOptions(16) { SingleWriter = true },
@@ -1919,10 +1923,10 @@ public sealed class ZSocketTests
         var stopwatch = Stopwatch.StartNew();
         while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
         {
-            if (state()!.Equals(expected))
+            if (Equals(state(), expected))
             {
                 await Task.Delay(interval);
-                if (state()!.Equals(expected)) return;
+                if (Equals(state(), expected)) return;
             }
 
             await Task.Delay(20);
@@ -2004,7 +2008,7 @@ public sealed class ZSocketTests
 
         if (finished == write)
         {
-            window.Cancel();
+            await window.CancelAsync();
         }
         else
         {
@@ -2101,7 +2105,7 @@ internal sealed class SynchronousEofConnection : IZConnection
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }

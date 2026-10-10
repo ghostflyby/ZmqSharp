@@ -12,7 +12,7 @@ namespace ZmqSharp.Tests.Transports;
 /// End-to-end tests of <see cref="ZSocketConnection"/> (0015 section 4): a
 /// raw-socket pair completing the NULL handshake, with the receiving side
 /// parsed by <see cref="ZmtpParser"/>. Covers the direct
-/// <see cref="Socket.ReceiveAsync"/> read path and the buffer-list scatter
+/// <see cref="Socket.ReceiveAsync(System.ArraySegment{byte})"/> read path and the buffer-list scatter
 /// write path (one system call per frame). The parser pump runs in the
 /// background (on a live socket it only stops when the peer closes) and the
 /// test drives the send side. The bulk regression for the connection swap

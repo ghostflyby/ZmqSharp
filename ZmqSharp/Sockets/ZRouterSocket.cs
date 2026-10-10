@@ -7,7 +7,7 @@ namespace ZmqSharp;
 /// ROUTER composition root (0012): identity-aware routing. Inbound messages
 /// arrive with the peer's routing identity prefixed as the first frame
 /// (consumers bind their own <see cref="IPatternSink"/> or wrap this in the
-/// channel surface); <see cref="SendAsync(ReadOnlyMemory<byte>, ZMessage, CancellationToken)"/>
+/// channel surface); <see cref="SendAsync(ReadOnlyMemory{byte}, ZMessage, CancellationToken)"/>
 /// addresses a peer by identity. The routing table and the inbound identity
 /// prefix both live in the composed <see cref="ZIdentityDispatch"/> / its
 /// inbound policy; this socket only delegates. Wire frames carry no identity

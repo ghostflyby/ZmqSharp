@@ -81,5 +81,10 @@ public abstract class ZSocketBase : IZSocket
     public Task ConnectAsync(string endpoint, CancellationToken token = default) => Runtime.ConnectAsync(endpoint, token);
     public ValueTask UnbindAsync(string endpoint, CancellationToken token = default) => Runtime.UnbindAsync(endpoint, token);
     public ValueTask DisconnectAsync(string endpoint, CancellationToken token = default) => Runtime.DisconnectAsync(endpoint, token);
-    public virtual ValueTask DisposeAsync() => Runtime.DisposeAsync();
+
+    public virtual ValueTask DisposeAsync()
+    {
+        GC.SuppressFinalize(this);
+        return Runtime.DisposeAsync();
+    }
 }

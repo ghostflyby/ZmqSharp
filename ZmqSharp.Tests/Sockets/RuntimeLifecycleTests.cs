@@ -181,7 +181,7 @@ public sealed class RuntimeLifecycleTests
     /// </summary>
     private sealed class ClosingBytes : IZConnection
     {
-        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int position;
         private int sequenceWrites;
         public TaskCompletionSource Aborted { get; } = Gate();
@@ -245,7 +245,7 @@ public sealed class RuntimeLifecycleTests
     // Deliberately implements only the public byte contract.
     private sealed class ControlledBytes : IZConnection
     {
-        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready("PAIR"));
+        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int position;
         public TaskCompletionSource ReadWaiting { get; } = Gate();
         public TaskCompletionSource WriteStarted { get; } = Gate();
