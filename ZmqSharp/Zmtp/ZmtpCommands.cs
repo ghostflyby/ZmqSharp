@@ -12,10 +12,10 @@ namespace ZmqSharp.Zmtp;
 /// </summary>
 public static class ZmtpCommands
 {
-    private static readonly byte[] ReadyName = [.. "READY"u8];
-    private static readonly byte[] SocketTypePropertyName = [.. "Socket-Type"u8];
-    private static readonly byte[] IdentityPropertyName = [.. "Identity"u8];
-    private static readonly byte[] ErrorName = [.. "ERROR"u8];
+    private static ReadOnlySpan<byte> ReadyName => "READY"u8;
+    private static ReadOnlySpan<byte> SocketTypePropertyName => "Socket-Type"u8;
+    private static ReadOnlySpan<byte> IdentityPropertyName => "Identity"u8;
+    private static ReadOnlySpan<byte> ErrorName => "ERROR"u8;
 
     /// <summary>
     /// Builds a READY body carrying the Socket-Type metadata property and,

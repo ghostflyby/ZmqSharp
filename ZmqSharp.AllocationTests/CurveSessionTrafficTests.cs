@@ -11,7 +11,7 @@ namespace ZmqSharp.AllocationTests;
 public sealed class CurveSessionTrafficTests
 {
     internal static CurveFrameCodec NewCodec() => new(new BouncyCastleCurveCrypto(), Key32.From(new byte[32]),
-        new byte[16], new byte[16], 1, 0);
+        encodeServerToClient: false, decodeServerToClient: false, 1, 0);
 
     [Fact]
     public async Task LargeFrame_RoundTrips_WithLongSizeFlag()
@@ -99,7 +99,7 @@ public sealed class CurveSessionTrafficTests
         using var encoder = NewCodec();
         var encoded = encoder.Encode(new ZmtpFrameData()).Body.ToArray();
         Span<byte> nonce = stackalloc byte[24];
-        nonce.Clear();
+        CurveConstants.MessagePrefixClientToServer.CopyTo(nonce);
         BinaryPrimitives.WriteUInt64BigEndian(nonce[16..], 1);
         new BouncyCastleCurveCrypto().SecretBox([(byte)ZmtpFrameFlags.LongSize], nonce, new byte[32], encoded.AsSpan(16));
         using var decoder = NewCodec();

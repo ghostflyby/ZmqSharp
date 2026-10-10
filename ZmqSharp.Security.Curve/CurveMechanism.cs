@@ -110,7 +110,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
             var session = new CurveFrameCodec(
                 crypto, sessionKey,
-                CurveConstants.MessagePrefixClientToServer, CurveConstants.MessagePrefixServerToClient,
+                encodeServerToClient: false, decodeServerToClient: true,
                 nonce, 0);
             return new ZMechanismResult(session, peerMetadata);
         }
@@ -118,7 +118,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
         private byte[] BuildHello(Key32 ephemeralPublic, Key32 ephemeralSecret, Key32 serverKey, ref ulong nonce)
         {
             var body = new byte[200];
-            CurveConstants.HelloLiteral.CopyTo(body, 0);
+            CurveConstants.HelloLiteral.CopyTo(body);
             body[6] = 1; // CurveZMQ major version
             body[7] = 0; // minor version
             // 8..80: zero padding (anti-amplification).
@@ -194,7 +194,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             WriteNonce(CurveConstants.InitiateNoncePrefix, ref nonce, initiateNonce);
 
             var body = new byte[9 + cookie.Length + 8 + (16 + initiatePlainLength)];
-            CurveConstants.InitiateLiteral.CopyTo(body, 0);
+            CurveConstants.InitiateLiteral.CopyTo(body);
             cookie.CopyTo(body, 9);
             initiateNonce[16..].CopyTo(body.AsSpan(105));
             crypto.Box(initiatePlain, initiateNonce, ephemeralSecret.Span, serverEphemeralKey.Span,
@@ -272,7 +272,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
 
             var session = new CurveFrameCodec(
                 crypto, sessionKey,
-                CurveConstants.MessagePrefixServerToClient, CurveConstants.MessagePrefixClientToServer,
+                encodeServerToClient: true, decodeServerToClient: false,
                 nonce, peerNonce);
             return new ZMechanismResult(session, peerMetadata);
         }
@@ -281,7 +281,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
         {
             // HELLO is 200 bytes; reconstruct the full body so the fixed offsets match the reference.
             var body = new byte[6 + hello.Arguments.Length];
-            CurveConstants.HelloLiteral.CopyTo(body, 0);
+            CurveConstants.HelloLiteral.CopyTo(body);
             hello.Arguments.Span.CopyTo(body.AsSpan(6));
             if (body.Length != 200) throw new ZMechanismException("malformed HELLO command");
             if (body[6] != 1 || body[7] != 0) throw new ZMechanismException("unsupported CURVE version");
@@ -334,7 +334,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             crypto.Box(welcomePlain, welcomeNonce, longTerm.Span, clientEphemeralKey.Span, welcomeBox);
 
             var body = new byte[8 + 16 + welcomeBox.Length];
-            CurveConstants.WelcomeLiteral.CopyTo(body, 0);
+            CurveConstants.WelcomeLiteral.CopyTo(body);
             welcomeNonce[8..24].CopyTo(body.AsSpan(8));
             welcomeBox.CopyTo(body.AsSpan(24));
             return body;
@@ -349,7 +349,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
         {
             // Reconstruct the full body so the fixed offsets match the reference.
             var body = new byte[9 + initiate.Arguments.Length];
-            CurveConstants.InitiateLiteral.CopyTo(body, 0);
+            CurveConstants.InitiateLiteral.CopyTo(body);
             initiate.Arguments.Span.CopyTo(body.AsSpan(9));
             if (body.Length < 257) throw new ZMechanismException("malformed INITIATE command");
 
@@ -416,7 +416,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             crypto.Box(metadata.Span, readyNonce, ephemeralSecret.Span, clientEphemeralKey.Span, box);
 
             var body = new byte[6 + 8 + box.Length];
-            CurveConstants.ReadyLiteral.CopyTo(body, 0);
+            CurveConstants.ReadyLiteral.CopyTo(body);
             readyNonce[16..].CopyTo(body.AsSpan(6));
             box.CopyTo(body.AsSpan(14));
             return body;
@@ -439,7 +439,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
     }
 
     /// <summary>Builds a full 24-byte nonce: 16-byte fixed prefix + 8-byte big-endian counter.</summary>
-    private static void WriteNonce(byte[] prefix, ref ulong nonce, Span<byte> destination)
+    private static void WriteNonce(ReadOnlySpan<byte> prefix, ref ulong nonce, Span<byte> destination)
     {
         prefix.CopyTo(destination);
         BinaryPrimitives.WriteUInt64BigEndian(destination[16..], nonce);
@@ -450,18 +450,18 @@ public sealed class CurveMechanism : IZSecurityMechanism
 /// <summary>Fixed RFC 25 literals and nonce prefixes.</summary>
 internal static class CurveConstants
 {
-    public static readonly byte[] HelloLiteral = [0x05, .. "HELLO"u8];
-    public static readonly byte[] WelcomeLiteral = [0x07, .. "WELCOME"u8];
-    public static readonly byte[] InitiateLiteral = [0x08, .. "INITIATE"u8];
-    public static readonly byte[] ReadyLiteral = [0x05, .. "READY"u8];
-    public static readonly byte[] MessageLiteral = [0x07, .. "MESSAGE"u8];
+    public static ReadOnlySpan<byte> HelloLiteral => "\u0005HELLO"u8;
+    public static ReadOnlySpan<byte> WelcomeLiteral => "\aWELCOME"u8;
+    public static ReadOnlySpan<byte> InitiateLiteral => "\bINITIATE"u8;
+    public static ReadOnlySpan<byte> ReadyLiteral => "\u0005READY"u8;
+    public static ReadOnlySpan<byte> MessageLiteral => "\aMESSAGE"u8;
 
-    public static readonly byte[] HelloNoncePrefix = [.. "CurveZMQHELLO---"u8];
-    public static readonly byte[] WelcomeNoncePrefix = [.. "WELCOME-"u8];
-    public static readonly byte[] VouchNoncePrefix = [.. "VOUCH---"u8];
-    public static readonly byte[] InitiateNoncePrefix = [.. "CurveZMQINITIATE"u8];
-    public static readonly byte[] ReadyNoncePrefix = [.. "CurveZMQREADY---"u8];
-    public static readonly byte[] CookieNoncePrefix = [.. "COOKIE--"u8];
-    public static readonly byte[] MessagePrefixClientToServer = [.. "CurveZMQMESSAGEC"u8];
-    public static readonly byte[] MessagePrefixServerToClient = [.. "CurveZMQMESSAGES"u8];
+    public static ReadOnlySpan<byte> HelloNoncePrefix => "CurveZMQHELLO---"u8;
+    public static ReadOnlySpan<byte> WelcomeNoncePrefix => "WELCOME-"u8;
+    public static ReadOnlySpan<byte> VouchNoncePrefix => "VOUCH---"u8;
+    public static ReadOnlySpan<byte> InitiateNoncePrefix => "CurveZMQINITIATE"u8;
+    public static ReadOnlySpan<byte> ReadyNoncePrefix => "CurveZMQREADY---"u8;
+    public static ReadOnlySpan<byte> CookieNoncePrefix => "COOKIE--"u8;
+    public static ReadOnlySpan<byte> MessagePrefixClientToServer => "CurveZMQMESSAGEC"u8;
+    public static ReadOnlySpan<byte> MessagePrefixServerToClient => "CurveZMQMESSAGES"u8;
 }
