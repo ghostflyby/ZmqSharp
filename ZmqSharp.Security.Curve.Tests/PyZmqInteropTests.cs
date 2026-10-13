@@ -23,9 +23,6 @@ public sealed class PyZmqInteropTests
     private static readonly string ScriptPath =
         Path.Combine(AppContext.BaseDirectory, "pyzmqInterop.py");
 
-    private static readonly byte[] ServerSecret = Convert.FromHexString(
-        "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
-
     private static readonly byte[] ServerPublicKey = Convert.FromHexString(
         "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
 
@@ -48,7 +45,7 @@ public sealed class PyZmqInteropTests
         var ready = await peer.StandardOutput.ReadLineAsync(token)
             .AsTask()
             .WaitAsync(TimeSpan.FromSeconds(15), token);
-        Assert.True(ready is not null && ready.StartsWith("READY "), $"peer did not become ready: {ready ?? "<exited>"}");
+        Assert.True(ready is not null && ready.StartsWith("READY "), $"peer did not become ready: {ready}");
 
         await using var local = new ZPairSocket(new ZSocketOptions
         {
@@ -126,7 +123,7 @@ public sealed class PyZmqInteropTests
             using var probe = Process.Start(info);
             if (probe is null) return false;
             probe.WaitForExit(10_000);
-            return probe.HasExited && probe.ExitCode == 0;
+            return probe is { HasExited: true, ExitCode: 0 };
         }
         catch (Exception)
         {
