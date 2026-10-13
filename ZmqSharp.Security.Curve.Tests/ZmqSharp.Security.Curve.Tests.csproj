@@ -24,4 +24,10 @@
     <ProjectReference Include="../ZmqSharp.Security.Curve/ZmqSharp.Security.Curve.csproj"/>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Preset peer script for PyZmqInteropTests (off by default; the test
+         launches it with a python interpreter when explicitly enabled). -->
+    <None Include="pyzmqInterop.py" CopyToOutputDirectory="PreserveNewest"/>
+  </ItemGroup>
+
 </Project>
