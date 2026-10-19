@@ -75,8 +75,7 @@ public sealed class ZmtpHandshakeTests
     {
         var body = ZmtpTestData.ReadyBodyWithProperties(("Identity", "abc"));
 
-        var ex = Assert.Throws<ZeroMqProtocolException>(
-            () => ZmtpCommandCodec.ParseReadySocketType(body.AsSpan()[(1 + ReadyName.Length)..]));
+        var ex = Assert.Throws<ZeroMqProtocolException>(() => ZmtpCommandCodec.ParseReadySocketType(body.AsSpan()[(1 + ReadyName.Length)..]));
 
         Assert.Contains("missing a valid Socket-Type", ex.Message);
     }

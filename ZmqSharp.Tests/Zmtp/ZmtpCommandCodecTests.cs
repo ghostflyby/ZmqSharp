@@ -67,8 +67,7 @@ public sealed class ZmtpCommandCodecTests
     {
         var body = BuildReadyWithDuplicateIdentity();
 
-        var ex = Assert.Throws<ZeroMqProtocolException>(
-            () => ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body)));
+        var ex = Assert.Throws<ZeroMqProtocolException>(() => ZmtpCommandCodec.ParseReadyIdentity(MetadataOf(body)));
         Assert.Contains("duplicate metadata property 'Identity'", ex.Message);
     }
 

@@ -149,8 +149,7 @@ public sealed class ZPlainMechanism : IZSecurityMechanism
         /// <summary>HELLO contains length-prefixed credentials, not metadata properties.</summary>
         private byte[] BuildHello()
         {
-            var user = Encoding.UTF8.GetBytes(username
-                ?? throw new InvalidOperationException("a PLAIN client requires fixed credentials"));
+            var user = Encoding.UTF8.GetBytes(username ?? throw new InvalidOperationException("a PLAIN client requires fixed credentials"));
             var body = new byte[8 + user.Length + password.Length];
             body[0] = 5;
             "HELLO"u8.CopyTo(body.AsSpan(1));
