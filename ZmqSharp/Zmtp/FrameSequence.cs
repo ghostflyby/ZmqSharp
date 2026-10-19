@@ -17,32 +17,32 @@ internal sealed class FrameSequence
         public void Link(Node next) => Next = next;
     }
 
-    private readonly List<Node> nodes = [];
-    private int count;
-    private long length;
+    private readonly List<Node> _nodes = [];
+    private int _count;
+    private long _length;
 
     public void Clear()
     {
-        count = 0;
-        length = 0;
+        _count = 0;
+        _length = 0;
     }
 
     public void Add(ReadOnlyMemory<byte> memory)
     {
         if (memory.IsEmpty) return;
-        if (count == nodes.Count) nodes.Add(new Node());
-        var node = nodes[count];
-        node.Reset(memory, length);
-        if (count > 0) nodes[count - 1].Link(node);
-        count++;
-        length += memory.Length;
+        if (_count == _nodes.Count) _nodes.Add(new Node());
+        var node = _nodes[_count];
+        node.Reset(memory, _length);
+        if (_count > 0) _nodes[_count - 1].Link(node);
+        _count++;
+        _length += memory.Length;
     }
 
-    public ReadOnlySequence<byte> Sequence => count switch
+    public ReadOnlySequence<byte> Sequence => _count switch
     {
         0 => ReadOnlySequence<byte>.Empty,
-        1 => new ReadOnlySequence<byte>(nodes[0].Memory),
-        _ => new ReadOnlySequence<byte>(nodes[0], 0, nodes[count - 1], nodes[count - 1].Memory.Length)
+        1 => new ReadOnlySequence<byte>(_nodes[0].Memory),
+        _ => new ReadOnlySequence<byte>(_nodes[0], 0, _nodes[_count - 1], _nodes[_count - 1].Memory.Length)
     };
 
     public ReadOnlySequence<byte> FromFrame(ZFrame frame)

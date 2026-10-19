@@ -15,13 +15,13 @@ namespace ZmqSharp;
 /// </summary>
 public sealed class ZReqSocket : ZSocketBase
 {
-    private readonly ZReqCore core;
+    private readonly ZReqCore _core;
 
     public ZReqSocket(ZSocketOptions? options = null) : this(Create(options ?? new ZSocketOptions())) { }
 
     private ZReqSocket((SocketRuntime Runtime, ZReqCore Core) components) : base(components.Runtime)
     {
-        core = components.Core;
+        _core = components.Core;
     }
 
     private static (SocketRuntime, ZReqCore) Create(ZSocketOptions options)
@@ -41,7 +41,7 @@ public sealed class ZReqSocket : ZSocketBase
     /// </summary>
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token = default)
     {
-        return core.RequestAsync(message, token);
+        return _core.RequestAsync(message, token);
     }
 
     /// <summary>
@@ -57,7 +57,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(request))));
         try
         {
-            return core.RequestAsync(message, token);
+            return _core.RequestAsync(message, token);
         }
         catch
         {
@@ -73,7 +73,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = ZMessage.Copy(request);
         try
         {
-            return core.RequestAsync(message, token);
+            return _core.RequestAsync(message, token);
         }
         catch
         {
@@ -88,7 +88,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = ZMessage.Copy(frames);
         try
         {
-            return core.RequestAsync(message, token);
+            return _core.RequestAsync(message, token);
         }
         catch
         {
@@ -103,7 +103,7 @@ public sealed class ZReqSocket : ZSocketBase
         var message = ZMessage.Copy(frames);
         try
         {
-            return core.RequestAsync(message, token);
+            return _core.RequestAsync(message, token);
         }
         catch
         {

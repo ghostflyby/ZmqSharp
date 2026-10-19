@@ -6,11 +6,11 @@ namespace ZmqSharp;
 /// <summary>Single-frame message: exactly one ZFrame.</summary>
 public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
 {
-    private readonly ZFrame frame;
+    private readonly ZFrame _frame;
 
     internal ZSingleMessage(ZFrame frame)
     {
-        this.frame = frame;
+        _frame = frame;
     }
 
     /// <summary>Zero-copy single frame: the caller transfers ownership of the array.</summary>
@@ -83,13 +83,13 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
         get
         {
             ArgumentOutOfRangeException.ThrowIfNotEqual(index, 0);
-            return frame;
+            return _frame;
         }
     }
 
     public Enumerator GetEnumerator()
     {
-        return new Enumerator(frame);
+        return new Enumerator(_frame);
     }
 
     IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
@@ -104,41 +104,41 @@ public readonly struct ZSingleMessage : IReadOnlyList<ZFrame>, IDisposable
 
     public void Dispose()
     {
-        frame.Dispose();
+        _frame.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZFrame>
     {
-        private readonly ZFrame frame;
-        private int state;
+        private readonly ZFrame _frame;
+        private int _state;
 
         internal Enumerator(ZFrame frame)
         {
-            this.frame = frame;
-            state = 0;
+            _frame = frame;
+            _state = 0;
         }
 
-        public ZFrame Current => state != 1
+        public ZFrame Current => _state != 1
             ? throw new InvalidOperationException("enumeration has not started or has already finished")
-            : frame;
+            : _frame;
 
         object IEnumerator.Current => Current;
 
         public bool MoveNext()
         {
-            if (state == 0)
+            if (_state == 0)
             {
-                state = 1;
+                _state = 1;
                 return true;
             }
 
-            state = 2;
+            _state = 2;
             return false;
         }
 
         public void Reset()
         {
-            state = 0;
+            _state = 0;
         }
 
         public void Dispose() { }

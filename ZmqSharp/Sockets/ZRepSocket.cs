@@ -14,16 +14,16 @@ namespace ZmqSharp;
 /// </summary>
 public sealed class ZRepSocket : ZSocketBase
 {
-    private readonly ZRepCore core;
-    private readonly RequestHandlerSlot handlers;
+    private readonly ZRepCore _core;
+    private readonly RequestHandlerSlot _handlers;
 
     public ZRepSocket(ZSocketOptions? options = null) : this(Create(options ?? new ZSocketOptions())) { }
 
     private ZRepSocket((SocketRuntime Runtime, ZRepCore Core, RequestHandlerSlot Handlers) components)
         : base(components.Runtime)
     {
-        core = components.Core;
-        handlers = components.Handlers;
+        _core = components.Core;
+        _handlers = components.Handlers;
     }
 
     private static (SocketRuntime, ZRepCore, RequestHandlerSlot) Create(ZSocketOptions options)
@@ -36,7 +36,7 @@ public sealed class ZRepSocket : ZSocketBase
     }
 
     /// <summary>Handles requests serially; the context is valid until the handler completes.</summary>
-    public void BindRequestHandler(Func<ZRequestContext, CancellationToken, ValueTask> handler) => handlers.Set(handler);
+    public void BindRequestHandler(Func<ZRequestContext, CancellationToken, ValueTask> handler) => _handlers.Set(handler);
 
     /// <summary>
     /// Routes a reply back to the request's originating peer. The reply is
@@ -45,7 +45,7 @@ public sealed class ZRepSocket : ZSocketBase
     /// </summary>
     public ValueTask SendReplyAsync(ZRequestContext context, ZMessage reply, CancellationToken token = default)
     {
-        return core.SendReplyAsync(context, reply, token);
+        return _core.SendReplyAsync(context, reply, token);
     }
 
     /// <summary>
@@ -58,24 +58,24 @@ public sealed class ZRepSocket : ZSocketBase
     public ValueTask SendReplyAsync(ZRequestContext context, ReadOnlyMemory<byte> reply, CancellationToken token = default)
     {
         var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(reply))));
-        return core.SendReplyAsync(context, message, token);
+        return _core.SendReplyAsync(context, message, token);
     }
 
     /// <summary>Routes a reply with non-contiguous content, copied, back to the originating peer (0026).</summary>
     public ValueTask SendReplyAsync(ZRequestContext context, ReadOnlySequence<byte> reply, CancellationToken token = default)
     {
-        return core.SendReplyAsync(context, ZMessage.Copy(reply), token);
+        return _core.SendReplyAsync(context, ZMessage.Copy(reply), token);
     }
 
     /// <summary>Routes a multipart reply, copied frame by frame, back to the originating peer (0026).</summary>
     public ValueTask SendReplyAsync(ZRequestContext context, IEnumerable<ReadOnlyMemory<byte>> frames, CancellationToken token = default)
     {
-        return core.SendReplyAsync(context, ZMessage.Copy(frames), token);
+        return _core.SendReplyAsync(context, ZMessage.Copy(frames), token);
     }
 
     /// <summary>Routes a multipart reply from a <c>byte[][]</c> collection, copied, back to the originating peer (0026).</summary>
     public ValueTask SendReplyAsync(ZRequestContext context, IEnumerable<byte[]> frames, CancellationToken token = default)
     {
-        return core.SendReplyAsync(context, ZMessage.Copy(frames), token);
+        return _core.SendReplyAsync(context, ZMessage.Copy(frames), token);
     }
 }

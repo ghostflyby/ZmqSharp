@@ -34,10 +34,10 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
 {
     // Identities are matched by content, so a consumer's copy of the identity
     // bytes addresses the peer. Latin1 maps bytes 1:1 to chars (no collisions).
-    private readonly Lock identityLock = new();
-    private readonly Dictionary<string, ZPeer> identities = [];
-    private readonly Dictionary<ZPeer, byte[]> peerIdentities = [];
-    private int nextIdentity;
+    private readonly Lock _identityLock = new();
+    private readonly Dictionary<string, ZPeer> _identities = [];
+    private readonly Dictionary<ZPeer, byte[]> _peerIdentities = [];
+    private int _nextIdentity;
 
     /// <inheritdoc/>
     public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
@@ -51,16 +51,16 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     /// </summary>
     internal byte[] AssignIdentity(ZPeer peer)
     {
-        lock (identityLock)
+        lock (_identityLock)
         {
-            if (peerIdentities.TryGetValue(peer, out var existing)) return existing;
+            if (_peerIdentities.TryGetValue(peer, out var existing)) return existing;
 
             // Routing ids are local metadata: the identity never leaves this
             // socket, so byte order is irrelevant but fixed for determinism.
             var identity = new byte[4];
-            BinaryPrimitives.WriteInt32BigEndian(identity, Interlocked.Increment(ref nextIdentity));
-            peerIdentities[peer] = identity;
-            identities[Encoding.Latin1.GetString(identity)] = peer;
+            BinaryPrimitives.WriteInt32BigEndian(identity, Interlocked.Increment(ref _nextIdentity));
+            _peerIdentities[peer] = identity;
+            _identities[Encoding.Latin1.GetString(identity)] = peer;
             return identity;
         }
     }
@@ -76,17 +76,17 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     /// </summary>
     internal bool TryRegisterIdentity(ZPeer peer, ReadOnlyMemory<byte> advertisedIdentity)
     {
-        lock (identityLock)
+        lock (_identityLock)
         {
-            if (peerIdentities.ContainsKey(peer)) return true;
+            if (_peerIdentities.ContainsKey(peer)) return true;
 
             var key = Encoding.Latin1.GetString(advertisedIdentity.Span);
-            if (identities.TryGetValue(key, out var existing) && !ReferenceEquals(existing, peer))
+            if (_identities.TryGetValue(key, out var existing) && !ReferenceEquals(existing, peer))
                 return false;
 
             var identity = advertisedIdentity.ToArray();
-            peerIdentities[peer] = identity;
-            identities[key] = peer;
+            _peerIdentities[peer] = identity;
+            _identities[key] = peer;
             return true;
         }
     }
@@ -94,20 +94,20 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
     /// <summary>Resolves the peer that advertises the given routing identity.</summary>
     internal bool TryResolve(ReadOnlySpan<byte> identity, out ZPeer? peer)
     {
-        lock (identityLock)
+        lock (_identityLock)
         {
-            return identities.TryGetValue(Encoding.Latin1.GetString(identity), out peer);
+            return _identities.TryGetValue(Encoding.Latin1.GetString(identity), out peer);
         }
     }
 
     /// <summary>Releases a peer's identity mapping on teardown.</summary>
     internal void RemovePeer(ZPeer peer)
     {
-        lock (identityLock)
+        lock (_identityLock)
         {
-            if (!peerIdentities.Remove(peer, out var identity)) return;
+            if (!_peerIdentities.Remove(peer, out var identity)) return;
 
-            identities.Remove(Encoding.Latin1.GetString(identity));
+            _identities.Remove(Encoding.Latin1.GetString(identity));
         }
     }
 }
@@ -122,15 +122,15 @@ public sealed class ZIdentityDispatch : IZDispatchPolicy
 /// </summary>
 public sealed class ZCurrentPeerDispatch : IZDispatchPolicy
 {
-    private readonly Lock gateLock = new();
-    private ZPeer? current;
+    private readonly Lock _gateLock = new();
+    private ZPeer? _current;
 
     /// <inheritdoc/>
     public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
-        lock (gateLock)
+        lock (_gateLock)
         {
-            targets[0] = current ?? throw new InvalidOperationException("REQ sends through RequestAsync, not SendAsync");
+            targets[0] = _current ?? throw new InvalidOperationException("REQ sends through RequestAsync, not SendAsync");
             return 1;
         }
     }
@@ -138,19 +138,19 @@ public sealed class ZCurrentPeerDispatch : IZDispatchPolicy
     /// <summary>True when <paramref name="peer"/> is the in-flight request's target.</summary>
     internal bool IsCurrent(ZPeer peer)
     {
-        lock (gateLock) return current == peer;
+        lock (_gateLock) return _current == peer;
     }
 
     /// <summary>Records the in-flight request's target (the fair-queue selection).</summary>
     internal void SetCurrent(ZPeer peer)
     {
-        lock (gateLock) current = peer;
+        lock (_gateLock) _current = peer;
     }
 
     /// <summary>Releases the in-flight target (reply received or peer ended).</summary>
     internal void Clear()
     {
-        lock (gateLock) current = null;
+        lock (_gateLock) _current = null;
     }
 }
 

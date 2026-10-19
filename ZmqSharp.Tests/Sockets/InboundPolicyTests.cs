@@ -162,16 +162,16 @@ public sealed class InboundPolicyTests
     /// <summary>Counts and disposes every message (a custom REQ-like consume).</summary>
     private sealed class ConsumeInbound : IZInboundPolicy
     {
-        private int count;
-        private readonly TaskCompletionSource reachedTwo = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _count;
+        private readonly TaskCompletionSource _reachedTwo = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Completes when two messages have been consumed (the state
         /// this test waits for, exposed instead of polling the counter).</summary>
-        public Task ReachedTwoAsync => reachedTwo.Task;
+        public Task ReachedTwoAsync => _reachedTwo.Task;
 
         public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
         {
-            if (Interlocked.Increment(ref count) >= 2) reachedTwo.TrySetResult();
+            if (Interlocked.Increment(ref _count) >= 2) _reachedTwo.TrySetResult();
             message.Dispose();
             return ValueTask.FromResult(new ZInboundDecision { Action = ZInboundAction.Consumed });
         }

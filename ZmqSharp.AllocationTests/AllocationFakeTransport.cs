@@ -54,22 +54,22 @@ internal sealed class AllocationFakeConnection : IZConnection
 {
     private static readonly byte[] Handshake = BuildHandshake();
 
-    private readonly Channel<byte[]> inbound =
+    private readonly Channel<byte[]> _inbound =
         Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
 
-    private readonly Lock gateLock = new();
-    private TaskCompletionSource pumpIdle = CreateGate();
-    private TaskCompletionSource pumpRelease = CreateCompletedGate();
+    private readonly Lock _gateLock = new();
+    private TaskCompletionSource _pumpIdle = CreateGate();
+    private TaskCompletionSource _pumpRelease = CreateCompletedGate();
 
-    private byte[]? current;
-    private int currentPosition;
-    private int handshakePosition;
-    private int disposed;
+    private byte[]? _current;
+    private int _currentPosition;
+    private int _handshakePosition;
+    private int _disposed;
 
     /// <summary>Feeds one scripted inbound chunk (a complete frame) to the receive pump.</summary>
     public void Enqueue(byte[] chunk)
     {
-        inbound.Writer.TryWrite(chunk);
+        _inbound.Writer.TryWrite(chunk);
     }
 
     /// <summary>
@@ -86,10 +86,10 @@ internal sealed class AllocationFakeConnection : IZConnection
     /// </summary>
     public void ArmSynchronousWindow()
     {
-        lock (gateLock)
+        lock (_gateLock)
         {
-            pumpIdle = CreateGate();
-            pumpRelease = CreateGate();
+            _pumpIdle = CreateGate();
+            _pumpRelease = CreateGate();
         }
     }
 
@@ -99,24 +99,24 @@ internal sealed class AllocationFakeConnection : IZConnection
     public Task WaitUntilPumpIdleAsync()
     {
         Task idle;
-        lock (gateLock) idle = pumpIdle.Task;
+        lock (_gateLock) idle = _pumpIdle.Task;
         return idle.WaitAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>Test seam: releases the parked pump; the buffered frames then drain synchronously.</summary>
     public void ReleasePump()
     {
-        lock (gateLock) pumpRelease.TrySetResult();
+        lock (_gateLock) _pumpRelease.TrySetResult();
     }
 
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
-        if (handshakePosition >= Handshake.Length) return ReadInboundAsync(buffer, token);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+        if (_handshakePosition >= Handshake.Length) return ReadInboundAsync(buffer, token);
 
-        var count = Math.Min(buffer.Length, Handshake.Length - handshakePosition);
-        Handshake.AsSpan(handshakePosition, count).CopyTo(buffer.Span);
-        handshakePosition += count;
+        var count = Math.Min(buffer.Length, Handshake.Length - _handshakePosition);
+        Handshake.AsSpan(_handshakePosition, count).CopyTo(buffer.Span);
+        _handshakePosition += count;
         return ValueTask.FromResult(count);
     }
 
@@ -124,11 +124,11 @@ internal sealed class AllocationFakeConnection : IZConnection
     {
         while (true)
         {
-            if (current is not null && currentPosition < current.Length)
+            if (_current is not null && _currentPosition < _current.Length)
             {
-                var count = Math.Min(buffer.Length, current.Length - currentPosition);
-                current.AsSpan(currentPosition, count).CopyTo(buffer.Span);
-                currentPosition += count;
+                var count = Math.Min(buffer.Length, _current.Length - _currentPosition);
+                _current.AsSpan(_currentPosition, count).CopyTo(buffer.Span);
+                _currentPosition += count;
                 return count;
             }
 
@@ -136,18 +136,18 @@ internal sealed class AllocationFakeConnection : IZConnection
             // test can wait for it, then block on the release gate (a no-op
             // when the gate is open, as during the handshake and warm-up).
             TaskCompletionSource release;
-            lock (gateLock)
+            lock (_gateLock)
             {
-                pumpIdle.TrySetResult();
-                release = pumpRelease;
+                _pumpIdle.TrySetResult();
+                release = _pumpRelease;
             }
 
             // Awaiting the gate under the test's token: a test timeout cancels
             // that token, so the pump wakes with an OperationCanceledException
             // instead of staying parked in the background.
             await release.Task.WaitAsync(TestContext.Current.CancellationToken);
-            current = await inbound.Reader.ReadAsync(token);
-            currentPosition = 0;
+            _current = await _inbound.Reader.ReadAsync(token);
+            _currentPosition = 0;
         }
     }
 
@@ -165,7 +165,7 @@ internal sealed class AllocationFakeConnection : IZConnection
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
@@ -178,7 +178,7 @@ internal sealed class AllocationFakeConnection : IZConnection
 
     public void Dispose()
     {
-        Interlocked.Exchange(ref disposed, 1);
+        Interlocked.Exchange(ref _disposed, 1);
     }
 
     /// <summary>ZMTP 3.0 NULL greeting plus a READY command advertising PAIR.</summary>

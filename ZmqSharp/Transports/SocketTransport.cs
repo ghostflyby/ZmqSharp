@@ -14,21 +14,21 @@ namespace ZmqSharp.Transports;
 /// </summary>
 public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 {
-    private readonly Socket socket;
-    private readonly string? boundPath;
-    private Func<IZConnection, CancellationToken, ValueTask>? onAccept;
-    private int closed;
+    private readonly Socket _socket;
+    private readonly string? _boundPath;
+    private Func<IZConnection, CancellationToken, ValueTask>? _onAccept;
+    private int _closed;
 
     private SocketTransport(Socket socket, string? boundPath = null)
     {
-        this.socket = socket;
-        this.boundPath = boundPath;
+        _socket = socket;
+        _boundPath = boundPath;
     }
 
     public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
     {
-        add => onAccept += value;
-        remove => onAccept -= value;
+        add => _onAccept += value;
+        remove => _onAccept -= value;
     }
 
     public static async ValueTask<IZConnection> ConnectAsync(
@@ -66,12 +66,12 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
     public async ValueTask StartAsync(CancellationToken token = default)
     {
-        while (Volatile.Read(ref closed) == 0)
+        while (Volatile.Read(ref _closed) == 0)
         {
             Socket accepted;
             try
             {
-                accepted = await socket.AcceptAsync(token);
+                accepted = await _socket.AcceptAsync(token);
             }
             catch (ObjectDisposedException)
             {
@@ -84,10 +84,10 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
             try
             {
-                SetTcpOptions(accepted, accepted.RemoteEndPoint ?? socket.LocalEndPoint);
+                SetTcpOptions(accepted, accepted.RemoteEndPoint ?? _socket.LocalEndPoint);
                 var connection = new ZSocketConnection(accepted);
-                if (onAccept is not null)
-                    await onAccept(connection, token);
+                if (_onAccept is not null)
+                    await _onAccept(connection, token);
                 else
                     connection.Dispose();
             }
@@ -102,16 +102,16 @@ public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref closed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _closed, 1) != 0) return;
 
-        socket.Dispose();
+        _socket.Dispose();
         // Unix domain bind creates a filesystem entry for the path; remove it
         // so a later bind of the same path succeeds (0015 section 5.2).
         // Abstract-namespace addresses (displayed with a leading '@', libzmq's
         // convention, 0020) have no filesystem entry - they are cleaned up
         // when the socket closes, and a File.Delete would target a wrong path
         // (a file literally named "@...") at best.
-        if (boundPath is not null && !boundPath.StartsWith('@')) File.Delete(boundPath);
+        if (_boundPath is not null && !_boundPath.StartsWith('@')) File.Delete(_boundPath);
     }
 
     /// <summary>

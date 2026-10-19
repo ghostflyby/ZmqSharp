@@ -18,9 +18,9 @@ namespace ZmqSharp.Security;
 /// </summary>
 public sealed class ZPlainMechanism : IZSecurityMechanism
 {
-    private readonly string? username;
-    private readonly ReadOnlyMemory<byte> password;
-    private readonly ZPlainAuthenticator? authenticator;
+    private readonly string? _username;
+    private readonly ReadOnlyMemory<byte> _password;
+    private readonly ZPlainAuthenticator? _authenticator;
 
     /// <summary>Client role: the credentials sent in every HELLO.</summary>
     public ZPlainMechanism(string username, ReadOnlySpan<byte> password)
@@ -28,24 +28,24 @@ public sealed class ZPlainMechanism : IZSecurityMechanism
         ArgumentNullException.ThrowIfNull(username);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(Encoding.UTF8.GetByteCount(username), byte.MaxValue, nameof(username));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(password.Length, byte.MaxValue, nameof(password));
-        this.username = username;
-        this.password = password.ToArray();
+        _username = username;
+        _password = password.ToArray();
     }
 
     /// <summary>Server role: authenticates each connection's HELLO credentials.</summary>
     public ZPlainMechanism(ZPlainAuthenticator authenticator)
     {
         ArgumentNullException.ThrowIfNull(authenticator);
-        this.authenticator = authenticator;
+        _authenticator = authenticator;
     }
 
     public string Name => "PLAIN";
 
-    public ZMechanismRole Role => authenticator is null ? ZMechanismRole.Client : ZMechanismRole.Server;
+    public ZMechanismRole Role => _authenticator is null ? ZMechanismRole.Client : ZMechanismRole.Server;
 
     public IZMechanismSession CreateSession()
     {
-        return new PlainSession(Role, username, password, authenticator);
+        return new PlainSession(Role, _username, _password, _authenticator);
     }
 
     private sealed class PlainSession(

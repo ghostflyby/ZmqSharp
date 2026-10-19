@@ -15,9 +15,9 @@ namespace ZmqSharp;
 /// </summary>
 public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
 {
-    private readonly object? owner;
-    private readonly int offset;
-    private readonly int length;
+    private readonly object? _owner;
+    private readonly int _offset;
+    private readonly int _length;
 
     internal ZSegment(object owner, int offset, int length)
         : this(owner, offset, length, false) { }
@@ -26,9 +26,9 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
         ArgumentOutOfRangeException.ThrowIfNegative(length);
-        this.owner = owner;
-        this.offset = offset;
-        this.length = length;
+        _owner = owner;
+        _offset = offset;
+        _length = length;
         IsBorrowed = isBorrowed;
     }
 
@@ -64,20 +64,20 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     {
         get
         {
-            if (owner is BorrowedMemory borrowed) return borrowed.Memory.Slice(offset, length);
+            if (_owner is BorrowedMemory borrowed) return borrowed.Memory.Slice(_offset, _length);
 
-            return Reacquire().Slice(offset, length);
+            return Reacquire().Slice(_offset, _length);
         }
     }
 
     /// <summary>Writable view, used by the parser to fill the buffer during materialization.</summary>
     internal Memory<byte> Writable =>
-        owner is BorrowedMemory
+        _owner is BorrowedMemory
             ? throw new InvalidOperationException("a borrowed view segment has no writable view")
-            : Reacquire().Slice(offset, length);
+            : Reacquire().Slice(_offset, _length);
 
     /// <summary>True when the segment is owned (backed by a caller byte[]).</summary>
-    public bool IsOwned => !IsBorrowed && owner is byte[];
+    public bool IsOwned => !IsBorrowed && _owner is byte[];
 
     /// <summary>True when the segment is a borrowed view (parser scratch source).</summary>
     internal bool IsBorrowed { get; }
@@ -85,7 +85,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     /// <summary>Returns the backing array when owned; false otherwise.</summary>
     public bool GetOwnedArray(out byte[] array)
     {
-        if (!IsBorrowed && owner is byte[] owned)
+        if (!IsBorrowed && _owner is byte[] owned)
         {
             array = owned;
             return true;
@@ -97,7 +97,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
 
     private Memory<byte> Reacquire()
     {
-        return owner switch
+        return _owner switch
         {
             byte[] array => array,
             IMemoryOwner<byte> pooled => pooled.Memory,
@@ -127,41 +127,41 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         // A pooled owner is released; a borrowed segment must never release
         // the parser's scratch. Owner-specific behavior after disposal is
         // neither caught nor normalized (0005 section 2.1).
-        if (!IsBorrowed && owner is IMemoryOwner<byte> memoryOwner) memoryOwner.Dispose();
+        if (!IsBorrowed && _owner is IMemoryOwner<byte> memoryOwner) memoryOwner.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZSegment>
     {
-        private readonly ZSegment segment;
-        private int state;
+        private readonly ZSegment _segment;
+        private int _state;
 
         internal Enumerator(ZSegment segment)
         {
-            this.segment = segment;
-            state = 0;
+            _segment = segment;
+            _state = 0;
         }
 
-        public ZSegment Current => state != 1
+        public ZSegment Current => _state != 1
             ? throw new InvalidOperationException("enumeration has not started or has already finished")
-            : segment;
+            : _segment;
 
         object IEnumerator.Current => Current;
 
         public bool MoveNext()
         {
-            if (state == 0)
+            if (_state == 0)
             {
-                state = 1;
+                _state = 1;
                 return true;
             }
 
-            state = 2;
+            _state = 2;
             return false;
         }
 
         public void Reset()
         {
-            state = 0;
+            _state = 0;
         }
 
         public void Dispose() { }

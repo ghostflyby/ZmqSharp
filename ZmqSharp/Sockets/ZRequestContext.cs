@@ -10,24 +10,24 @@ namespace ZmqSharp;
 /// </summary>
 public readonly struct ZRequestContext : IReadOnlyList<ZFrame>, IDisposable
 {
-    private readonly ZMessage message;
+    private readonly ZMessage _message;
 
     internal ZRequestContext(ZPeer peer, ZMessage message)
     {
         Peer = peer;
-        this.message = message;
+        _message = message;
     }
 
     /// <summary>The peer the request arrived from; replies route back to it.</summary>
     public ZPeer Peer { get; }
 
-    public int Count => message.Count;
+    public int Count => _message.Count;
 
-    public ZFrame this[int index] => message[index];
+    public ZFrame this[int index] => _message[index];
 
     public ZMessage.Enumerator GetEnumerator()
     {
-        return message.GetEnumerator();
+        return _message.GetEnumerator();
     }
 
     IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
@@ -42,6 +42,6 @@ public readonly struct ZRequestContext : IReadOnlyList<ZFrame>, IDisposable
 
     public void Dispose()
     {
-        message.Dispose();
+        _message.Dispose();
     }
 }

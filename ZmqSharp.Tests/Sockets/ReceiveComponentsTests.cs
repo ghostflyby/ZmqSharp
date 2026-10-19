@@ -132,12 +132,12 @@ public sealed class ReceiveComponentsTests
 
     private sealed class HeaderThenFailure : IZByteReader
     {
-        private int position;
+        private int _position;
 
         public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
-            if (position >= 2) throw new IOException("read failed in body");
-            destination.Span[0] = position++ == 0 ? (byte)0 : (byte)8;
+            if (_position >= 2) throw new IOException("read failed in body");
+            destination.Span[0] = _position++ == 0 ? (byte)0 : (byte)8;
             return ValueTask.FromResult(1);
         }
     }

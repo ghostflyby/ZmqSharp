@@ -7,17 +7,17 @@ namespace ZmqSharp.Zmtp;
 /// <summary>ZMTP framing over a single writer. The session serializes whole messages.</summary>
 public sealed class ZmtpFrameEncoder
 {
-    private readonly IZByteWriter writer;
-    private readonly byte[] header = new byte[9];
-    private readonly FrameSequence wire = new();
-    private readonly FrameSequence logical = new();
+    private readonly IZByteWriter _writer;
+    private readonly byte[] _header = new byte[9];
+    private readonly FrameSequence _wire = new();
+    private readonly FrameSequence _logical = new();
 
     public ZmtpFrameEncoder(Stream stream) : this(new StreamWriter(stream)) { }
 
     public ZmtpFrameEncoder(IZByteWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        this.writer = writer;
+        _writer = writer;
     }
 
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
@@ -29,7 +29,7 @@ public sealed class ZmtpFrameEncoder
             await WriteFrameAsync(new ZmtpFrameData
             {
                 Flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None,
-                Body = logical.FromFrame(message[i])
+                Body = _logical.FromFrame(message[i])
             }, token);
     }
 
@@ -41,13 +41,13 @@ public sealed class ZmtpFrameEncoder
         ValidateFlags(frame.Flags);
         var length = frame.Body.Length;
         var longSize = length > 255;
-        header[0] = (byte)(frame.Flags | (longSize ? ZmtpFrameFlags.LongSize : ZmtpFrameFlags.None));
-        if (longSize) BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1), length);
-        else header[1] = (byte)length;
-        wire.Clear();
-        wire.Add(header.AsMemory(0, longSize ? 9 : 2));
-        foreach (var segment in frame.Body) wire.Add(segment);
-        return writer.WriteAsync(wire.Sequence, token);
+        _header[0] = (byte)(frame.Flags | (longSize ? ZmtpFrameFlags.LongSize : ZmtpFrameFlags.None));
+        if (longSize) BinaryPrimitives.WriteInt64BigEndian(_header.AsSpan(1), length);
+        else _header[1] = (byte)length;
+        _wire.Clear();
+        _wire.Add(_header.AsMemory(0, longSize ? 9 : 2));
+        foreach (var segment in frame.Body) _wire.Add(segment);
+        return _writer.WriteAsync(_wire.Sequence, token);
     }
 
     internal static void ValidateFlags(ZmtpFrameFlags flags)

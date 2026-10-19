@@ -135,8 +135,8 @@ public sealed class ZSocketOptions
     /// </summary>
     public ZQueueFactory ReceiveQueueFactory
     {
-        get => receiveQueueFactory ?? new BoundedChannelOptions(16) { SingleWriter = true };
-        init => receiveQueueFactory = value;
+        get => _receiveQueueFactory ?? new BoundedChannelOptions(16) { SingleWriter = true };
+        init => _receiveQueueFactory = value;
     }
 
     /// <summary>
@@ -156,8 +156,8 @@ public sealed class ZSocketOptions
     /// </summary>
     public IZReceivePolicy ReceivePolicy
     {
-        get => receivePolicy ?? new ZReceiveOptions();
-        init => receivePolicy = value;
+        get => _receivePolicy ?? new ZReceiveOptions();
+        init => _receivePolicy = value;
     }
 
     /// <summary>
@@ -167,8 +167,8 @@ public sealed class ZSocketOptions
     /// </summary>
     public long MaxFrameLength
     {
-        get => maxFrameLength ?? long.MaxValue;
-        init => maxFrameLength = value;
+        get => _maxFrameLength ?? long.MaxValue;
+        init => _maxFrameLength = value;
     }
 
     /// <summary>
@@ -179,8 +179,8 @@ public sealed class ZSocketOptions
     /// </summary>
     public long MaxMessageLength
     {
-        get => maxMessageLength ?? long.MaxValue;
-        init => maxMessageLength = value;
+        get => _maxMessageLength ?? long.MaxValue;
+        init => _maxMessageLength = value;
     }
 
     /// <summary>
@@ -190,8 +190,8 @@ public sealed class ZSocketOptions
     /// </summary>
     public int MaxFramesPerMessage
     {
-        get => maxFramesPerMessage ?? int.MaxValue;
-        init => maxFramesPerMessage = value;
+        get => _maxFramesPerMessage ?? int.MaxValue;
+        init => _maxFramesPerMessage = value;
     }
 
     // Nullable backing fields: a null means "not configured", so a socket
@@ -199,11 +199,11 @@ public sealed class ZSocketOptions
     // configuration and reject it at construction instead of silently
     // ignoring it (0023). The public getters stay non-null and declarative
     // (0008 D2). ReceivePolicy caches its lazily-created default.
-    private readonly ZQueueFactory? receiveQueueFactory;
-    private readonly IZReceivePolicy? receivePolicy;
-    private readonly long? maxFrameLength;
-    private readonly long? maxMessageLength;
-    private readonly int? maxFramesPerMessage;
+    private readonly ZQueueFactory? _receiveQueueFactory;
+    private readonly IZReceivePolicy? _receivePolicy;
+    private readonly long? _maxFrameLength;
+    private readonly long? _maxMessageLength;
+    private readonly int? _maxFramesPerMessage;
 
     /// <summary>
     /// True when any queue-surface option was explicitly set (0023). A socket
@@ -212,10 +212,10 @@ public sealed class ZSocketOptions
     /// set, so silently-ignored configuration fails loudly.
     /// </summary>
     internal bool HasQueueConfiguration =>
-        receiveQueueFactory is not null
+        _receiveQueueFactory is not null
         || SendQueueFactory is not null
-        || receivePolicy is not null
-        || maxFrameLength is not null
-        || maxMessageLength is not null
-        || maxFramesPerMessage is not null;
+        || _receivePolicy is not null
+        || _maxFrameLength is not null
+        || _maxMessageLength is not null
+        || _maxFramesPerMessage is not null;
 }

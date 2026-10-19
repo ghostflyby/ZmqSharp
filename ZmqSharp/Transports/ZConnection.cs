@@ -5,7 +5,7 @@ namespace ZmqSharp.Transports;
 /// <summary>A protocol-independent byte connection over a stream.</summary>
 internal sealed class ZConnection(Stream stream) : IZConnection
 {
-    private int aborted;
+    private int _aborted;
 
     public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         => stream.ReadAsync(destination, token);
@@ -20,7 +20,7 @@ internal sealed class ZConnection(Stream stream) : IZConnection
 
     public void Abort()
     {
-        if (Interlocked.Exchange(ref aborted, 1) == 0) stream.Dispose();
+        if (Interlocked.Exchange(ref _aborted, 1) == 0) stream.Dispose();
     }
 
     public void Dispose() => Abort();
