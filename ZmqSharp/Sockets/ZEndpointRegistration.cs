@@ -10,24 +10,24 @@ internal sealed class ZEndpointRegistration(
     CancellationToken attempt = default,
     Action? abort = null)
 {
-    private readonly Lock gate = new();
-    private readonly CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime, attempt);
-    private Task? stop;
+    private readonly Lock _gate = new();
+    private readonly CancellationTokenSource _cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime, attempt);
+    private Task? _stop;
 
     public object? Endpoint { get; } = endpoint;
     public Type? Transport { get; } = transport;
     public string? Address { get; } = address;
-    public CancellationToken Token => cancellation.Token;
+    public CancellationToken Token => _cancellation.Token;
     public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public void RequestStop()
     {
-        lock (gate) stop ??= StopAsync();
+        lock (_gate) _stop ??= StopAsync();
     }
 
     private async Task StopAsync()
     {
-        var canceled = cancellation.CancelAsync();
+        var canceled = _cancellation.CancelAsync();
         try
         {
             if (abort is not null) abort();
@@ -42,14 +42,14 @@ internal sealed class ZEndpointRegistration(
     public async Task FinishAsync()
     {
         Task stopping;
-        lock (gate) stopping = stop ??= StopAsync();
+        lock (_gate) stopping = _stop ??= StopAsync();
         try
         {
             await stopping;
         }
         finally
         {
-            cancellation.Dispose();
+            _cancellation.Dispose();
         }
     }
 

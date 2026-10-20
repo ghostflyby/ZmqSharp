@@ -9,14 +9,14 @@ namespace ZmqSharp.Patterns;
 /// </summary>
 public sealed class ZRoundRobinDispatch : IZDispatchPolicy
 {
-    private int next;
+    private int _next;
 
     /// <inheritdoc/>
     public int SelectTargets(ZMessage message, ReadOnlySpan<ZPeer> peers, Span<ZPeer> targets)
     {
         if (peers.IsEmpty) return 0;
 
-        var index = (Interlocked.Increment(ref next) - 1) % peers.Length;
+        var index = (Interlocked.Increment(ref _next) - 1) % peers.Length;
         targets[0] = peers[index];
         return 1;
     }

@@ -7,8 +7,8 @@ namespace ZmqSharp.Transports;
 /// <summary>Raw socket byte I/O, including complete scatter/gather writes.</summary>
 internal sealed class ZSocketConnection(Socket socket) : IZConnection
 {
-    private readonly List<ArraySegment<byte>> segments = [];
-    private int aborted;
+    private readonly List<ArraySegment<byte>> _segments = [];
+    private int _aborted;
 
     public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         => socket.ReceiveAsync(destination, SocketFlags.None, token);
@@ -32,13 +32,13 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
             return;
         }
 
-        segments.Clear();
+        _segments.Clear();
         foreach (var memory in bytes)
         {
             if (memory.IsEmpty) continue;
             if (MemoryMarshal.TryGetArray(memory, out var segment))
             {
-                segments.Add(segment);
+                _segments.Add(segment);
                 continue;
             }
 
@@ -62,22 +62,22 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
         {
             if (state is ZSocketConnection connection) connection.Abort();
         }, this);
-        while (segments.Count > 0)
+        while (_segments.Count > 0)
         {
-            var written = await socket.SendAsync(segments, SocketFlags.None);
+            var written = await socket.SendAsync(_segments, SocketFlags.None);
             if (written == 0) throw new IOException("socket closed during scatter write");
             while (written > 0)
             {
-                var first = segments[0];
+                var first = _segments[0];
                 if (written >= first.Count)
                 {
                     written -= first.Count;
-                    segments.RemoveAt(0);
+                    _segments.RemoveAt(0);
                 }
                 else
                 {
                     if (first.Array is not { } array) throw new IOException("scatter segment has no backing array");
-                    segments[0] = new ArraySegment<byte>(array, first.Offset + written, first.Count - written);
+                    _segments[0] = new ArraySegment<byte>(array, first.Offset + written, first.Count - written);
                     written = 0;
                 }
             }
@@ -86,7 +86,7 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
 
     public void Abort()
     {
-        if (Interlocked.Exchange(ref aborted, 1) == 0) socket.Dispose();
+        if (Interlocked.Exchange(ref _aborted, 1) == 0) socket.Dispose();
     }
 
     public void Dispose() => Abort();

@@ -13,16 +13,16 @@ namespace ZmqSharp.AllocationTests;
 /// </summary>
 internal sealed class MeasuringSink(int capacity) : IPatternSink
 {
-    private readonly Lock gate = new();
-    private readonly List<(int Threshold, TaskCompletionSource Tcs)> pending = [];
+    private readonly Lock _gate = new();
+    private readonly List<(int Threshold, TaskCompletionSource Tcs)> _pending = [];
 
     // Delivered count and write cursor; both guarded by gate. OnMessageAsync
     // is the single writer (the pump thread) but still publishes under the
     // lock, so every access is uniformly synchronized and the test thread
     // reading Samples/ThreadIds after awaiting WaitForAsync sees them via the
     // monitor's memory barrier.
-    private int index;
-    private long received;
+    private int _index;
+    private long _received;
 
     /// <summary>Per-delivery absolute counters, captured on the pump thread.</summary>
     public long[] Samples { get; } = new long[capacity];
@@ -37,12 +37,12 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
     /// </summary>
     public Task WaitForAsync(int count)
     {
-        lock (gate)
+        lock (_gate)
         {
-            if (received >= count) return Task.CompletedTask;
+            if (_received >= count) return Task.CompletedTask;
 
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            pending.Add((count, tcs));
+            _pending.Add((count, tcs));
             return tcs.Task.WaitAsync(TestContext.Current.CancellationToken);
         }
     }
@@ -52,13 +52,13 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
         // Sample before touching the lock: the counters must measure only the
         // library's per-message work, and the cursor is written by this pump
         // thread alone.
-        Samples[index] = GC.GetAllocatedBytesForCurrentThread();
-        ThreadIds[index] = Environment.CurrentManagedThreadId;
+        Samples[_index] = GC.GetAllocatedBytesForCurrentThread();
+        ThreadIds[_index] = Environment.CurrentManagedThreadId;
 
-        lock (gate)
+        lock (_gate)
         {
-            index++;
-            received = index;
+            _index++;
+            _received = _index;
             NotifyWaitersLocked();
         }
 
@@ -69,13 +69,13 @@ internal sealed class MeasuringSink(int capacity) : IPatternSink
     /// <summary>Caller must hold <c>gate</c>.</summary>
     private void NotifyWaitersLocked()
     {
-        if (pending.Count == 0) return;
+        if (_pending.Count == 0) return;
 
-        for (var i = pending.Count - 1; i >= 0; i--)
-            if (received >= pending[i].Threshold)
+        for (var i = _pending.Count - 1; i >= 0; i--)
+            if (_received >= _pending[i].Threshold)
             {
-                pending[i].Tcs.TrySetResult();
-                pending.RemoveAt(i);
+                _pending[i].Tcs.TrySetResult();
+                _pending.RemoveAt(i);
             }
     }
 }

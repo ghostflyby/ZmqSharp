@@ -14,7 +14,7 @@ internal sealed class ZRepCore(
     Func<ZRepCore, ZRequestContext, CancellationToken, ValueTask> handle,
     Func<ZPeer, ZMessage, CancellationToken, ValueTask> send) : IZInboundPolicy
 {
-    private readonly SemaphoreSlim slot = new(1, 1);
+    private readonly SemaphoreSlim _slot = new(1, 1);
 
     public async ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
@@ -23,7 +23,7 @@ internal sealed class ZRepCore(
         // A cancelled slot wait must still release the aggregated message.
         try
         {
-            await slot.WaitAsync(token);
+            await _slot.WaitAsync(token);
         }
         catch (OperationCanceledException)
         {
@@ -40,7 +40,7 @@ internal sealed class ZRepCore(
         finally
         {
             context?.Dispose();
-            slot.Release();
+            _slot.Release();
         }
 
         return ZInboundDecision.Consumed();

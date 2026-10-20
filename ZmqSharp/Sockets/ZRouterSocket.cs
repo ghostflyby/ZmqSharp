@@ -15,7 +15,7 @@ namespace ZmqSharp;
 /// </summary>
 public sealed class ZRouterSocket : ZQueueSocketBase
 {
-    private readonly ZIdentityDispatch dispatch;
+    private readonly ZIdentityDispatch _dispatch;
 
     public ZRouterSocket(ZSocketOptions? options = null)
         : this(options ?? new ZSocketOptions(), new ZIdentityDispatch()) { }
@@ -23,7 +23,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     private ZRouterSocket(ZSocketOptions options, ZIdentityDispatch dispatch)
         : base(options, dispatch, ZSocketTypes.Router, new RouterInboundPolicy(dispatch))
     {
-        this.dispatch = dispatch;
+        _dispatch = dispatch;
         // The identity mapping lives in the routing policy; release it on
         // teardown so a long-lived ROUTER never retains disposed connections
         // or stale ids (subagent review finding).
@@ -37,7 +37,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     /// </summary>
     public async ValueTask SendAsync(ReadOnlyMemory<byte> identity, ZMessage message, CancellationToken token = default)
     {
-        if (identity.IsEmpty || !dispatch.TryResolve(identity.Span, out var peer) || peer is null)
+        if (identity.IsEmpty || !_dispatch.TryResolve(identity.Span, out var peer) || peer is null)
         {
             message.Dispose();
             return;
@@ -55,7 +55,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     /// </summary>
     public async ValueTask SendAsync(ReadOnlyMemory<byte> identity, ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        if (identity.IsEmpty || !dispatch.TryResolve(identity.Span, out var peer) || peer is null)
+        if (identity.IsEmpty || !_dispatch.TryResolve(identity.Span, out var peer) || peer is null)
             return;
 
         var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed(bytes))));
@@ -90,7 +90,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     {
         if (advertisedIdentity is not { Length: > 0 } identity) return;
 
-        if (!dispatch.TryRegisterIdentity(peer, identity))
+        if (!_dispatch.TryRegisterIdentity(peer, identity))
             throw new ZeroMqProtocolException("peer advertises an in-use routing identity");
     }
 

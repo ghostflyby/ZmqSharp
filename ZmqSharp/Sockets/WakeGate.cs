@@ -3,21 +3,21 @@ namespace ZmqSharp.Sockets;
 /// <summary>Capture before checking the readable level to avoid lost wakeups.</summary>
 internal sealed class WakeGate
 {
-    private readonly Lock gate = new();
-    private TaskCompletionSource current = NewGate();
+    private readonly Lock _gate = new();
+    private TaskCompletionSource _current = NewGate();
     private static TaskCompletionSource NewGate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Task Capture()
     {
-        lock (gate) return current.Task;
+        lock (_gate) return _current.Task;
     }
 
     public void Wake()
     {
-        lock (gate)
+        lock (_gate)
         {
-            current.TrySetResult();
-            current = NewGate();
+            _current.TrySetResult();
+            _current = NewGate();
         }
     }
 }

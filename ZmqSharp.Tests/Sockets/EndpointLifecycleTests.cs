@@ -269,16 +269,16 @@ public sealed class EndpointLifecycleTests
 
     private sealed class ControlledConnection(ControlledEndpoint endpoint) : IZConnection
     {
-        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
-        private int position;
+        private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
+        private int _position;
 
         public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
         {
-            if (endpoint.Handshake && position < handshake.Length)
+            if (endpoint.Handshake && _position < _handshake.Length)
             {
-                var count = Math.Min(buffer.Length, handshake.Length - position);
-                handshake.AsMemory(position, count).CopyTo(buffer);
-                position += count;
+                var count = Math.Min(buffer.Length, _handshake.Length - _position);
+                _handshake.AsMemory(_position, count).CopyTo(buffer);
+                _position += count;
                 return count;
             }
 

@@ -8,26 +8,26 @@ namespace ZmqSharp;
 /// </summary>
 public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
 {
-    private readonly ZSegment[] segments;
+    private readonly ZSegment[] _segments;
 
     internal ZSegments(ZSegment[] segments)
     {
-        this.segments = segments;
+        _segments = segments;
     }
 
-    public int Count => segments.Length;
+    public int Count => _segments.Length;
 
     public ZSegment this[int index]
     {
         get
         {
             ArgumentOutOfRangeException.ThrowIfNegative(index);
-            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, segments.Length);
-            return segments[index];
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, _segments.Length);
+            return _segments[index];
         }
     }
 
-    public Enumerator GetEnumerator() => new(segments);
+    public Enumerator GetEnumerator() => new(_segments);
 
     IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator() => GetEnumerator();
 
@@ -35,28 +35,28 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
 
     public void Dispose()
     {
-        foreach (var segment in segments) segment.Dispose();
+        foreach (var segment in _segments) segment.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZSegment>
     {
-        private readonly ZSegment[] segments;
-        private int index;
+        private readonly ZSegment[] _segments;
+        private int _index;
 
         internal Enumerator(ZSegment[] segments)
         {
-            this.segments = segments;
-            index = -1;
+            _segments = segments;
+            _index = -1;
         }
 
         public ZSegment Current
         {
             get
             {
-                if (index < 0 || index >= segments.Length)
+                if (_index < 0 || _index >= _segments.Length)
                     throw new InvalidOperationException("enumeration has not started or has already finished");
 
-                return segments[index];
+                return _segments[_index];
             }
         }
 
@@ -64,19 +64,19 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
 
         public bool MoveNext()
         {
-            if (index + 1 < segments.Length)
+            if (_index + 1 < _segments.Length)
             {
-                index++;
+                _index++;
                 return true;
             }
 
-            index = segments.Length;
+            _index = _segments.Length;
             return false;
         }
 
         public void Reset()
         {
-            index = -1;
+            _index = -1;
         }
 
         public void Dispose() { }

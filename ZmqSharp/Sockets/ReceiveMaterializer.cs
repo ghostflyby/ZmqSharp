@@ -13,21 +13,21 @@ internal sealed class ReceiveMaterializer(
 {
     private const int SegmentBlockSize = 8192;
 
-    private int frameIndex;
-    private long accumulatedLength;
+    private int _frameIndex;
+    private long _accumulatedLength;
 
     public ZFrameAllocator CreateAllocator()
     {
         return (length, more) =>
         {
-            var index = this.frameIndex;
-            if (!ZReceiveGuard.TryAccumulate(accumulatedLength, length, out var accumulated))
+            var index = _frameIndex;
+            if (!ZReceiveGuard.TryAccumulate(_accumulatedLength, length, out var accumulated))
                 // An unrepresentable message total is a rejection, never an
                 // arithmetic exception (0008 D3/D6).
                 Reject(ZReceiveRejectionReason.MessageTooLarge, null, null);
 
-            this.frameIndex = index + 1;
-            accumulatedLength = accumulated;
+            _frameIndex = index + 1;
+            _accumulatedLength = accumulated;
 
             // Connection-level limits are enforced here, before any allocation,
             // so a custom policy can never bypass them (0008 D1).
@@ -54,8 +54,8 @@ internal sealed class ReceiveMaterializer(
     /// <summary>Resets the guard counters at a message boundary.</summary>
     public void Reset()
     {
-        frameIndex = 0;
-        accumulatedLength = 0;
+        _frameIndex = 0;
+        _accumulatedLength = 0;
     }
 
     private void Reject(ZReceiveRejection rejection)

@@ -10,17 +10,17 @@ namespace ZmqSharp;
 /// </summary>
 public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 {
-    private readonly ZSingleMessage? single; // Single case
-    private readonly ZMultiMessage? multi;   // Multi case
+    private readonly ZSingleMessage? _single; // Single case
+    private readonly ZMultiMessage? _multi;   // Multi case
 
     public ZMessage(ZSingleMessage single)
     {
-        this.single = single;
+        _single = single;
     }
 
     public ZMessage(ZMultiMessage multi)
     {
-        this.multi = multi;
+        _multi = multi;
     }
 
     /// <summary>Implicit conversion from the single case (0005).</summary>
@@ -80,24 +80,24 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 
     public bool TryGetValue(out ZSingleMessage singleMessage)
     {
-        singleMessage = single.GetValueOrDefault();
-        return single is not null;
+        singleMessage = _single.GetValueOrDefault();
+        return _single is not null;
     }
 
     public bool TryGetValue(out ZMultiMessage multiMessage)
     {
-        multiMessage = multi.GetValueOrDefault();
-        return multi is not null;
+        multiMessage = _multi.GetValueOrDefault();
+        return _multi is not null;
     }
 
-    public int Count => multi?.Count ?? 1;
+    public int Count => _multi?.Count ?? 1;
 
     public ZFrame this[int index]
-        => multi is null ? single.GetValueOrDefault()[index] : multi.Value[index];
+        => _multi is null ? _single.GetValueOrDefault()[index] : _multi.Value[index];
 
     public Enumerator GetEnumerator()
     {
-        return multi is null ? new Enumerator(single.GetValueOrDefault()) : new Enumerator(multi.Value);
+        return _multi is null ? new Enumerator(_single.GetValueOrDefault()) : new Enumerator(_multi.Value);
     }
 
     IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator()
@@ -112,41 +112,41 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 
     public void Dispose()
     {
-        single?.Dispose();
-        multi?.Dispose();
+        _single?.Dispose();
+        _multi?.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZFrame>
     {
-        private readonly ZSingleMessage? singleMessage;
-        private readonly ZMultiMessage? multiMessage;
-        private int index;
+        private readonly ZSingleMessage? _singleMessage;
+        private readonly ZMultiMessage? _multiMessage;
+        private int _index;
 
         internal Enumerator(ZSingleMessage singleMessage)
         {
-            this.singleMessage = singleMessage;
-            multiMessage = null;
-            index = -1;
+            _singleMessage = singleMessage;
+            _multiMessage = null;
+            _index = -1;
         }
 
         internal Enumerator(ZMultiMessage multiMessage)
         {
-            this.multiMessage = multiMessage;
-            singleMessage = null;
-            index = -1;
+            _multiMessage = multiMessage;
+            _singleMessage = null;
+            _index = -1;
         }
 
         public ZFrame Current
         {
             get
             {
-                var count = singleMessage is not null ? 1 : multiMessage.GetValueOrDefault().Count;
-                if (index < 0 || index >= count)
+                var count = _singleMessage is not null ? 1 : _multiMessage.GetValueOrDefault().Count;
+                if (_index < 0 || _index >= count)
                     throw new InvalidOperationException("enumeration has not started or has already finished");
 
-                return singleMessage is not null
-                    ? singleMessage.GetValueOrDefault()[index]
-                    : multiMessage.GetValueOrDefault()[index];
+                return _singleMessage is not null
+                    ? _singleMessage.GetValueOrDefault()[_index]
+                    : _multiMessage.GetValueOrDefault()[_index];
             }
         }
 
@@ -154,20 +154,20 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 
         public bool MoveNext()
         {
-            var count = singleMessage is not null ? 1 : multiMessage.GetValueOrDefault().Count;
-            if (index + 1 < count)
+            var count = _singleMessage is not null ? 1 : _multiMessage.GetValueOrDefault().Count;
+            if (_index + 1 < count)
             {
-                index++;
+                _index++;
                 return true;
             }
 
-            index = count;
+            _index = count;
             return false;
         }
 
         public void Reset()
         {
-            index = -1;
+            _index = -1;
         }
 
         public void Dispose() { }

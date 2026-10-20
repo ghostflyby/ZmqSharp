@@ -2087,7 +2087,7 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
 
 internal sealed class SynchronousEofConnection : IZConnection
 {
-    private int disposed;
+    private int _disposed;
 
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
@@ -2096,7 +2096,7 @@ internal sealed class SynchronousEofConnection : IZConnection
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
@@ -2109,7 +2109,7 @@ internal sealed class SynchronousEofConnection : IZConnection
 
     public void Dispose()
     {
-        Interlocked.Exchange(ref disposed, 1);
+        Interlocked.Exchange(ref _disposed, 1);
     }
 }
 

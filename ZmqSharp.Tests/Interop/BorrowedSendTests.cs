@@ -152,22 +152,22 @@ public sealed class BorrowedSendTests
 
     private sealed class CountingRentPool : MemoryPool<byte>
     {
-        private readonly MemoryPool<byte> inner = Shared;
-        private int rented;
+        private readonly MemoryPool<byte> _inner = Shared;
+        private int _rented;
 
-        public int Rentals => Volatile.Read(ref rented);
+        public int Rentals => Volatile.Read(ref _rented);
 
-        public override int MaxBufferSize => inner.MaxBufferSize;
+        public override int MaxBufferSize => _inner.MaxBufferSize;
 
         public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
         {
-            Interlocked.Increment(ref rented);
-            return inner.Rent(minimumBufferSize);
+            Interlocked.Increment(ref _rented);
+            return _inner.Rent(minimumBufferSize);
         }
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) inner.Dispose();
+            if (disposing) _inner.Dispose();
         }
     }
 

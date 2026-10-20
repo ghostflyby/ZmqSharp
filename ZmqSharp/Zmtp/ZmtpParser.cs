@@ -24,21 +24,21 @@ public sealed class ZmtpParser : IDisposable
     /// <summary>Default command-size limit (0008 Slice B).</summary>
     public const long DefaultMaxCommandSize = 1L << 20;
 
-    private readonly IZByteReader reader;
-    private readonly Func<ZmtpParser, ZFrame, CancellationToken, ValueTask<bool>> onFrame;
-    private readonly IZFrameCodec? codec;
-    private readonly long maxEncodedLength;
-    private readonly MemoryPool<byte> pool;
-    private readonly ZFrameAllocator? allocator;
-    private readonly long maxCommandSize;
-    private readonly byte[] headerBuffer = new byte[9];
+    private readonly IZByteReader _reader;
+    private readonly Func<ZmtpParser, ZFrame, CancellationToken, ValueTask<bool>> _onFrame;
+    private readonly IZFrameCodec? _codec;
+    private readonly long _maxEncodedLength;
+    private readonly MemoryPool<byte> _pool;
+    private readonly ZFrameAllocator? _allocator;
+    private readonly long _maxCommandSize;
+    private readonly byte[] _headerBuffer = new byte[9];
 
-    private IMemoryOwner<byte>? scratchOwner;
-    private Memory<byte> scratch;
-    private int scratchUsed;
+    private IMemoryOwner<byte>? _scratchOwner;
+    private Memory<byte> _scratch;
+    private int _scratchUsed;
 
-    private readonly Lock gateLock = new();
-    private TaskCompletionSource gate = CreateGate();
+    private readonly Lock _gateLock = new();
+    private TaskCompletionSource _gate = CreateGate();
 
     private static TaskCompletionSource CreateGate()
     {
@@ -49,7 +49,9 @@ public sealed class ZmtpParser : IDisposable
         IZFrameCodec? codec = null, MemoryPool<byte>? pool = null)
         : this(reader, (_, frame, token) => onFrame(frame, token), null,
             pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec)
+    //@formatter:off
     { }
+    //@formatter:on
 
     internal ZmtpParser(IZByteReader reader,
         Func<ZmtpParser, ZFrame, CancellationToken, ValueTask<bool>> onFrame,
@@ -59,22 +61,22 @@ public sealed class ZmtpParser : IDisposable
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(onFrame);
-        this.reader = reader;
-        this.onFrame = onFrame;
-        this.allocator = allocator;
-        this.pool = pool;
-        this.maxCommandSize = maxCommandSize;
-        this.codec = codec;
-        maxEncodedLength = codec?.GetMaximumEncodedLength(Math.Max(maxFrameLength, maxCommandSize)) ?? long.MaxValue;
+        _reader = reader;
+        _onFrame = onFrame;
+        _allocator = allocator;
+        _pool = pool;
+        _maxCommandSize = maxCommandSize;
+        _codec = codec;
+        _maxEncodedLength = codec?.GetMaximumEncodedLength(Math.Max(maxFrameLength, maxCommandSize)) ?? long.MaxValue;
     }
 
     /// <summary>Call after a streaming callback returns false to resume the receive loop.</summary>
     public void Resume()
     {
-        lock (gateLock)
+        lock (_gateLock)
         {
-            gate.TrySetResult();
-            gate = CreateGate();
+            _gate.TrySetResult();
+            _gate = CreateGate();
         }
     }
 
@@ -92,10 +94,10 @@ public sealed class ZmtpParser : IDisposable
 
     public void Dispose()
     {
-        scratchOwner?.Dispose();
-        scratchOwner = null;
-        scratch = Memory<byte>.Empty;
-        scratchUsed = 0;
+        _scratchOwner?.Dispose();
+        _scratchOwner = null;
+        _scratch = Memory<byte>.Empty;
+        _scratchUsed = 0;
     }
 
     // ---- Traffic ----
@@ -107,23 +109,23 @@ public sealed class ZmtpParser : IDisposable
             var nullableHeader = await TryReadFrameHeaderAsync(token);
             if (nullableHeader is not { } header) return;
 
-            if (codec is { } transform)
+            if (_codec is { } transform)
             {
-                if (header.Size > maxEncodedLength || header.Size > int.MaxValue)
+                if (header.Size > _maxEncodedLength || header.Size > int.MaxValue)
                     throw new ZeroMqProtocolException("encoded frame exceeds maximum supported length");
                 var encodedLength = (int)header.Size;
                 EnsureScratchCapacity(encodedLength);
-                if (!await TryReadExactlyAsync(scratch[..encodedLength], token)) return;
+                if (!await TryReadExactlyAsync(_scratch[..encodedLength], token)) return;
                 var decoded = transform.Decode(new ZmtpFrameData
                 {
                     Flags = header.Flags & ~ZmtpFrameFlags.LongSize,
-                    Body = new ReadOnlySequence<byte>(scratch[..encodedLength])
+                    Body = new ReadOnlySequence<byte>(_scratch[..encodedLength])
                 });
                 ZmtpFrameEncoder.ValidateFlags(decoded.Flags);
                 if ((decoded.Flags & ZmtpFrameFlags.Command) != 0)
                 {
-                    if (decoded.Body.Length > maxCommandSize)
-                        throw new ZeroMqProtocolException($"command frame exceeds maximum size of {maxCommandSize} bytes");
+                    if (decoded.Body.Length > _maxCommandSize)
+                        throw new ZeroMqProtocolException($"command frame exceeds maximum size of {_maxCommandSize} bytes");
                     if (!decoded.Body.IsSingleSegment)
                         throw new ZeroMqProtocolException("decoded command must be contiguous");
                     CheckCommand(decoded.Body.First.Span);
@@ -133,9 +135,9 @@ public sealed class ZmtpParser : IDisposable
                 var decodedLength = checked((int)decoded.Body.Length);
                 var decodedMore = (decoded.Flags & ZmtpFrameFlags.More) != 0;
                 ZFrame decodedFrame;
-                if (allocator is not null)
+                if (_allocator is not null)
                 {
-                    decodedFrame = allocator(decodedLength, decodedMore);
+                    decodedFrame = _allocator(decodedLength, decodedMore);
                     var remaining = decoded.Body;
                     foreach (var segment in decodedFrame)
                     {
@@ -148,13 +150,13 @@ public sealed class ZmtpParser : IDisposable
                     if (!decoded.Body.IsSingleSegment)
                     {
                         EnsureScratchCapacity(decodedLength);
-                        decoded.Body.CopyTo(scratch.Span);
-                        decodedFrame = new ZFrame(ZSegment.Borrowed(scratch[..decodedLength]), decodedMore);
+                        decoded.Body.CopyTo(_scratch.Span);
+                        decodedFrame = new ZFrame(ZSegment.Borrowed(_scratch[..decodedLength]), decodedMore);
                     }
                     else decodedFrame = new ZFrame(ZSegment.Borrowed(decoded.Body.First), decodedMore);
                 }
 
-                if (!await onFrame(this, decodedFrame, token)) await WaitForResumeAsync(token);
+                if (!await _onFrame(this, decodedFrame, token)) await WaitForResumeAsync(token);
                 continue;
             }
 
@@ -165,7 +167,7 @@ public sealed class ZmtpParser : IDisposable
 
                 CheckCommand(commandBody.Value.Span);
 
-                scratchUsed = 0;
+                _scratchUsed = 0;
                 MaybeShrinkScratch();
                 continue;
             }
@@ -174,9 +176,9 @@ public sealed class ZmtpParser : IDisposable
 
             var length = (int)header.Size;
             var more = (header.Flags & ZmtpFrameFlags.More) != 0;
-            if (allocator is not null)
+            if (_allocator is not null)
             {
-                var materialized = allocator(length, more);
+                var materialized = _allocator(length, more);
                 bool complete;
                 try
                 {
@@ -200,27 +202,27 @@ public sealed class ZmtpParser : IDisposable
                     return;
                 }
 
-                if (!await onFrame(this, materialized, token)) await WaitForResumeAsync(token);
+                if (!await _onFrame(this, materialized, token)) await WaitForResumeAsync(token);
                 continue;
             }
 
-            EnsureScratchCapacity(checked(scratchUsed + length));
-            var target = scratch.Slice(scratchUsed, length);
+            EnsureScratchCapacity(checked(_scratchUsed + length));
+            var target = _scratch.Slice(_scratchUsed, length);
             if (!await TryReadExactlyAsync(target, token)) return;
 
             // The borrowed segment refers to the scratch owner without taking
             // ownership; EnsureScratchCapacity guarantees the owner is live for
             // the duration of this frame's delivery (0006 3.4).
-            if (scratchOwner is not { } source)
+            if (_scratchOwner is not { } source)
                 throw new InvalidOperationException("borrowed frame without scratch owner");
 
-            var frame = new ZFrame(ZSegment.Borrowed(source, scratchUsed, length), more);
-            var keepGoing = await onFrame(this, frame, token);
+            var frame = new ZFrame(ZSegment.Borrowed(source, _scratchUsed, length), more);
+            var keepGoing = await _onFrame(this, frame, token);
             if (!keepGoing) await WaitForResumeAsync(token);
 
             // The borrowed frame must outlive the await; the scratch is
             // reused only after delivery (and any pause) completes.
-            scratchUsed = 0;
+            _scratchUsed = 0;
             MaybeShrinkScratch();
         }
     }
@@ -240,7 +242,7 @@ public sealed class ZmtpParser : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await reader.ReadAsync(target[filled..], token);
+            var count = await _reader.ReadAsync(target[filled..], token);
             if (count == 0) return false;
 
             filled += count;
@@ -253,9 +255,9 @@ public sealed class ZmtpParser : IDisposable
 
     private async ValueTask<FrameHeader?> TryReadFrameHeaderAsync(CancellationToken token)
     {
-        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(0, 1), token)) return null;
+        if (!await TryReadExactlyAsync(_headerBuffer.AsMemory(0, 1), token)) return null;
 
-        var flags = (ZmtpFrameFlags)headerBuffer[0];
+        var flags = (ZmtpFrameFlags)_headerBuffer[0];
         if ((flags & (ZmtpFrameFlags)0b1111_1000) != 0)
             throw new ZeroMqProtocolException("reserved ZMTP frame flag bits are set");
 
@@ -264,11 +266,11 @@ public sealed class ZmtpParser : IDisposable
 
         var isLong = (flags & ZmtpFrameFlags.LongSize) != 0;
         var sizeLength = isLong ? 8 : 1;
-        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(1, sizeLength), token)) return null;
+        if (!await TryReadExactlyAsync(_headerBuffer.AsMemory(1, sizeLength), token)) return null;
 
         var size = isLong
-            ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
-            : headerBuffer[1];
+            ? BinaryPrimitives.ReadInt64BigEndian(_headerBuffer.AsSpan(1, 8))
+            : _headerBuffer[1];
         return size < 0
             ? throw new ZeroMqProtocolException("negative ZMTP frame size")
             : new FrameHeader(flags, size);
@@ -278,18 +280,18 @@ public sealed class ZmtpParser : IDisposable
         FrameHeader header,
         CancellationToken token)
     {
-        if (header.Size > maxCommandSize)
-            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {maxCommandSize} bytes");
+        if (header.Size > _maxCommandSize)
+            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {_maxCommandSize} bytes");
 
         if (header.Size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
         var length = (int)header.Size;
-        EnsureScratchCapacity(checked(scratchUsed + length));
-        var target = scratch.Slice(scratchUsed, length);
+        EnsureScratchCapacity(checked(_scratchUsed + length));
+        var target = _scratch.Slice(_scratchUsed, length);
         if (!await TryReadExactlyAsync(target, token)) return null;
 
-        var body = scratch.Slice(scratchUsed, length);
-        scratchUsed += length;
+        var body = _scratch.Slice(_scratchUsed, length);
+        _scratchUsed += length;
         return body;
     }
 
@@ -298,32 +300,32 @@ public sealed class ZmtpParser : IDisposable
         // A missing owner means the scratch was never rented (a zero-length
         // first frame, or a shrink); rent before handing out any borrowed
         // frame, since the borrowed branch requires a live owner.
-        if (scratch.Length >= required && scratchOwner is not null) return;
+        if (_scratch.Length >= required && _scratchOwner is not null) return;
 
-        var newSize = Math.Max(required, Math.Max(InitialScratchSize, scratch.Length * 2));
-        var newOwner = pool.Rent(newSize);
+        var newSize = Math.Max(required, Math.Max(InitialScratchSize, _scratch.Length * 2));
+        var newOwner = _pool.Rent(newSize);
         var newScratch = newOwner.Memory;
-        scratch[..scratchUsed].CopyTo(newScratch);
-        scratchOwner?.Dispose();
-        scratchOwner = newOwner;
-        scratch = newScratch;
+        _scratch[.._scratchUsed].CopyTo(newScratch);
+        _scratchOwner?.Dispose();
+        _scratchOwner = newOwner;
+        _scratch = newScratch;
     }
 
     private void MaybeShrinkScratch()
     {
-        if (scratch.Length <= ScratchShrinkThreshold) return;
+        if (_scratch.Length <= ScratchShrinkThreshold) return;
 
-        scratchOwner?.Dispose();
-        scratchOwner = null;
-        scratch = Memory<byte>.Empty;
+        _scratchOwner?.Dispose();
+        _scratchOwner = null;
+        _scratch = Memory<byte>.Empty;
     }
 
     private async ValueTask WaitForResumeAsync(CancellationToken token)
     {
         Task task;
-        lock (gateLock)
+        lock (_gateLock)
         {
-            task = gate.Task;
+            task = _gate.Task;
         }
 
         await task.WaitAsync(token);

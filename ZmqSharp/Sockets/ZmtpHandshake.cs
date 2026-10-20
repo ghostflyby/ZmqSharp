@@ -17,11 +17,11 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 internal sealed class ZmtpHandshake : IDisposable
 {
-    private readonly IZConnection connection;
-    private readonly IZSecurityMechanism mechanism;
-    private readonly ReadOnlyMemory<byte> localReadyBody;
-    private readonly long maxCommandSize;
-    private readonly MemoryPool<byte> pool;
+    private readonly IZConnection _connection;
+    private readonly IZSecurityMechanism _mechanism;
+    private readonly ReadOnlyMemory<byte> _localReadyBody;
+    private readonly long _maxCommandSize;
+    private readonly MemoryPool<byte> _pool;
 
     internal ZmtpHandshake(
         IZConnection connection,
@@ -32,11 +32,11 @@ internal sealed class ZmtpHandshake : IDisposable
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(mechanism);
-        this.connection = connection;
-        this.mechanism = mechanism;
-        this.localReadyBody = localReadyBody;
-        this.maxCommandSize = maxCommandSize;
-        this.pool = pool ?? MemoryPool<byte>.Shared;
+        _connection = connection;
+        _mechanism = mechanism;
+        _localReadyBody = localReadyBody;
+        _maxCommandSize = maxCommandSize;
+        _pool = pool ?? MemoryPool<byte>.Shared;
     }
 
     /// <summary>
@@ -46,20 +46,20 @@ internal sealed class ZmtpHandshake : IDisposable
     public async ValueTask<ZMechanismResult?> EstablishAsync(CancellationToken token = default)
     {
         // Traffic waits on establishment, so this handshake is the only writer.
-        await connection.WriteAsync(ZmtpGreeting.Build(mechanism.Name, mechanism.Role), token);
+        await _connection.WriteAsync(ZmtpGreeting.Build(_mechanism.Name, _mechanism.Role), token);
 
         var peerMechanism = await ReadPeerMechanismAsync(token);
         if (peerMechanism is null) return null;
 
-        if (!string.Equals(peerMechanism, mechanism.Name, StringComparison.Ordinal))
+        if (!string.Equals(peerMechanism, _mechanism.Name, StringComparison.Ordinal))
         {
-            await new ZmtpFrameEncoder(connection).WriteCommandAsync(ZmtpCommands.BuildError("Invalid mechanism"), token);
+            await new ZmtpFrameEncoder(_connection).WriteCommandAsync(ZmtpCommands.BuildError("Invalid mechanism"), token);
             throw new ZeroMqProtocolException(
-                $"peer mechanism '{peerMechanism}' does not match the configured mechanism '{mechanism.Name}'");
+                $"peer mechanism '{peerMechanism}' does not match the configured mechanism '{_mechanism.Name}'");
         }
 
-        using var context = new ZMechanismContext(connection, localReadyBody, maxCommandSize, pool);
-        var result = await mechanism.CreateSession().RunAsync(context, token);
+        using var context = new ZMechanismContext(_connection, _localReadyBody, _maxCommandSize, _pool);
+        var result = await _mechanism.CreateSession().RunAsync(context, token);
         return result;
     }
 
@@ -87,7 +87,7 @@ internal sealed class ZmtpHandshake : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await connection.ReadAsync(target[filled..], token);
+            var count = await _connection.ReadAsync(target[filled..], token);
             if (count == 0) return false;
 
             filled += count;

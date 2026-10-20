@@ -15,7 +15,7 @@ namespace ZmqSharp;
 /// </summary>
 public class ZSubSocket : ZQueueSocketBase
 {
-    private readonly ZTopicFilter filter;
+    private readonly ZTopicFilter _filter;
 
     public ZSubSocket(ZSocketOptions? options = null)
         : this(options ?? new ZSocketOptions(), ZSocketTypes.Sub, new ZTopicFilter(), true) { }
@@ -27,21 +27,21 @@ public class ZSubSocket : ZQueueSocketBase
         : base(options, new ZNoDispatch("SUB is receive-only"), type,
             filterInbound ? new ZTopicFilterPolicy(filter) : ZInboundPolicy.PassThrough)
     {
-        this.filter = filter;
+        _filter = filter;
         SetPeerConnectedHandler(SendSubscriptionsTo);
     }
 
     /// <summary>Subscribes to a topic prefix; the empty prefix subscribes to everything.</summary>
     public void Subscribe(ReadOnlySpan<byte> topic)
     {
-        var copy = filter.Add(topic);
+        var copy = _filter.Add(topic);
         BroadcastSubscription(0x01, copy);
     }
 
     /// <summary>Removes a subscription (matched by content).</summary>
     public void Unsubscribe(ReadOnlySpan<byte> topic)
     {
-        filter.RemoveAll(topic);
+        _filter.RemoveAll(topic);
         BroadcastSubscription(0x00, topic);
     }
 
@@ -61,7 +61,7 @@ public class ZSubSocket : ZQueueSocketBase
 
     private void SendSubscriptionsTo(ZPeer peer)
     {
-        foreach (var topic in filter.Snapshot())
+        foreach (var topic in _filter.Snapshot())
         {
             var payload = new byte[1 + topic.Length];
             payload[0] = 0x01;

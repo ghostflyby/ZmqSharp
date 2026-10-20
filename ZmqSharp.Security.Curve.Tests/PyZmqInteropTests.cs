@@ -100,7 +100,8 @@ public sealed class PyZmqInteropTests
             : ["python3", "python"];
 
         foreach (var candidate in candidates)
-            if (Runs(candidate, ["-c", "pass"])) return candidate;
+            if (Runs(candidate, ["-c", "pass"]))
+                return candidate;
 
         return null;
     }

@@ -18,9 +18,9 @@ namespace ZmqSharp.Security.Curve;
 /// </summary>
 public sealed class CurveMechanism : IZSecurityMechanism
 {
-    private readonly Key32? clientLongTermKey;
-    private readonly Key32? serverPublicKey;
-    private readonly Key32? serverLongTermKey;
+    private readonly Key32? _clientLongTermKey;
+    private readonly Key32? _serverPublicKey;
+    private readonly Key32? _serverLongTermKey;
 
     /// <summary>
     /// Client role: authenticates with a long-term key pair against the
@@ -29,8 +29,8 @@ public sealed class CurveMechanism : IZSecurityMechanism
     /// </summary>
     public CurveMechanism(ReadOnlySpan<byte> clientLongTermKey, ReadOnlySpan<byte> serverPublicKey)
     {
-        this.clientLongTermKey = Key32.From(clientLongTermKey);
-        this.serverPublicKey = Key32.From(serverPublicKey);
+        _clientLongTermKey = Key32.From(clientLongTermKey);
+        _serverPublicKey = Key32.From(serverPublicKey);
     }
 
     /// <summary>
@@ -40,18 +40,18 @@ public sealed class CurveMechanism : IZSecurityMechanism
     /// </summary>
     public CurveMechanism(ReadOnlySpan<byte> serverLongTermKey)
     {
-        this.serverLongTermKey = Key32.From(serverLongTermKey);
+        _serverLongTermKey = Key32.From(serverLongTermKey);
     }
 
     public string Name => "CURVE";
 
-    public ZMechanismRole Role => serverLongTermKey is null ? ZMechanismRole.Client : ZMechanismRole.Server;
+    public ZMechanismRole Role => _serverLongTermKey is null ? ZMechanismRole.Client : ZMechanismRole.Server;
 
     public IZMechanismSession CreateSession()
     {
         if (Role == ZMechanismRole.Client)
         {
-            if (clientLongTermKey is not { } clientKey || serverPublicKey is not { } serverKey)
+            if (_clientLongTermKey is not { } clientKey || _serverPublicKey is not { } serverKey)
                 throw new InvalidOperationException(
                     "a CURVE client requires a long-term key pair and the server public key");
 
@@ -63,7 +63,7 @@ public sealed class CurveMechanism : IZSecurityMechanism
             return new ClientSession(clientKey, Key32.From(publicBytes), serverKey);
         }
 
-        return serverLongTermKey is { } serverSecretKey
+        return _serverLongTermKey is { } serverSecretKey
             ? new ServerSession(serverSecretKey)
             : throw new InvalidOperationException("a CURVE server requires a long-term key pair");
     }

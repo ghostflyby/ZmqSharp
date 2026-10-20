@@ -10,17 +10,17 @@ namespace ZmqSharp;
 /// </summary>
 public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 {
-    private readonly ZSegment? contiguous;     // Contiguous case
-    private readonly ZSegments? nonContiguous; // NonContiguous case
+    private readonly ZSegment? _contiguous;     // Contiguous case
+    private readonly ZSegments? _nonContiguous; // NonContiguous case
 
     public ZFrame(ZSegment segment)
     {
-        contiguous = segment;
+        _contiguous = segment;
     }
 
     public ZFrame(ZSegments segments)
     {
-        nonContiguous = segments;
+        _nonContiguous = segments;
     }
 
     /// <summary>Implicit conversion from the contiguous case (0005).</summary>
@@ -37,13 +37,13 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
     internal ZFrame(ZSegment segment, bool more)
     {
-        contiguous = segment;
+        _contiguous = segment;
         More = more;
     }
 
     internal ZFrame(ZSegments segments, bool more)
     {
-        nonContiguous = segments;
+        _nonContiguous = segments;
         More = more;
     }
 
@@ -52,32 +52,32 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
     public bool TryGetValue(out ZSegment segment)
     {
-        segment = contiguous.GetValueOrDefault();
-        return contiguous is not null;
+        segment = _contiguous.GetValueOrDefault();
+        return _contiguous is not null;
     }
 
     public bool TryGetValue(out ZSegments segments)
     {
-        segments = nonContiguous.GetValueOrDefault();
-        return nonContiguous is not null;
+        segments = _nonContiguous.GetValueOrDefault();
+        return _nonContiguous is not null;
     }
 
-    public int Count => nonContiguous?.Count ?? 1;
+    public int Count => _nonContiguous?.Count ?? 1;
 
     public ZSegment this[int index]
     {
         get
         {
-            if (nonContiguous is { } segments) return segments[index];
+            if (_nonContiguous is { } segments) return segments[index];
 
             ArgumentOutOfRangeException.ThrowIfNotEqual(index, 0);
-            return contiguous.GetValueOrDefault();
+            return _contiguous.GetValueOrDefault();
         }
     }
 
     public Enumerator GetEnumerator()
     {
-        return new Enumerator(contiguous, nonContiguous);
+        return new Enumerator(_contiguous, _nonContiguous);
     }
 
     IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator()
@@ -93,17 +93,17 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
     /// <summary>Materializes the frame content as a sequence.</summary>
     public ReadOnlySequence<byte> ToSequence()
     {
-        if (contiguous is { } single) return new ReadOnlySequence<byte>(single.Memory);
+        if (_contiguous is { } single) return new ReadOnlySequence<byte>(single.Memory);
 
-        if (nonContiguous is { } many) return ZSequence.Build(IterateSegments(many));
+        if (_nonContiguous is { } many) return ZSequence.Build(IterateSegments(many));
 
         return ReadOnlySequence<byte>.Empty;
     }
 
     public void Dispose()
     {
-        contiguous?.Dispose();
-        nonContiguous?.Dispose();
+        _contiguous?.Dispose();
+        _nonContiguous?.Dispose();
     }
 
     private static IEnumerable<ReadOnlyMemory<byte>> IterateSegments(ZSegments segments)
@@ -113,26 +113,26 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
     public struct Enumerator : IEnumerator<ZSegment>
     {
-        private readonly ZSegment? single;
-        private readonly ZSegments? many;
-        private int index;
+        private readonly ZSegment? _single;
+        private readonly ZSegments? _many;
+        private int _index;
 
         internal Enumerator(ZSegment? single, ZSegments? many)
         {
-            this.single = single;
-            this.many = many;
-            index = -1;
+            _single = single;
+            _many = many;
+            _index = -1;
         }
 
         public ZSegment Current
         {
             get
             {
-                var count = single is not null ? 1 : many.GetValueOrDefault().Count;
-                if (index < 0 || index >= count)
+                var count = _single is not null ? 1 : _many.GetValueOrDefault().Count;
+                if (_index < 0 || _index >= count)
                     throw new InvalidOperationException("enumeration has not started or has already finished");
 
-                return single ?? many.GetValueOrDefault()[index];
+                return _single ?? _many.GetValueOrDefault()[_index];
             }
         }
 
@@ -140,20 +140,20 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
         public bool MoveNext()
         {
-            var count = single is not null ? 1 : many.GetValueOrDefault().Count;
-            if (index + 1 < count)
+            var count = _single is not null ? 1 : _many.GetValueOrDefault().Count;
+            if (_index + 1 < count)
             {
-                index++;
+                _index++;
                 return true;
             }
 
-            index = count;
+            _index = count;
             return false;
         }
 
         public void Reset()
         {
-            index = -1;
+            _index = -1;
         }
 
         public void Dispose() { }

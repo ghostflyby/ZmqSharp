@@ -16,12 +16,12 @@ namespace ZmqSharp.Security;
 /// </summary>
 public sealed class ZMechanismContext : IDisposable
 {
-    private readonly IZByteReader reader;
-    private readonly ZmtpFrameEncoder encoder;
-    private readonly MemoryPool<byte> pool;
-    private readonly byte[] headerBuffer = new byte[9];
-    private IMemoryOwner<byte>? scratchOwner;
-    private Memory<byte> scratch;
+    private readonly IZByteReader _reader;
+    private readonly ZmtpFrameEncoder _encoder;
+    private readonly MemoryPool<byte> _pool;
+    private readonly byte[] _headerBuffer = new byte[9];
+    private IMemoryOwner<byte>? _scratchOwner;
+    private Memory<byte> _scratch;
 
     internal ZMechanismContext(
         IZConnection connection,
@@ -29,11 +29,11 @@ public sealed class ZMechanismContext : IDisposable
         long maxCommandSize,
         MemoryPool<byte>? pool = null)
     {
-        reader = connection;
-        encoder = new ZmtpFrameEncoder(connection);
+        _reader = connection;
+        _encoder = new ZmtpFrameEncoder(connection);
         LocalReadyBody = localReadyBody;
         MaxCommandSize = maxCommandSize;
-        this.pool = pool ?? MemoryPool<byte>.Shared;
+        _pool = pool ?? MemoryPool<byte>.Shared;
     }
 
     /// <summary>
@@ -49,7 +49,7 @@ public sealed class ZMechanismContext : IDisposable
     /// <summary>Writes one command frame (header + body) during the exclusive handshake phase.</summary>
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
     {
-        return encoder.WriteCommandAsync(body, token);
+        return _encoder.WriteCommandAsync(body, token);
     }
 
     /// <summary>
@@ -59,9 +59,9 @@ public sealed class ZMechanismContext : IDisposable
     /// </summary>
     public async ValueTask<ZMechanismCommand?> ReadCommandAsync(CancellationToken token = default)
     {
-        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(0, 1), token)) return null;
+        if (!await TryReadExactlyAsync(_headerBuffer.AsMemory(0, 1), token)) return null;
 
-        var flags = (ZmtpFrameFlags)headerBuffer[0];
+        var flags = (ZmtpFrameFlags)_headerBuffer[0];
         if ((flags & (ZmtpFrameFlags)0b1111_1000) != 0)
             throw new ZeroMqProtocolException("reserved ZMTP frame flag bits are set");
 
@@ -73,11 +73,11 @@ public sealed class ZMechanismContext : IDisposable
 
         var isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);
         var sizeLength = isLong ? 8 : 1;
-        if (!await TryReadExactlyAsync(headerBuffer.AsMemory(1, sizeLength), token)) return null;
+        if (!await TryReadExactlyAsync(_headerBuffer.AsMemory(1, sizeLength), token)) return null;
 
         var size = isLong
-            ? BinaryPrimitives.ReadInt64BigEndian(headerBuffer.AsSpan(1, 8))
-            : headerBuffer[1];
+            ? BinaryPrimitives.ReadInt64BigEndian(_headerBuffer.AsSpan(1, 8))
+            : _headerBuffer[1];
         if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
         if (size > MaxCommandSize)
             throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
@@ -87,22 +87,22 @@ public sealed class ZMechanismContext : IDisposable
 
         var length = (int)size;
         EnsureScratchCapacity(length);
-        if (!await TryReadExactlyAsync(scratch[..length], token)) return null;
+        if (!await TryReadExactlyAsync(_scratch[..length], token)) return null;
 
-        var body = scratch[..length].Span;
+        var body = _scratch[..length].Span;
         if (!ZmtpCommandCodec.TryReadCommandName(body, out var name))
             throw new ZeroMqProtocolException("malformed command name");
 
         return new ZMechanismCommand(
-            scratch.Slice(1, name.Length),
-            scratch[(1 + name.Length)..length]);
+            _scratch.Slice(1, name.Length),
+            _scratch[(1 + name.Length)..length]);
     }
 
     public void Dispose()
     {
-        scratchOwner?.Dispose();
-        scratchOwner = null;
-        scratch = Memory<byte>.Empty;
+        _scratchOwner?.Dispose();
+        _scratchOwner = null;
+        _scratch = Memory<byte>.Empty;
     }
 
     private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)
@@ -110,7 +110,7 @@ public sealed class ZMechanismContext : IDisposable
         var filled = 0;
         while (filled < target.Length)
         {
-            var count = await reader.ReadAsync(target[filled..], token);
+            var count = await _reader.ReadAsync(target[filled..], token);
             if (count == 0) return false;
 
             filled += count;
@@ -121,12 +121,12 @@ public sealed class ZMechanismContext : IDisposable
 
     private void EnsureScratchCapacity(int required)
     {
-        if (scratch.Length >= required) return;
+        if (_scratch.Length >= required) return;
 
-        var newSize = Math.Max(required, Math.Max(4096, scratch.Length * 2));
-        var newOwner = pool.Rent(newSize);
-        scratchOwner?.Dispose();
-        scratchOwner = newOwner;
-        scratch = newOwner.Memory;
+        var newSize = Math.Max(required, Math.Max(4096, _scratch.Length * 2));
+        var newOwner = _pool.Rent(newSize);
+        _scratchOwner?.Dispose();
+        _scratchOwner = newOwner;
+        _scratch = newOwner.Memory;
     }
 }

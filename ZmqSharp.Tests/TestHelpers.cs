@@ -89,7 +89,7 @@ internal static class TestTransports
 /// be written into the connection during tests.</summary>
 internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : Stream
 {
-    private int position;
+    private int _position;
 
     public override bool CanRead => true;
     public override bool CanSeek => false;
@@ -98,7 +98,7 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
 
     public override long Position
     {
-        get => position;
+        get => _position;
         set => throw new NotSupportedException();
     }
 
@@ -136,13 +136,13 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
 
     private int ReadInternal(Span<byte> buffer)
     {
-        if (position >= data.Length) return 0;
+        if (_position >= data.Length) return 0;
 
-        var available = data.Length - position;
+        var available = data.Length - _position;
         var chunk = maxChunkSize > 0 ? Math.Min(maxChunkSize, available) : available;
         var count = Math.Min(buffer.Length, chunk);
-        data.AsSpan(position, count).CopyTo(buffer);
-        position += count;
+        data.AsSpan(_position, count).CopyTo(buffer);
+        _position += count;
         return count;
     }
 }
@@ -150,13 +150,13 @@ internal sealed class ChunkedMemoryStream(byte[] data, int maxChunkSize = 0) : S
 /// <summary>Pool that tracks outstanding rentals, used to assert buffers are returned after message Dispose.</summary>
 internal sealed class CountingMemoryPool : MemoryPool<byte>
 {
-    private readonly MemoryPool<byte> inner = Shared;
-    private readonly Lock gate = new();
-    private int outstanding;
-    private TaskCompletionSource released = CreateReleasedGate();
-    private TaskCompletionSource changed = CreateChangedGate();
+    private readonly MemoryPool<byte> _inner = Shared;
+    private readonly Lock _gate = new();
+    private int _outstanding;
+    private TaskCompletionSource _released = CreateReleasedGate();
+    private TaskCompletionSource _changed = CreateChangedGate();
 
-    public int Outstanding => Volatile.Read(ref outstanding);
+    public int Outstanding => Volatile.Read(ref _outstanding);
 
     /// <summary>
     /// Completes when the outstanding rental count drops to
@@ -166,12 +166,12 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
     /// </summary>
     public Task WaitForOutstandingAsync(int count, TimeSpan timeout)
     {
-        lock (gate)
+        lock (_gate)
         {
-            if (Volatile.Read(ref outstanding) <= count) return Task.CompletedTask;
+            if (Volatile.Read(ref _outstanding) <= count) return Task.CompletedTask;
 
-            released = CreateReleasedGate();
-            return released.Task.WaitAsync(timeout, TestContext.Current.CancellationToken);
+            _released = CreateReleasedGate();
+            return _released.Task.WaitAsync(timeout, TestContext.Current.CancellationToken);
         }
     }
 
@@ -188,26 +188,26 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
         while (true)
         {
             Task signal;
-            lock (gate)
+            lock (_gate)
             {
-                if (Volatile.Read(ref outstanding) >= count) return;
-                changed = CreateChangedGate();
-                signal = changed.Task;
+                if (Volatile.Read(ref _outstanding) >= count) return;
+                _changed = CreateChangedGate();
+                signal = _changed.Task;
             }
 
             await signal.WaitAsync(cts.Token);
         }
     }
 
-    public override int MaxBufferSize => inner.MaxBufferSize;
+    public override int MaxBufferSize => _inner.MaxBufferSize;
 
     public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
     {
-        var owner = inner.Rent(minimumBufferSize);
-        Interlocked.Increment(ref outstanding);
-        lock (gate)
+        var owner = _inner.Rent(minimumBufferSize);
+        Interlocked.Increment(ref _outstanding);
+        lock (_gate)
         {
-            changed.TrySetResult();
+            _changed.TrySetResult();
         }
 
         return new TrackingOwner(this, owner);
@@ -215,15 +215,15 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) inner.Dispose();
+        if (disposing) _inner.Dispose();
     }
 
     private void OnReleased()
     {
-        lock (gate)
+        lock (_gate)
         {
-            changed.TrySetResult();
-            if (Volatile.Read(ref outstanding) == 0) released.TrySetResult();
+            _changed.TrySetResult();
+            if (Volatile.Read(ref _outstanding) == 0) _released.TrySetResult();
         }
     }
 
@@ -239,15 +239,15 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
 
     private sealed class TrackingOwner(CountingMemoryPool pool, IMemoryOwner<byte> inner) : IMemoryOwner<byte>
     {
-        private int disposed;
+        private int _disposed;
 
         public Memory<byte> Memory => inner.Memory;
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-            Interlocked.Decrement(ref pool.outstanding);
+            Interlocked.Decrement(ref pool._outstanding);
             pool.OnReleased();
             inner.Dispose();
         }
@@ -263,11 +263,11 @@ internal sealed class CountingMemoryPool : MemoryPool<byte>
 /// </summary>
 internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullMode mode) : ZQueueFactory
 {
-    private readonly Lock gate = new();
-    private int drops;
-    private TaskCompletionSource changed = CreateChangedGate();
+    private readonly Lock _gate = new();
+    private int _drops;
+    private TaskCompletionSource _changed = CreateChangedGate();
 
-    public int Drops => Volatile.Read(ref drops);
+    public int Drops => Volatile.Read(ref _drops);
 
     public override Channel<ZMessage> Create(Action<ZMessage> itemDropped)
     {
@@ -276,10 +276,10 @@ internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullM
             message =>
             {
                 itemDropped(message);
-                Interlocked.Increment(ref drops);
-                lock (gate)
+                Interlocked.Increment(ref _drops);
+                lock (_gate)
                 {
-                    changed.TrySetResult();
+                    _changed.TrySetResult();
                 }
             });
     }
@@ -292,11 +292,11 @@ internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullM
         while (true)
         {
             Task signal;
-            lock (gate)
+            lock (_gate)
             {
-                if (Volatile.Read(ref drops) >= count) return;
-                changed = CreateChangedGate();
-                signal = changed.Task;
+                if (Volatile.Read(ref _drops) >= count) return;
+                _changed = CreateChangedGate();
+                signal = _changed.Task;
             }
 
             await signal.WaitAsync(cts.Token);
@@ -315,33 +315,33 @@ internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullM
 /// </summary>
 internal sealed class ProbingMemoryPool : MemoryPool<byte>
 {
-    private readonly MemoryPool<byte> inner = Shared;
-    private int rented;
+    private readonly MemoryPool<byte> _inner = Shared;
+    private int _rented;
 
     /// <summary>Total Rent calls since construction or the last <see cref="Reset"/>.</summary>
-    public int Rentals => Volatile.Read(ref rented);
+    public int Rentals => Volatile.Read(ref _rented);
 
     /// <summary>When set, Rent throws before allocating anything.</summary>
     public Exception? FailOnRent { get; set; }
 
-    public override int MaxBufferSize => inner.MaxBufferSize;
+    public override int MaxBufferSize => _inner.MaxBufferSize;
 
     public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
     {
-        Interlocked.Increment(ref rented);
+        Interlocked.Increment(ref _rented);
         if (FailOnRent is { } failure) throw failure;
 
-        return inner.Rent(minimumBufferSize);
+        return _inner.Rent(minimumBufferSize);
     }
 
     public void Reset()
     {
-        Interlocked.Exchange(ref rented, 0);
+        Interlocked.Exchange(ref _rented, 0);
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) inner.Dispose();
+        if (disposing) _inner.Dispose();
     }
 }
 
@@ -398,7 +398,7 @@ internal interface ITestFrameSink
 
 internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFrame = null) : ITestFrameSink
 {
-    private readonly TaskCompletionSource firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public List<byte[]> Frames { get; } = [];
 
@@ -407,14 +407,14 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
     /// <summary>Completes when the first frame arrives, so tests wait on the
     /// state instead of polling the frame count. The awaiting test supplies its
     /// own cancellation token; the recorder holds no ambient test context.</summary>
-    public Task FirstFrameAsync => firstFrame.Task;
+    public Task FirstFrameAsync => _firstFrame.Task;
 
     public ValueTask<bool> OnFrameAsync(ZFrame frame, CancellationToken token)
     {
         frame.TryGetValue(out ZSegment segment);
         Frames.Add(segment.Memory.ToArray());
         MoreFlags.Add(frame.More);
-        firstFrame.TrySetResult();
+        _firstFrame.TrySetResult();
         return ValueTask.FromResult(onFrame?.Invoke(frame, token) ?? true);
     }
 }
@@ -634,18 +634,18 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
 
 internal sealed class EstablishedFakeConnection : IZConnection
 {
-    private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
-    private int position;
-    private int disposed;
+    private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
+    private int _position;
+    private int _disposed;
 
     public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
-        if (position < handshake.Length)
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+        if (_position < _handshake.Length)
         {
-            var count = Math.Min(buffer.Length, handshake.Length - position);
-            handshake.AsSpan(position, count).CopyTo(buffer.Span);
-            position += count;
+            var count = Math.Min(buffer.Length, _handshake.Length - _position);
+            _handshake.AsSpan(_position, count).CopyTo(buffer.Span);
+            _position += count;
             return ValueTask.FromResult(count);
         }
 
@@ -660,7 +660,7 @@ internal sealed class EstablishedFakeConnection : IZConnection
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) == 1, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
@@ -673,6 +673,6 @@ internal sealed class EstablishedFakeConnection : IZConnection
 
     public void Dispose()
     {
-        Interlocked.Exchange(ref disposed, 1);
+        Interlocked.Exchange(ref _disposed, 1);
     }
 }

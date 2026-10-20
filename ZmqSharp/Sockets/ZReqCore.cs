@@ -10,31 +10,31 @@ internal sealed class ZReqCore(
 {
     private sealed class Request(ZPeer peer, CancellationToken token)
     {
-        private int finished;
-        public bool TryFinish() => Interlocked.CompareExchange(ref finished, 1, 0) == 0;
+        private int _finished;
+        public bool TryFinish() => Interlocked.CompareExchange(ref _finished, 1, 0) == 0;
         public ZPeer Peer { get; } = peer;
         public CancellationToken Token { get; } = token;
         public TaskCompletionSource<ZMessage> Outcome { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<ZMessage> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private readonly Lock gate = new();
-    private readonly ZRoundRobinDispatch selection = new();
-    private readonly ZPeer[] target = new ZPeer[1];
-    private Request? pending;
+    private readonly Lock _gate = new();
+    private readonly ZRoundRobinDispatch _selection = new();
+    private readonly ZPeer[] _target = new ZPeer[1];
+    private Request? _pending;
 
     /// <summary>Transfers the message only after preconditions succeed; completion ends all buffer borrowing.</summary>
     public Task<ZMessage> RequestAsync(ZMessage message, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         Request request;
-        lock (gate)
+        lock (_gate)
         {
-            if (pending is not null) throw new InvalidOperationException("a request is already in flight");
-            if (selection.SelectTargets(message, peers(), target) == 0)
+            if (_pending is not null) throw new InvalidOperationException("a request is already in flight");
+            if (_selection.SelectTargets(message, peers(), _target) == 0)
                 throw new InvalidOperationException("no connected peer to send the request to");
-            request = new Request(target[0], token);
-            pending = request;
+            request = new Request(_target[0], token);
+            _pending = request;
         }
 
         _ = RunAsync(request, message);
@@ -78,9 +78,9 @@ internal sealed class ZReqCore(
         await registration.DisposeAsync();
 
         // The send and cancellation callback have finished before the public task or slot is released.
-        lock (gate)
+        lock (_gate)
         {
-            if (ReferenceEquals(pending, request)) pending = null;
+            if (ReferenceEquals(_pending, request)) _pending = null;
         }
 
         if (ownsReply) request.Completion.TrySetResult(reply);
@@ -114,7 +114,7 @@ internal sealed class ZReqCore(
     public ValueTask<ZInboundDecision> DecideAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         Request? request;
-        lock (gate) request = pending is { } active && ReferenceEquals(active.Peer, peer) ? active : null;
+        lock (_gate) request = _pending is { } active && ReferenceEquals(active.Peer, peer) ? active : null;
         if (request is null)
         {
             message.Dispose();
@@ -139,9 +139,9 @@ internal sealed class ZReqCore(
 
     public void OnPeerEnded(ZPeer peer)
     {
-        lock (gate)
+        lock (_gate)
         {
-            if (pending is { } request && ReferenceEquals(request.Peer, peer))
+            if (_pending is { } request && ReferenceEquals(request.Peer, peer))
                 Fail(request, new IOException("peer closed before the reply arrived"), false);
         }
     }

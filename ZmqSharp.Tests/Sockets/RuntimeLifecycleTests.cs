@@ -185,19 +185,19 @@ public sealed class RuntimeLifecycleTests
     /// </summary>
     private sealed class ClosingBytes : IZConnection
     {
-        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
-        private int position;
-        private int sequenceWrites;
+        private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
+        private int _position;
+        private int _sequenceWrites;
         private TaskCompletionSource Aborted { get; } = Gate();
-        private int disposals;
+        private int _disposals;
 
         public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
-            if (position < handshake.Length)
+            if (_position < _handshake.Length)
             {
-                var count = Math.Min(destination.Length, handshake.Length - position);
-                handshake.AsMemory(position, count).CopyTo(destination);
-                position += count;
+                var count = Math.Min(destination.Length, _handshake.Length - _position);
+                _handshake.AsMemory(_position, count).CopyTo(destination);
+                _position += count;
                 return count;
             }
 
@@ -209,7 +209,7 @@ public sealed class RuntimeLifecycleTests
             => ValueTask.CompletedTask;
 
         public ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
-            => Interlocked.Increment(ref sequenceWrites) > 1
+            => Interlocked.Increment(ref _sequenceWrites) > 1
                 ? throw new IOException("peer closed before the ERROR write")
                 : ValueTask.CompletedTask;
 
@@ -218,7 +218,7 @@ public sealed class RuntimeLifecycleTests
         public void Dispose()
         {
             Abort();
-            Interlocked.Increment(ref disposals);
+            Interlocked.Increment(ref _disposals);
         }
     }
 
@@ -253,8 +253,8 @@ public sealed class RuntimeLifecycleTests
     // Deliberately implements only the public byte contract.
     private sealed class ControlledBytes : IZConnection
     {
-        private readonly byte[] handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
-        private int position;
+        private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
+        private int _position;
         public TaskCompletionSource ReadWaiting { get; } = Gate();
         public TaskCompletionSource WriteStarted { get; } = Gate();
         public TaskCompletionSource ReleaseWrite { get; } = Gate();
@@ -265,12 +265,12 @@ public sealed class RuntimeLifecycleTests
 
         public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
-            if (position < handshake.Length)
+            if (_position < _handshake.Length)
             {
                 // Force partial reads throughout the greeting and READY.
-                var count = Math.Min(3, Math.Min(destination.Length, handshake.Length - position));
-                handshake.AsMemory(position, count).CopyTo(destination);
-                position += count;
+                var count = Math.Min(3, Math.Min(destination.Length, _handshake.Length - _position));
+                _handshake.AsMemory(_position, count).CopyTo(destination);
+                _position += count;
                 return count;
             }
 

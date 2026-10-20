@@ -11,32 +11,32 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 internal sealed class ZTopicFilter
 {
-    private readonly Lock filterLock = new();
-    private readonly List<byte[]> subscriptions = [];
+    private readonly Lock _filterLock = new();
+    private readonly List<byte[]> _subscriptions = [];
 
     public byte[] Add(ReadOnlySpan<byte> topic)
     {
         var copy = topic.ToArray();
-        lock (filterLock) subscriptions.Add(copy);
+        lock (_filterLock) _subscriptions.Add(copy);
         return copy;
     }
 
     public void RemoveAll(ReadOnlySpan<byte> topic)
     {
-        lock (filterLock)
+        lock (_filterLock)
         {
-            for (var i = subscriptions.Count - 1; i >= 0; i--)
-                if (subscriptions[i].AsSpan().SequenceEqual(topic))
-                    subscriptions.RemoveAt(i);
+            for (var i = _subscriptions.Count - 1; i >= 0; i--)
+                if (_subscriptions[i].AsSpan().SequenceEqual(topic))
+                    _subscriptions.RemoveAt(i);
         }
     }
 
     /// <summary>True when the topic starts with any subscribed prefix.</summary>
     public bool Matches(ReadOnlySequence<byte> topic)
     {
-        lock (filterLock)
+        lock (_filterLock)
         {
-            foreach (var subscription in subscriptions)
+            foreach (var subscription in _subscriptions)
                 if (subscription.Length <= topic.Length
                     && topic.Slice(0, subscription.Length).ToArray().AsSpan().SequenceEqual(subscription))
                     return true;
@@ -48,7 +48,7 @@ internal sealed class ZTopicFilter
     /// <summary>Copies the subscribed prefixes (for outbound subscription propagation).</summary>
     public byte[][] Snapshot()
     {
-        lock (filterLock) return [.. subscriptions];
+        lock (_filterLock) return [.. _subscriptions];
     }
 }
 
