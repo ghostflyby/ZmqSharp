@@ -10,8 +10,12 @@ namespace ZmqSharp.Security;
 public class ZMechanismException : ZeroMqProtocolException
 {
     public ZMechanismException(string message)
-        : base(message) { }
+        : base(message)
+    {
+    }
 
     public ZMechanismException(string message, Exception innerException)
-        : base(message, innerException) { }
+        : base(message, innerException)
+    {
+    }
 }

@@ -18,7 +18,9 @@ public sealed class ZRouterSocket : ZQueueSocketBase
     private readonly ZIdentityDispatch _dispatch;
 
     public ZRouterSocket(ZSocketOptions? options = null)
-        : this(options ?? new ZSocketOptions(), new ZIdentityDispatch()) { }
+        : this(options ?? new ZSocketOptions(), new ZIdentityDispatch())
+    {
+    }
 
     private ZRouterSocket(ZSocketOptions options, ZIdentityDispatch dispatch)
         : base(options, dispatch, ZSocketTypes.Router, new RouterInboundPolicy(dispatch))

@@ -8,7 +8,9 @@ namespace ZmqSharp;
 public abstract class ZQueueSocketBase : ZSocketBase
 {
     protected ZQueueSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
-        IZInboundPolicy? inbound = null) : base(new SocketRuntime(options, dispatch, type, inbound, supportsQueue: true)) { }
+        IZInboundPolicy? inbound = null) : base(new SocketRuntime(options, dispatch, type, inbound, supportsQueue: true))
+    {
+    }
 
     private protected ZQueueSocketBase(SocketRuntime runtime) : base(runtime) { }
 

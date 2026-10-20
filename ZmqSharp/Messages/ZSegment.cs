@@ -20,7 +20,9 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
     private readonly int _length;
 
     internal ZSegment(object owner, int offset, int length)
-        : this(owner, offset, length, false) { }
+        : this(owner, offset, length, false)
+    {
+    }
 
     private ZSegment(object owner, int offset, int length, bool isBorrowed)
     {
