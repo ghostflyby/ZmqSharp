@@ -49,9 +49,8 @@ public sealed class ZmtpParser : IDisposable
         IZFrameCodec? codec = null, MemoryPool<byte>? pool = null)
         : this(reader, (_, frame, token) => onFrame(frame, token), null,
             pool ?? MemoryPool<byte>.Shared, DefaultMaxCommandSize, codec)
-    //@formatter:off
-    { }
-    //@formatter:on
+    {
+    }
 
     internal ZmtpParser(IZByteReader reader,
         Func<ZmtpParser, ZFrame, CancellationToken, ValueTask<bool>> onFrame,

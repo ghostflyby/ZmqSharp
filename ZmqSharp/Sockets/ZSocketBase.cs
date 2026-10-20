@@ -14,7 +14,9 @@ public abstract class ZSocketBase : IZSocket
     protected Lock StateLock => Runtime.StateLock;
 
     protected ZSocketBase(ZSocketOptions options, IZDispatchPolicy dispatch, ZSocketType type,
-        IZInboundPolicy? inbound = null) : this(new SocketRuntime(options, dispatch, type, inbound)) { }
+        IZInboundPolicy? inbound = null) : this(new SocketRuntime(options, dispatch, type, inbound))
+    {
+    }
 
     private protected ZSocketBase(SocketRuntime runtime)
     {
