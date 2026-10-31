@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <IsPackable>true</IsPackable>
     <PackageId>ZmqSharp</PackageId>
     <!-- Symbol packages: a .snupkg with the portable PDB ships alongside the
@@ -25,6 +27,8 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/ghostflyby/ZmqSharp</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/ghostflyby/ZmqSharp</PackageProjectUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageTags>zmq;zmtp;zeromq;networking;messaging</PackageTags>
   </PropertyGroup>
 
@@ -36,7 +40,7 @@
   <ItemGroup>
     <!-- SourceLink: embeds GitHub URLs into the PDB so debuggers fetch the
          exact source of the published commit. -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.402" PrivateAssets="all"/>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.403" PrivateAssets="all"/>
   </ItemGroup>
 
   <ItemGroup>
