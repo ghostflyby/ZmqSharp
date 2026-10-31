@@ -25,7 +25,7 @@ jobs:
     # One OS is enough: the managed dll has no platform-specific code (no
     # P/Invoke), unlike Pty.Net.
     name: Package smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7 # for ZmqSharp.Smoke
@@ -34,7 +34,8 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-
+          cache: true
+          cache-dependency-path: '**/*.csproj'
       # The consumer csproj defaults to 0.1.0 for local runs; the manual trigger
       # overrides it with the version being verified (a habitual "v0.5.0" input
       # is stripped to the bare version nuget restore expects).

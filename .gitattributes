@@ -1,8 +1,4 @@
-# Normalize line endings so every platform checks out LF; the CI format gate
-# requires LF on all OSes.
 * text=auto eol=lf
-
-# Binary files must not be normalized.
 *.png binary
 *.jpg binary
 *.ico binary
