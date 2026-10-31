@@ -76,8 +76,6 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # id-token: write lets NuGet/login exchange the OIDC token for a short-lived NuGet
-    # API key (Trusted Publishing); contents: write is for gh release create.
     permissions:
       id-token: write
       attestations: write
