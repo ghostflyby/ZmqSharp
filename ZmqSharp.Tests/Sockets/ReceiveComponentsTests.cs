@@ -160,9 +160,12 @@ public sealed class ReceiveComponentsTests
         Assert.Single(decisions);
         Assert.Equal(1, rejected);
         Assert.Equal(0, pool.Outstanding);
+        // The policy sees the multipart flag of the frame it is deciding on.
+        Assert.True(decisions[0].HasMore);
         materializer.Reset();
         using var next = allocate(4, false);
         Assert.Equal(0, decisions[1].FrameIndex);
+        Assert.False(decisions[1].HasMore);
         Assert.Equal(4, decisions[1].AccumulatedLength);
     }
 

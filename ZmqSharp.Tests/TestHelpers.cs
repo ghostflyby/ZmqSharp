@@ -310,8 +310,8 @@ internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullM
 }
 
 /// <summary>
-/// Pool that probes the receive path: counts every Rent and can be armed to
-/// throw from Rent, proving whether an over-limit frame was allocated.
+/// Pool that probes the receive path: counts every Rent, proving whether an
+/// over-limit frame was allocated.
 /// </summary>
 internal sealed class ProbingMemoryPool : MemoryPool<byte>
 {
@@ -321,16 +321,11 @@ internal sealed class ProbingMemoryPool : MemoryPool<byte>
     /// <summary>Total Rent calls since construction or the last <see cref="Reset"/>.</summary>
     public int Rentals => Volatile.Read(ref _rented);
 
-    /// <summary>When set, Rent throws before allocating anything.</summary>
-    public Exception? FailOnRent { get; set; }
-
     public override int MaxBufferSize => _inner.MaxBufferSize;
 
     public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
     {
         Interlocked.Increment(ref _rented);
-        if (FailOnRent is { } failure) throw failure;
-
         return _inner.Rent(minimumBufferSize);
     }
 
