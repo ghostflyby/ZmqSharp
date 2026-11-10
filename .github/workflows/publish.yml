@@ -76,10 +76,17 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # id-token: write lets NuGet/login exchange the OIDC token for a short-lived
+    # NuGet API key (Trusted Publishing); attestations: write persists the build
+    # provenance attestation in the repository's attestation store; contents: write
+    # is for gh release create; pull-requests: write lets the housekeeping step
+    # create and merge its PR (requires the repo setting "Allow GitHub Actions
+    # to create and approve pull requests").
     permissions:
       id-token: write
       attestations: write
       contents: write
+      pull-requests: write
     steps:
       # gh release create resolves the repository through git, so this job needs the
       # checkout even though it builds nothing (packages come from the build job).
@@ -260,5 +267,65 @@ jobs:
             --notes "ZmqSharp $env:VERSION — see https://www.nuget.org/packages/ZmqSharp/$env:VERSION and https://www.nuget.org/packages/ZmqSharp.Security.Curve/$env:VERSION for package details. Symbol packages (.snupkg) are on nuget.org; debuggers fetch them automatically." `
             "pkgs/ZmqSharp.$env:VERSION.nupkg" "pkgs/ZmqSharp.$env:VERSION.snupkg" `
             "pkgs/ZmqSharp.Security.Curve.$env:VERSION.nupkg" "pkgs/ZmqSharp.Security.Curve.$env:VERSION.snupkg"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Publish-time housekeeping: the API shipped in this release must move from
+      # Unshipped to Shipped, so Shipped stays an accurate record of what is actually
+      # published on nuget.org. The exact set is the Unshipped entries present on the
+      # tag commit (this checkout), merged into main's Shipped and removed from main's
+      # Unshipped — later additions on main stay unshipped. Both packable projects ride
+      # one housekeeping branch and PR. A failure here only marks the run red after
+      # the release itself is already done.
+      - name: Move published API into Shipped (housekeeping PR)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $projects = @('ZmqSharp', 'ZmqSharp.Security.Curve')
+          # The working tree is the tag commit: its Unshipped entries are what shipped.
+          $tagUnshippedByProject = @{}
+          foreach ($project in $projects)
+          {
+            $tagUnshippedByProject[$project] = @(Get-Content "$project/PublicAPI.Unshipped.txt" | Where-Object { $_ -and -not $_.StartsWith('#') })
+          }
+          if (-not ($tagUnshippedByProject.Values | Where-Object { $_.Count -gt 0 }))
+          {
+            Write-Host 'no unshipped API on this tag; nothing to move'
+            exit 0
+          }
+          git fetch origin main
+          git checkout -b "housekeeping/shipped-v$env:VERSION" FETCH_HEAD
+          foreach ($project in $projects)
+          {
+            $tagUnshipped = $tagUnshippedByProject[$project]
+            if ($tagUnshipped.Count -eq 0) { continue }
+            $shippedPath = "$project/PublicAPI.Shipped.txt"
+            $unshippedPath = "$project/PublicAPI.Unshipped.txt"
+            $shipped = @(Get-Content $shippedPath | Where-Object { $_ -and -not $_.StartsWith('#') })
+            $unshipped = @(Get-Content $unshippedPath | Where-Object { $_ -and -not $_.StartsWith('#') })
+            $removedPrefix = '*REMOVED*'
+            $tagAdditions = @($tagUnshipped | Where-Object { -not $_.StartsWith($removedPrefix) })
+            $tagRemovals = @($tagUnshipped | Where-Object { $_.StartsWith($removedPrefix) } | ForEach-Object { $_.Substring($removedPrefix.Length) })
+            $remainingShipped = @($shipped | Where-Object { $_ -notin $tagRemovals })
+            $newShipped = @(($remainingShipped + $tagAdditions) | Select-Object -Unique)
+            $newUnshipped = @($unshipped | Where-Object { $_ -notin $tagUnshipped })
+            # Sort by the stripped symbol key, matching the existing Shipped ordering.
+            $key = { param($s) ($s -replace '^\*REMOVED\*', '') -replace '^(static |override )', '' }
+            $newShipped = @($newShipped | Sort-Object -Property @{ Expression = $key })
+            $newUnshipped = @($newUnshipped | Sort-Object -Property @{ Expression = $key })
+            "#nullable enable`n$( $newShipped -join "`n" )`n" | Set-Content -Path $shippedPath -NoNewline
+            "#nullable enable`n$( $newUnshipped -join "`n" )`n" | Set-Content -Path $unshippedPath -NoNewline
+            git add $shippedPath $unshippedPath
+          }
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' `
+            commit -m "chore: move shipped API to Shipped for $env:GITHUB_REF_NAME"
+          git push -u origin "housekeeping/shipped-v$env:VERSION"
+          gh pr create --base main --head "housekeeping/shipped-v$env:VERSION" `
+            --title "chore: move shipped API to Shipped for $env:GITHUB_REF_NAME" `
+            --body "Publish-time housekeeping: the API shipped in $env:GITHUB_REF_NAME moves from Unshipped to Shipped (the entries present on the tag commit, both packable projects)."
+          # Direct merge, not --auto: the branch is pushed with the repository's own
+          # GITHUB_TOKEN, whose events start no workflow runs, so the PR never gains
+          # checks and GitHub rejects auto-merge with "Pull request is in clean status".
+          gh pr merge --merge
         env:
           GH_TOKEN: ${{ github.token }}
