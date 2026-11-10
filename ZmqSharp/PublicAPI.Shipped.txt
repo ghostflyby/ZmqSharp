@@ -1,0 +1,478 @@
+#nullable enable
+abstract ZmqSharp.ZQueueFactory.Create(System.Action<ZmqSharp.ZMessage>! itemDropped) -> System.Threading.Channels.Channel<ZmqSharp.ZMessage>!
+const ZmqSharp.Zmtp.ZmtpParser.DefaultMaxCommandSize = 1048576 -> long
+const ZmqSharp.ZSocketOptions.MinMaxCommandSize = 256 -> long
+static ZmqSharp.Patterns.ZInboundDecision.Consumed() -> ZmqSharp.Patterns.ZInboundDecision
+static ZmqSharp.Patterns.ZInboundDecision.Deliver() -> ZmqSharp.Patterns.ZInboundDecision
+static ZmqSharp.Patterns.ZInboundDecision.Deliver(ZmqSharp.ZMessage message) -> ZmqSharp.Patterns.ZInboundDecision
+static ZmqSharp.Patterns.ZInboundDecision.Drop() -> ZmqSharp.Patterns.ZInboundDecision
+static ZmqSharp.Patterns.ZInboundPolicy.PassThrough.get -> ZmqSharp.Patterns.IZInboundPolicy!
+static ZmqSharp.Patterns.ZSocketType.ForCustom(string! name) -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Dealer.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Pair.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Pub.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Pull.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Push.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Rep.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Req.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Router.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.Sub.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.XPub.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Patterns.ZSocketTypes.XSub.get -> ZmqSharp.Patterns.ZSocketType!
+static ZmqSharp.Security.ZNullMechanism.Instance.get -> ZmqSharp.Security.ZNullMechanism!
+static ZmqSharp.Transports.SocketTransport.BindAsync(System.Net.EndPoint! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.SocketTransport!>
+static ZmqSharp.Transports.SocketTransport.ConnectAsync(System.Net.EndPoint! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.IZConnection!>
+static ZmqSharp.ZFrame.implicit operator ZmqSharp.ZFrame(ZmqSharp.ZSegment segment) -> ZmqSharp.ZFrame
+static ZmqSharp.ZFrame.implicit operator ZmqSharp.ZFrame(ZmqSharp.ZSegments segments) -> ZmqSharp.ZFrame
+static ZmqSharp.ZMessage.Copy(System.Buffers.ReadOnlySequence<byte> frame) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.Copy(System.Collections.Generic.IEnumerable<byte[]!>! frames) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.Copy(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.Copy(System.ReadOnlyMemory<byte> data) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.FromOwned(byte[]! data) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.FromOwned(byte[]![]! frames) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.FromPooled(System.Buffers.IMemoryOwner<byte>! owner) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.implicit operator ZmqSharp.ZMessage(ZmqSharp.ZMultiMessage multi) -> ZmqSharp.ZMessage
+static ZmqSharp.ZMessage.implicit operator ZmqSharp.ZMessage(ZmqSharp.ZSingleMessage single) -> ZmqSharp.ZMessage
+static ZmqSharp.Zmtp.ZmtpCommandCodec.MetadataPropertyLength(int nameLength, int valueLength) -> int
+static ZmqSharp.Zmtp.ZmtpCommandCodec.ParseErrorReason(System.ReadOnlySpan<byte> body) -> string!
+static ZmqSharp.Zmtp.ZmtpCommandCodec.ParseMetadata(System.ReadOnlySpan<byte> metadata) -> System.Collections.Generic.Dictionary<string!, string!>!
+static ZmqSharp.Zmtp.ZmtpCommandCodec.ParseReadyIdentity(System.ReadOnlySpan<byte> metadata) -> System.ReadOnlyMemory<byte>?
+static ZmqSharp.Zmtp.ZmtpCommandCodec.ParseReadySocketType(System.ReadOnlySpan<byte> metadata) -> string!
+static ZmqSharp.Zmtp.ZmtpCommandCodec.TryReadCommandName(System.ReadOnlySpan<byte> body, out System.ReadOnlySpan<byte> name) -> bool
+static ZmqSharp.Zmtp.ZmtpCommandCodec.WriteMetadataProperty(System.Span<byte> destination, System.ReadOnlySpan<byte> name, System.ReadOnlySpan<byte> value) -> int
+static ZmqSharp.Zmtp.ZmtpCommands.BuildError(string! reason) -> byte[]!
+static ZmqSharp.Zmtp.ZmtpCommands.BuildReady(string! socketType, System.ReadOnlyMemory<byte> identity = default(System.ReadOnlyMemory<byte>)) -> byte[]!
+static ZmqSharp.ZMultiMessage.Copy(System.Collections.Generic.IEnumerable<byte[]!>! frames) -> ZmqSharp.ZMultiMessage
+static ZmqSharp.ZMultiMessage.Copy(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames) -> ZmqSharp.ZMultiMessage
+static ZmqSharp.ZMultiMessage.FromOwned(byte[]![]! frames) -> ZmqSharp.ZMultiMessage
+static ZmqSharp.ZQueueFactory.implicit operator ZmqSharp.ZQueueFactory!(System.Threading.Channels.BoundedChannelOptions! options) -> ZmqSharp.ZQueueFactory!
+static ZmqSharp.ZQueueFactory.implicit operator ZmqSharp.ZQueueFactory!(System.Threading.Channels.UnboundedChannelOptions! options) -> ZmqSharp.ZQueueFactory!
+static ZmqSharp.ZSecurityOptions.Null.get -> ZmqSharp.ZSecurityOptions!
+static ZmqSharp.ZSingleMessage.Copy(System.Buffers.ReadOnlySequence<byte> frame) -> ZmqSharp.ZSingleMessage
+static ZmqSharp.ZSingleMessage.Copy(System.ReadOnlyMemory<byte> data) -> ZmqSharp.ZSingleMessage
+static ZmqSharp.ZSingleMessage.FromOwned(byte[]! data) -> ZmqSharp.ZSingleMessage
+static ZmqSharp.ZSingleMessage.FromPooled(System.Buffers.IMemoryOwner<byte>! owner) -> ZmqSharp.ZSingleMessage
+virtual ZmqSharp.Patterns.ZInboundDecide.Invoke(ZmqSharp.ZPeer! peer, ZmqSharp.ZMessage message, System.Threading.CancellationToken token) -> System.Threading.Tasks.ValueTask<ZmqSharp.Patterns.ZInboundDecision>
+virtual ZmqSharp.Security.ZPlainAuthenticator.Invoke(string! username, System.ReadOnlySpan<byte> password) -> bool
+virtual ZmqSharp.ZDecide.Invoke(ZmqSharp.ZReceiveContext context) -> ZmqSharp.ZReceiveAllocation
+virtual ZmqSharp.Zmtp.ZFrameHandler.Invoke(ZmqSharp.ZFrame frame, System.Threading.CancellationToken token) -> bool
+virtual ZmqSharp.Zmtp.ZFrameHandlerAsync.Invoke(ZmqSharp.ZFrame frame, System.Threading.CancellationToken token) -> System.Threading.Tasks.ValueTask<bool>
+virtual ZmqSharp.ZSocketBase.DisposeAsync() -> System.Threading.Tasks.ValueTask
+virtual ZmqSharp.ZSocketBase.OnPeerEstablished(ZmqSharp.ZPeer! peer, System.ReadOnlyMemory<byte>? advertisedIdentity) -> void
+ZmqSharp.IPatternSink
+ZmqSharp.IPatternSink.OnMessageAsync(ZmqSharp.ZPeer! peer, ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.IZQueueFactory
+ZmqSharp.IZQueueFactory.Create(System.Action<ZmqSharp.ZMessage>! itemDropped) -> System.Threading.Channels.Channel<ZmqSharp.ZMessage>!
+ZmqSharp.IZReceivePolicy
+ZmqSharp.IZReceivePolicy.Decide(ZmqSharp.ZReceiveContext context) -> ZmqSharp.ZReceiveAllocation
+ZmqSharp.IZSocket
+ZmqSharp.IZSocket.BindAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.IZSocket.BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.IZSocket.ConnectAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.IZSocket.ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.IZSocket.Disconnect<TEndpoint, TTransport>(TEndpoint endpoint) -> void
+ZmqSharp.IZSocket.DisconnectAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.IZSocket.DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.IZSocket.Unbind<TEndpoint, TTransport>(TEndpoint endpoint) -> void
+ZmqSharp.IZSocket.UnbindAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.IZSocket.UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Patterns.IZDispatchPolicy
+ZmqSharp.Patterns.IZDispatchPolicy.SelectTargets(ZmqSharp.ZMessage message, System.ReadOnlySpan<ZmqSharp.ZPeer!> peers, System.Span<ZmqSharp.ZPeer!> targets) -> int
+ZmqSharp.Patterns.IZInboundPolicy
+ZmqSharp.Patterns.IZInboundPolicy.DecideAsync(ZmqSharp.ZPeer! peer, ZmqSharp.ZMessage message, System.Threading.CancellationToken token) -> System.Threading.Tasks.ValueTask<ZmqSharp.Patterns.ZInboundDecision>
+ZmqSharp.Patterns.ZBroadcastDispatch
+ZmqSharp.Patterns.ZBroadcastDispatch.SelectTargets(ZmqSharp.ZMessage message, System.ReadOnlySpan<ZmqSharp.ZPeer!> peers, System.Span<ZmqSharp.ZPeer!> targets) -> int
+ZmqSharp.Patterns.ZBroadcastDispatch.ZBroadcastDispatch() -> void
+ZmqSharp.Patterns.ZCurrentPeerDispatch
+ZmqSharp.Patterns.ZCurrentPeerDispatch.SelectTargets(ZmqSharp.ZMessage message, System.ReadOnlySpan<ZmqSharp.ZPeer!> peers, System.Span<ZmqSharp.ZPeer!> targets) -> int
+ZmqSharp.Patterns.ZCurrentPeerDispatch.ZCurrentPeerDispatch() -> void
+ZmqSharp.Patterns.ZDelegateInboundPolicy
+ZmqSharp.Patterns.ZDelegateInboundPolicy.DecideAsync(ZmqSharp.ZPeer! peer, ZmqSharp.ZMessage message, System.Threading.CancellationToken token) -> System.Threading.Tasks.ValueTask<ZmqSharp.Patterns.ZInboundDecision>
+ZmqSharp.Patterns.ZDelegateInboundPolicy.ZDelegateInboundPolicy(ZmqSharp.Patterns.ZInboundDecide! decide) -> void
+ZmqSharp.Patterns.ZIdentityDispatch
+ZmqSharp.Patterns.ZIdentityDispatch.SelectTargets(ZmqSharp.ZMessage message, System.ReadOnlySpan<ZmqSharp.ZPeer!> peers, System.Span<ZmqSharp.ZPeer!> targets) -> int
+ZmqSharp.Patterns.ZIdentityDispatch.ZIdentityDispatch() -> void
+ZmqSharp.Patterns.ZInboundAction
+ZmqSharp.Patterns.ZInboundAction.Consumed = 2 -> ZmqSharp.Patterns.ZInboundAction
+ZmqSharp.Patterns.ZInboundAction.Deliver = 0 -> ZmqSharp.Patterns.ZInboundAction
+ZmqSharp.Patterns.ZInboundAction.Drop = 1 -> ZmqSharp.Patterns.ZInboundAction
+ZmqSharp.Patterns.ZInboundDecide
+ZmqSharp.Patterns.ZInboundDecision
+ZmqSharp.Patterns.ZInboundDecision.Action.get -> ZmqSharp.Patterns.ZInboundAction
+ZmqSharp.Patterns.ZInboundDecision.Action.init -> void
+ZmqSharp.Patterns.ZInboundDecision.Message.get -> ZmqSharp.ZMessage?
+ZmqSharp.Patterns.ZInboundDecision.Message.init -> void
+ZmqSharp.Patterns.ZInboundDecision.ZInboundDecision() -> void
+ZmqSharp.Patterns.ZInboundPolicy
+ZmqSharp.Patterns.ZRoundRobinDispatch
+ZmqSharp.Patterns.ZRoundRobinDispatch.SelectTargets(ZmqSharp.ZMessage message, System.ReadOnlySpan<ZmqSharp.ZPeer!> peers, System.Span<ZmqSharp.ZPeer!> targets) -> int
+ZmqSharp.Patterns.ZRoundRobinDispatch.ZRoundRobinDispatch() -> void
+ZmqSharp.Patterns.ZSinglePeerDispatch
+ZmqSharp.Patterns.ZSinglePeerDispatch.SelectTargets(ZmqSharp.ZMessage message, System.ReadOnlySpan<ZmqSharp.ZPeer!> peers, System.Span<ZmqSharp.ZPeer!> targets) -> int
+ZmqSharp.Patterns.ZSinglePeerDispatch.ZSinglePeerDispatch() -> void
+ZmqSharp.Patterns.ZSocketType
+ZmqSharp.Patterns.ZSocketType.AcceptsPeer.get -> System.Func<string!, bool>!
+ZmqSharp.Patterns.ZSocketType.AcceptsPeer.init -> void
+ZmqSharp.Patterns.ZSocketType.AdvertisesIdentity.get -> bool
+ZmqSharp.Patterns.ZSocketType.AdvertisesIdentity.init -> void
+ZmqSharp.Patterns.ZSocketType.Name.get -> string!
+ZmqSharp.Patterns.ZSocketType.Name.init -> void
+ZmqSharp.Patterns.ZSocketType.ZSocketType() -> void
+ZmqSharp.Patterns.ZSocketTypes
+ZmqSharp.Security.IZMechanismSession
+ZmqSharp.Security.IZMechanismSession.RunAsync(ZmqSharp.Security.ZMechanismContext! context, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Security.ZMechanismResult?>
+ZmqSharp.Security.IZSecurityMechanism
+ZmqSharp.Security.IZSecurityMechanism.CreateSession() -> ZmqSharp.Security.IZMechanismSession!
+ZmqSharp.Security.IZSecurityMechanism.Name.get -> string!
+ZmqSharp.Security.IZSecurityMechanism.Role.get -> ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZMechanismCommand
+ZmqSharp.Security.ZMechanismCommand.Arguments.get -> System.ReadOnlyMemory<byte>
+ZmqSharp.Security.ZMechanismCommand.Name.get -> System.ReadOnlyMemory<byte>
+ZmqSharp.Security.ZMechanismCommand.ZMechanismCommand() -> void
+ZmqSharp.Security.ZMechanismCommand.ZMechanismCommand(System.ReadOnlyMemory<byte> name, System.ReadOnlyMemory<byte> arguments) -> void
+ZmqSharp.Security.ZMechanismContext
+ZmqSharp.Security.ZMechanismContext.Dispose() -> void
+ZmqSharp.Security.ZMechanismContext.LocalReadyBody.get -> System.ReadOnlyMemory<byte>
+ZmqSharp.Security.ZMechanismContext.MaxCommandSize.get -> long
+ZmqSharp.Security.ZMechanismContext.ReadCommandAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Security.ZMechanismCommand?>
+ZmqSharp.Security.ZMechanismContext.WriteCommandAsync(System.ReadOnlyMemory<byte> body, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Security.ZMechanismException
+ZmqSharp.Security.ZMechanismException.ZMechanismException(string! message) -> void
+ZmqSharp.Security.ZMechanismException.ZMechanismException(string! message, System.Exception! innerException) -> void
+ZmqSharp.Security.ZMechanismResult
+ZmqSharp.Security.ZMechanismResult.Codec.get -> ZmqSharp.Zmtp.IZFrameCodec?
+ZmqSharp.Security.ZMechanismResult.PeerReadyBody.get -> System.ReadOnlyMemory<byte>
+ZmqSharp.Security.ZMechanismResult.ZMechanismResult() -> void
+ZmqSharp.Security.ZMechanismResult.ZMechanismResult(ZmqSharp.Zmtp.IZFrameCodec? codec, System.ReadOnlyMemory<byte> peerReadyBody) -> void
+ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZMechanismRole.Client = 1 -> ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZMechanismRole.None = 0 -> ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZMechanismRole.Server = 2 -> ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZNullMechanism
+ZmqSharp.Security.ZNullMechanism.CreateSession() -> ZmqSharp.Security.IZMechanismSession!
+ZmqSharp.Security.ZNullMechanism.Name.get -> string!
+ZmqSharp.Security.ZNullMechanism.Role.get -> ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZNullMechanism.ZNullMechanism() -> void
+ZmqSharp.Security.ZPlainAuthenticator
+ZmqSharp.Security.ZPlainMechanism
+ZmqSharp.Security.ZPlainMechanism.CreateSession() -> ZmqSharp.Security.IZMechanismSession!
+ZmqSharp.Security.ZPlainMechanism.Name.get -> string!
+ZmqSharp.Security.ZPlainMechanism.Role.get -> ZmqSharp.Security.ZMechanismRole
+ZmqSharp.Security.ZPlainMechanism.ZPlainMechanism(string! username, System.ReadOnlySpan<byte> password) -> void
+ZmqSharp.Security.ZPlainMechanism.ZPlainMechanism(ZmqSharp.Security.ZPlainAuthenticator! authenticator) -> void
+ZmqSharp.Transports.IZByteReader
+ZmqSharp.Transports.IZByteReader.ReadAsync(System.Memory<byte> destination, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<int>
+ZmqSharp.Transports.IZByteWriter
+ZmqSharp.Transports.IZByteWriter.WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Transports.IZByteWriter.WriteAsync(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Transports.IZConnection
+ZmqSharp.Transports.IZConnection.Abort() -> void
+ZmqSharp.Transports.IZTransport
+ZmqSharp.Transports.IZTransport.OnAccept -> System.Func<ZmqSharp.Transports.IZConnection!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
+ZmqSharp.Transports.IZTransport.StartAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Transports.IZTransport<TSelf, TEndpoint>
+ZmqSharp.Transports.IZTransport<TSelf, TEndpoint>.BindAsync(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<TSelf>
+ZmqSharp.Transports.IZTransport<TSelf, TEndpoint>.ConnectAsync(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.IZConnection!>
+ZmqSharp.Transports.SocketTransport
+ZmqSharp.Transports.SocketTransport.Dispose() -> void
+ZmqSharp.Transports.SocketTransport.OnAccept -> System.Func<ZmqSharp.Transports.IZConnection!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
+ZmqSharp.Transports.SocketTransport.StartAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZDealerSocket
+ZmqSharp.ZDealerSocket.SendAsync(System.Buffers.ReadOnlySequence<byte> frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZDealerSocket.SendAsync(System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZDealerSocket.SendAsync(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZDealerSocket.SendAsync(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZDealerSocket.SendAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZDealerSocket.ZDealerSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZDecide
+ZmqSharp.ZDelegateReceivePolicy
+ZmqSharp.ZDelegateReceivePolicy.Decide(ZmqSharp.ZReceiveContext context) -> ZmqSharp.ZReceiveAllocation
+ZmqSharp.ZDelegateReceivePolicy.ZDelegateReceivePolicy(ZmqSharp.ZDecide! decide) -> void
+ZmqSharp.ZeroMqProtocolException
+ZmqSharp.ZeroMqProtocolException.ZeroMqProtocolException(string! message) -> void
+ZmqSharp.ZeroMqProtocolException.ZeroMqProtocolException(string! message, System.Exception! innerException) -> void
+ZmqSharp.ZFrame
+ZmqSharp.ZFrame.Count.get -> int
+ZmqSharp.ZFrame.Dispose() -> void
+ZmqSharp.ZFrame.Enumerator
+ZmqSharp.ZFrame.Enumerator.Current.get -> ZmqSharp.ZSegment
+ZmqSharp.ZFrame.Enumerator.Dispose() -> void
+ZmqSharp.ZFrame.Enumerator.Enumerator() -> void
+ZmqSharp.ZFrame.Enumerator.MoveNext() -> bool
+ZmqSharp.ZFrame.Enumerator.Reset() -> void
+ZmqSharp.ZFrame.GetEnumerator() -> ZmqSharp.ZFrame.Enumerator
+ZmqSharp.ZFrame.More.get -> bool
+ZmqSharp.ZFrame.this[int index].get -> ZmqSharp.ZSegment
+ZmqSharp.ZFrame.ToSequence() -> System.Buffers.ReadOnlySequence<byte>
+ZmqSharp.ZFrame.TryGetValue(out ZmqSharp.ZSegment segment) -> bool
+ZmqSharp.ZFrame.TryGetValue(out ZmqSharp.ZSegments segments) -> bool
+ZmqSharp.ZFrame.ZFrame() -> void
+ZmqSharp.ZFrame.ZFrame(ZmqSharp.ZSegment segment) -> void
+ZmqSharp.ZFrame.ZFrame(ZmqSharp.ZSegments segments) -> void
+ZmqSharp.ZMessage
+ZmqSharp.ZMessage.Count.get -> int
+ZmqSharp.ZMessage.Dispose() -> void
+ZmqSharp.ZMessage.Enumerator
+ZmqSharp.ZMessage.Enumerator.Current.get -> ZmqSharp.ZFrame
+ZmqSharp.ZMessage.Enumerator.Dispose() -> void
+ZmqSharp.ZMessage.Enumerator.Enumerator() -> void
+ZmqSharp.ZMessage.Enumerator.MoveNext() -> bool
+ZmqSharp.ZMessage.Enumerator.Reset() -> void
+ZmqSharp.ZMessage.GetEnumerator() -> ZmqSharp.ZMessage.Enumerator
+ZmqSharp.ZMessage.this[int index].get -> ZmqSharp.ZFrame
+ZmqSharp.ZMessage.TryGetValue(out ZmqSharp.ZMultiMessage multiMessage) -> bool
+ZmqSharp.ZMessage.TryGetValue(out ZmqSharp.ZSingleMessage singleMessage) -> bool
+ZmqSharp.ZMessage.ZMessage() -> void
+ZmqSharp.ZMessage.ZMessage(ZmqSharp.ZMultiMessage multi) -> void
+ZmqSharp.ZMessage.ZMessage(ZmqSharp.ZSingleMessage single) -> void
+ZmqSharp.Zmtp.IZFrameCodec
+ZmqSharp.Zmtp.IZFrameCodec.Decode(ZmqSharp.Zmtp.ZmtpFrameData wireFrame) -> ZmqSharp.Zmtp.ZmtpFrameData
+ZmqSharp.Zmtp.IZFrameCodec.Encode(ZmqSharp.Zmtp.ZmtpFrameData logicalFrame) -> ZmqSharp.Zmtp.ZmtpFrameData
+ZmqSharp.Zmtp.IZFrameCodec.GetMaximumEncodedLength(long logicalBodyLimit) -> long
+ZmqSharp.Zmtp.ZFrameHandler
+ZmqSharp.Zmtp.ZFrameHandlerAsync
+ZmqSharp.Zmtp.ZmtpCommandCodec
+ZmqSharp.Zmtp.ZmtpCommands
+ZmqSharp.Zmtp.ZmtpFrameData
+ZmqSharp.Zmtp.ZmtpFrameData.Body.get -> System.Buffers.ReadOnlySequence<byte>
+ZmqSharp.Zmtp.ZmtpFrameData.Body.init -> void
+ZmqSharp.Zmtp.ZmtpFrameData.Flags.get -> ZmqSharp.Zmtp.ZmtpFrameFlags
+ZmqSharp.Zmtp.ZmtpFrameData.Flags.init -> void
+ZmqSharp.Zmtp.ZmtpFrameData.ZmtpFrameData() -> void
+ZmqSharp.Zmtp.ZmtpFrameEncoder
+ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteCommandAsync(System.ReadOnlyMemory<byte> body, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteFrameAsync(System.Buffers.ReadOnlySequence<byte> body, bool more, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteFrameAsync(ZmqSharp.Zmtp.ZmtpFrameData frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteMessageAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Zmtp.ZmtpFrameEncoder.ZmtpFrameEncoder(System.IO.Stream! stream) -> void
+ZmqSharp.Zmtp.ZmtpFrameEncoder.ZmtpFrameEncoder(ZmqSharp.Transports.IZByteWriter! writer) -> void
+ZmqSharp.Zmtp.ZmtpFrameFlags
+ZmqSharp.Zmtp.ZmtpFrameFlags.Command = 4 -> ZmqSharp.Zmtp.ZmtpFrameFlags
+ZmqSharp.Zmtp.ZmtpFrameFlags.LongSize = 2 -> ZmqSharp.Zmtp.ZmtpFrameFlags
+ZmqSharp.Zmtp.ZmtpFrameFlags.More = 1 -> ZmqSharp.Zmtp.ZmtpFrameFlags
+ZmqSharp.Zmtp.ZmtpFrameFlags.None = 0 -> ZmqSharp.Zmtp.ZmtpFrameFlags
+ZmqSharp.Zmtp.ZmtpParser
+ZmqSharp.Zmtp.ZmtpParser.Dispose() -> void
+ZmqSharp.Zmtp.ZmtpParser.ParseAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Zmtp.ZmtpParser.Resume() -> void
+ZmqSharp.Zmtp.ZmtpParser.ZmtpParser(ZmqSharp.Transports.IZByteReader! reader, ZmqSharp.Zmtp.ZFrameHandlerAsync! onFrame, ZmqSharp.Zmtp.IZFrameCodec? codec = null, System.Buffers.MemoryPool<byte>? pool = null) -> void
+ZmqSharp.ZMultiMessage
+ZmqSharp.ZMultiMessage.Count.get -> int
+ZmqSharp.ZMultiMessage.Dispose() -> void
+ZmqSharp.ZMultiMessage.Enumerator
+ZmqSharp.ZMultiMessage.Enumerator.Current.get -> ZmqSharp.ZFrame
+ZmqSharp.ZMultiMessage.Enumerator.Dispose() -> void
+ZmqSharp.ZMultiMessage.Enumerator.Enumerator() -> void
+ZmqSharp.ZMultiMessage.Enumerator.MoveNext() -> bool
+ZmqSharp.ZMultiMessage.Enumerator.Reset() -> void
+ZmqSharp.ZMultiMessage.GetEnumerator() -> ZmqSharp.ZMultiMessage.Enumerator
+ZmqSharp.ZMultiMessage.this[int index].get -> ZmqSharp.ZFrame
+ZmqSharp.ZMultiMessage.ZMultiMessage() -> void
+ZmqSharp.ZPairSocket
+ZmqSharp.ZPairSocket.SendAsync(System.Buffers.ReadOnlySequence<byte> frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPairSocket.SendAsync(System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPairSocket.SendAsync(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPairSocket.SendAsync(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPairSocket.SendAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPairSocket.ZPairSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZPeer
+ZmqSharp.ZPubSocket
+ZmqSharp.ZPubSocket.SendAsync(System.Buffers.ReadOnlySequence<byte> frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPubSocket.SendAsync(System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPubSocket.SendAsync(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPubSocket.SendAsync(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPubSocket.SendAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPubSocket.ZPubSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZPullSocket
+ZmqSharp.ZPullSocket.ZPullSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZPushSocket
+ZmqSharp.ZPushSocket.SendAsync(System.Buffers.ReadOnlySequence<byte> frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPushSocket.SendAsync(System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPushSocket.SendAsync(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPushSocket.SendAsync(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPushSocket.SendAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZPushSocket.ZPushSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZQueueFactory
+ZmqSharp.ZQueueFactory.ZQueueFactory() -> void
+ZmqSharp.ZQueueSocketBase
+ZmqSharp.ZQueueSocketBase.Messages.get -> System.Threading.Channels.ChannelReader<ZmqSharp.ZMessage>!
+ZmqSharp.ZQueueSocketBase.Outbound.get -> System.Threading.Channels.ChannelWriter<ZmqSharp.ZMessage>?
+ZmqSharp.ZQueueSocketBase.ReceiveRejections.get -> long
+ZmqSharp.ZQueueSocketBase.ZQueueSocketBase(ZmqSharp.ZSocketOptions! options, ZmqSharp.Patterns.IZDispatchPolicy! dispatch, ZmqSharp.Patterns.ZSocketType! type, ZmqSharp.Patterns.IZInboundPolicy? inbound = null) -> void
+ZmqSharp.ZReceiveAllocation
+ZmqSharp.ZReceiveAllocation.Contiguous.get -> bool
+ZmqSharp.ZReceiveAllocation.Mode.get -> ZmqSharp.ZReceiveMode
+ZmqSharp.ZReceiveAllocation.Mode.init -> void
+ZmqSharp.ZReceiveAllocation.Segmented.get -> bool
+ZmqSharp.ZReceiveAllocation.Segmented.init -> void
+ZmqSharp.ZReceiveAllocation.ZReceiveAllocation() -> void
+ZmqSharp.ZReceiveContext
+ZmqSharp.ZReceiveContext.AccumulatedLength.get -> long
+ZmqSharp.ZReceiveContext.AccumulatedLength.init -> void
+ZmqSharp.ZReceiveContext.FrameIndex.get -> int
+ZmqSharp.ZReceiveContext.FrameIndex.init -> void
+ZmqSharp.ZReceiveContext.FrameLength.get -> int
+ZmqSharp.ZReceiveContext.FrameLength.init -> void
+ZmqSharp.ZReceiveContext.HasMore.get -> bool
+ZmqSharp.ZReceiveContext.HasMore.init -> void
+ZmqSharp.ZReceiveContext.IsFirstFrame.get -> bool
+ZmqSharp.ZReceiveContext.ZReceiveContext() -> void
+ZmqSharp.ZReceiveMode
+ZmqSharp.ZReceiveMode.Owned = 1 -> ZmqSharp.ZReceiveMode
+ZmqSharp.ZReceiveMode.Pooled = 0 -> ZmqSharp.ZReceiveMode
+ZmqSharp.ZReceiveOptions
+ZmqSharp.ZReceiveOptions.ContiguousFrameLimit.get -> int
+ZmqSharp.ZReceiveOptions.ContiguousFrameLimit.init -> void
+ZmqSharp.ZReceiveOptions.Decide(ZmqSharp.ZReceiveContext context) -> ZmqSharp.ZReceiveAllocation
+ZmqSharp.ZReceiveOptions.Mode.get -> ZmqSharp.ZReceiveMode
+ZmqSharp.ZReceiveOptions.Mode.init -> void
+ZmqSharp.ZReceiveOptions.ZReceiveOptions() -> void
+ZmqSharp.ZReceiveRejectedException
+ZmqSharp.ZReceiveRejectedException.Rejection.get -> ZmqSharp.ZReceiveRejection
+ZmqSharp.ZReceiveRejectedException.ZReceiveRejectedException(ZmqSharp.ZReceiveRejection rejection) -> void
+ZmqSharp.ZReceiveRejection
+ZmqSharp.ZReceiveRejection.Actual.get -> long?
+ZmqSharp.ZReceiveRejection.Actual.init -> void
+ZmqSharp.ZReceiveRejection.Limit.get -> long?
+ZmqSharp.ZReceiveRejection.Limit.init -> void
+ZmqSharp.ZReceiveRejection.Reason.get -> ZmqSharp.ZReceiveRejectionReason
+ZmqSharp.ZReceiveRejection.Reason.init -> void
+ZmqSharp.ZReceiveRejection.ZReceiveRejection() -> void
+ZmqSharp.ZReceiveRejectionReason
+ZmqSharp.ZReceiveRejectionReason.FrameTooLarge = 0 -> ZmqSharp.ZReceiveRejectionReason
+ZmqSharp.ZReceiveRejectionReason.MessageTooLarge = 1 -> ZmqSharp.ZReceiveRejectionReason
+ZmqSharp.ZReceiveRejectionReason.TooManyFrames = 2 -> ZmqSharp.ZReceiveRejectionReason
+ZmqSharp.ZReceiveSurface
+ZmqSharp.ZReceiveSurface.Callback = 1 -> ZmqSharp.ZReceiveSurface
+ZmqSharp.ZReceiveSurface.Queue = 0 -> ZmqSharp.ZReceiveSurface
+ZmqSharp.ZRepSocket
+ZmqSharp.ZRepSocket.BindRequestHandler(System.Func<ZmqSharp.ZRequestContext, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! handler) -> void
+ZmqSharp.ZRepSocket.SendReplyAsync(ZmqSharp.ZRequestContext context, System.Buffers.ReadOnlySequence<byte> reply, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRepSocket.SendReplyAsync(ZmqSharp.ZRequestContext context, System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRepSocket.SendReplyAsync(ZmqSharp.ZRequestContext context, System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRepSocket.SendReplyAsync(ZmqSharp.ZRequestContext context, System.ReadOnlyMemory<byte> reply, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRepSocket.SendReplyAsync(ZmqSharp.ZRequestContext context, ZmqSharp.ZMessage reply, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRepSocket.ZRepSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZReqSocket
+ZmqSharp.ZReqSocket.RequestAsync(System.Buffers.ReadOnlySequence<byte> request, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ZmqSharp.ZMessage>!
+ZmqSharp.ZReqSocket.RequestAsync(System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ZmqSharp.ZMessage>!
+ZmqSharp.ZReqSocket.RequestAsync(System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ZmqSharp.ZMessage>!
+ZmqSharp.ZReqSocket.RequestAsync(System.ReadOnlyMemory<byte> request, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ZmqSharp.ZMessage>!
+ZmqSharp.ZReqSocket.RequestAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ZmqSharp.ZMessage>!
+ZmqSharp.ZReqSocket.ZReqSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZRequestContext
+ZmqSharp.ZRequestContext.Count.get -> int
+ZmqSharp.ZRequestContext.Dispose() -> void
+ZmqSharp.ZRequestContext.GetEnumerator() -> ZmqSharp.ZMessage.Enumerator
+ZmqSharp.ZRequestContext.Peer.get -> ZmqSharp.ZPeer!
+ZmqSharp.ZRequestContext.this[int index].get -> ZmqSharp.ZFrame
+ZmqSharp.ZRequestContext.ZRequestContext() -> void
+ZmqSharp.ZRouterSocket
+ZmqSharp.ZRouterSocket.SendAsync(System.ReadOnlyMemory<byte> identity, System.Buffers.ReadOnlySequence<byte> frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRouterSocket.SendAsync(System.ReadOnlyMemory<byte> identity, System.Collections.Generic.IEnumerable<byte[]!>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRouterSocket.SendAsync(System.ReadOnlyMemory<byte> identity, System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<byte>>! frames, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRouterSocket.SendAsync(System.ReadOnlyMemory<byte> identity, System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRouterSocket.SendAsync(System.ReadOnlyMemory<byte> identity, ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZRouterSocket.ZRouterSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZSecurityOptions
+ZmqSharp.ZSecurityOptions.Mechanism.get -> ZmqSharp.Security.IZSecurityMechanism!
+ZmqSharp.ZSecurityOptions.Mechanism.init -> void
+ZmqSharp.ZSecurityOptions.ZSecurityOptions() -> void
+ZmqSharp.ZSegment
+ZmqSharp.ZSegment.Count.get -> int
+ZmqSharp.ZSegment.Dispose() -> void
+ZmqSharp.ZSegment.Enumerator
+ZmqSharp.ZSegment.Enumerator.Current.get -> ZmqSharp.ZSegment
+ZmqSharp.ZSegment.Enumerator.Dispose() -> void
+ZmqSharp.ZSegment.Enumerator.Enumerator() -> void
+ZmqSharp.ZSegment.Enumerator.MoveNext() -> bool
+ZmqSharp.ZSegment.Enumerator.Reset() -> void
+ZmqSharp.ZSegment.GetEnumerator() -> ZmqSharp.ZSegment.Enumerator
+ZmqSharp.ZSegment.GetOwnedArray(out byte[]! array) -> bool
+ZmqSharp.ZSegment.IsOwned.get -> bool
+ZmqSharp.ZSegment.Memory.get -> System.ReadOnlyMemory<byte>
+ZmqSharp.ZSegment.this[int index].get -> ZmqSharp.ZSegment
+ZmqSharp.ZSegment.ZSegment() -> void
+ZmqSharp.ZSegments
+ZmqSharp.ZSegments.Count.get -> int
+ZmqSharp.ZSegments.Dispose() -> void
+ZmqSharp.ZSegments.Enumerator
+ZmqSharp.ZSegments.Enumerator.Current.get -> ZmqSharp.ZSegment
+ZmqSharp.ZSegments.Enumerator.Dispose() -> void
+ZmqSharp.ZSegments.Enumerator.Enumerator() -> void
+ZmqSharp.ZSegments.Enumerator.MoveNext() -> bool
+ZmqSharp.ZSegments.Enumerator.Reset() -> void
+ZmqSharp.ZSegments.GetEnumerator() -> ZmqSharp.ZSegments.Enumerator
+ZmqSharp.ZSegments.this[int index].get -> ZmqSharp.ZSegment
+ZmqSharp.ZSegments.ZSegments() -> void
+ZmqSharp.ZSingleMessage
+ZmqSharp.ZSingleMessage.Count.get -> int
+ZmqSharp.ZSingleMessage.Dispose() -> void
+ZmqSharp.ZSingleMessage.Enumerator
+ZmqSharp.ZSingleMessage.Enumerator.Current.get -> ZmqSharp.ZFrame
+ZmqSharp.ZSingleMessage.Enumerator.Dispose() -> void
+ZmqSharp.ZSingleMessage.Enumerator.Enumerator() -> void
+ZmqSharp.ZSingleMessage.Enumerator.MoveNext() -> bool
+ZmqSharp.ZSingleMessage.Enumerator.Reset() -> void
+ZmqSharp.ZSingleMessage.GetEnumerator() -> ZmqSharp.ZSingleMessage.Enumerator
+ZmqSharp.ZSingleMessage.this[int index].get -> ZmqSharp.ZFrame
+ZmqSharp.ZSingleMessage.ZSingleMessage() -> void
+ZmqSharp.ZSocketBase
+ZmqSharp.ZSocketBase.BindAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.ZSocketBase.BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.ZSocketBase.ConnectAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.ZSocketBase.ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ZmqSharp.ZSocketBase.Disconnect<TEndpoint, TTransport>(TEndpoint endpoint) -> void
+ZmqSharp.ZSocketBase.DisconnectAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZSocketBase.DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZSocketBase.OnFrame -> ZmqSharp.Zmtp.ZFrameHandler?
+ZmqSharp.ZSocketBase.PeerEnded -> System.Action<ZmqSharp.ZPeer!, System.Exception?>?
+ZmqSharp.ZSocketBase.Pool.get -> System.Buffers.MemoryPool<byte>!
+ZmqSharp.ZSocketBase.ResumePaused() -> void
+ZmqSharp.ZSocketBase.SendAsyncCore(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZSocketBase.SendAsyncCore(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZSocketBase.StateLock.get -> System.Threading.Lock!
+ZmqSharp.ZSocketBase.ThrowIfClosed() -> void
+ZmqSharp.ZSocketBase.TrackBackground(System.Threading.Tasks.Task! task) -> void
+ZmqSharp.ZSocketBase.Unbind<TEndpoint, TTransport>(TEndpoint endpoint) -> void
+ZmqSharp.ZSocketBase.UnbindAsync(string! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZSocketBase.UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.ZSocketBase.ZSocketBase(ZmqSharp.ZSocketOptions! options, ZmqSharp.Patterns.IZDispatchPolicy! dispatch, ZmqSharp.Patterns.ZSocketType! type, ZmqSharp.Patterns.IZInboundPolicy? inbound = null) -> void
+ZmqSharp.ZSocketOptions
+ZmqSharp.ZSocketOptions.HandshakeTimeoutMs.get -> int
+ZmqSharp.ZSocketOptions.HandshakeTimeoutMs.init -> void
+ZmqSharp.ZSocketOptions.Identity.get -> System.ReadOnlyMemory<byte>
+ZmqSharp.ZSocketOptions.Identity.init -> void
+ZmqSharp.ZSocketOptions.MaxCommandSize.get -> long
+ZmqSharp.ZSocketOptions.MaxCommandSize.init -> void
+ZmqSharp.ZSocketOptions.MaxFrameLength.get -> long
+ZmqSharp.ZSocketOptions.MaxFrameLength.init -> void
+ZmqSharp.ZSocketOptions.MaxFramesPerMessage.get -> int
+ZmqSharp.ZSocketOptions.MaxFramesPerMessage.init -> void
+ZmqSharp.ZSocketOptions.MaxIncompleteHandshakes.get -> int
+ZmqSharp.ZSocketOptions.MaxIncompleteHandshakes.init -> void
+ZmqSharp.ZSocketOptions.MaxMessageLength.get -> long
+ZmqSharp.ZSocketOptions.MaxMessageLength.init -> void
+ZmqSharp.ZSocketOptions.MessageSink.get -> ZmqSharp.IPatternSink?
+ZmqSharp.ZSocketOptions.MessageSink.init -> void
+ZmqSharp.ZSocketOptions.Pool.get -> System.Buffers.MemoryPool<byte>!
+ZmqSharp.ZSocketOptions.Pool.init -> void
+ZmqSharp.ZSocketOptions.ReceivePolicy.get -> ZmqSharp.IZReceivePolicy!
+ZmqSharp.ZSocketOptions.ReceivePolicy.init -> void
+ZmqSharp.ZSocketOptions.ReceiveQueueFactory.get -> ZmqSharp.ZQueueFactory!
+ZmqSharp.ZSocketOptions.ReceiveQueueFactory.init -> void
+ZmqSharp.ZSocketOptions.ReceiveSurface.get -> ZmqSharp.ZReceiveSurface
+ZmqSharp.ZSocketOptions.ReceiveSurface.init -> void
+ZmqSharp.ZSocketOptions.Security.get -> ZmqSharp.ZSecurityOptions!
+ZmqSharp.ZSocketOptions.Security.init -> void
+ZmqSharp.ZSocketOptions.SendQueueFactory.get -> ZmqSharp.ZQueueFactory?
+ZmqSharp.ZSocketOptions.SendQueueFactory.init -> void
+ZmqSharp.ZSocketOptions.ZSocketOptions() -> void
+ZmqSharp.ZSubSocket
+ZmqSharp.ZSubSocket.Subscribe(System.ReadOnlySpan<byte> topic) -> void
+ZmqSharp.ZSubSocket.Unsubscribe(System.ReadOnlySpan<byte> topic) -> void
+ZmqSharp.ZSubSocket.ZSubSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZXPubSocket
+ZmqSharp.ZXPubSocket.ZXPubSocket(ZmqSharp.ZSocketOptions? options = null) -> void
+ZmqSharp.ZXSubSocket
+ZmqSharp.ZXSubSocket.ZXSubSocket(ZmqSharp.ZSocketOptions? options = null) -> void

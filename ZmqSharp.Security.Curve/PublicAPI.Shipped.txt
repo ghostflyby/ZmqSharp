@@ -1,0 +1,7 @@
+#nullable enable
+ZmqSharp.Security.Curve.CurveMechanism
+ZmqSharp.Security.Curve.CurveMechanism.CreateSession() -> ZmqSharp.Security.IZMechanismSession!
+ZmqSharp.Security.Curve.CurveMechanism.CurveMechanism(System.ReadOnlySpan<byte> clientLongTermKey, System.ReadOnlySpan<byte> serverPublicKey) -> void
+ZmqSharp.Security.Curve.CurveMechanism.CurveMechanism(System.ReadOnlySpan<byte> serverLongTermKey) -> void
+ZmqSharp.Security.Curve.CurveMechanism.Name.get -> string!
+ZmqSharp.Security.Curve.CurveMechanism.Role.get -> ZmqSharp.Security.ZMechanismRole
