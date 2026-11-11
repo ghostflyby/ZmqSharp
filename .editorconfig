@@ -18,6 +18,15 @@ indent_size = 2
 [*.cs]
 indent_size = 4
 
+# Public API surface tracking is the PublicApiAnalyzers rules RS0016 (symbol is
+# not declared in the public API files) and RS0017 (declared symbol no longer
+# exists). Both stay enabled and are errors through TreatWarningsAsErrors.
+# RS0026/RS0027 instead police optional parameters on overloaded members - a
+# shape this library uses on purpose (e.g. the endpoint overloads), so the
+# back-compat advice would be noise rather than a real finding.
+dotnet_diagnostic.RS0026.severity = none
+dotnet_diagnostic.RS0027.severity = none
+
 # Roslyn switches whose defaults disagree with Rider's defaults.
 csharp_indent_case_contents_when_block = false
 csharp_new_line_before_members_in_object_initializers = false

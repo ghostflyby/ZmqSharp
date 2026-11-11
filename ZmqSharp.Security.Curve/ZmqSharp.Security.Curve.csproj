@@ -40,6 +40,13 @@
     <!-- SourceLink: embeds GitHub URLs into the PDB so debuggers fetch the
          exact source of the published commit. -->
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.403" PrivateAssets="all"/>
+    <!-- Public API surface guard: every public/protected member must be declared
+         in PublicAPI.Shipped.txt or PublicAPI.Unshipped.txt. RS0016 (missing
+         declaration) and RS0017 (stale declaration) are errors via
+         TreatWarningsAsErrors, so an accidental leak or removal fails the build
+         instead of silently changing the package's surface. The package wires
+         both files as AdditionalFiles when they exist in the project directory. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="all"/>
   </ItemGroup>
 
   <ItemGroup>

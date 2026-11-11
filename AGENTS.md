@@ -25,6 +25,13 @@ Engineering constraints for ZmqSharp.
 - Full Native AOT support: no runtime reflection or dynamic code generation; use source generators for serialization/metadata needs.
 - The library enables AOT compatibility checks via `IsAotCompatible`, which turns on the AOT, trim, and single-file analyzers; warnings are errors.
 
+## Public API surface
+
+- `Microsoft.CodeAnalysis.PublicApiAnalyzers` guards the surface of both packable projects. Every public and protected member must be declared in `PublicAPI.Shipped.txt` (already released) or `PublicAPI.Unshipped.txt` (added since the last release).
+- RS0016 (a member is not declared) and RS0017 (a declared member no longer exists) fail the build through `TreatWarningsAsErrors`. Do not suppress them; declare the change instead.
+- At release time the publish workflow opens and merges a housekeeping PR moving the tag's `Unshipped` entries into `Shipped` for both packable projects, so `Shipped` mirrors what nuget.org actually has. The step requires the repo setting "Allow GitHub Actions to create and approve pull requests".
+- RS0026/RS0027 (optional-parameter overload advice) are disabled in `.editorconfig`: the endpoint overloads use that shape on purpose.
+
 ## Namespaces
 
 - The top-level `ZmqSharp` namespace holds the base public API: socket factory and surfaces, the message model, and configuration. A single `using ZmqSharp;` covers basic usage.
