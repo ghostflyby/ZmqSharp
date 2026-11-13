@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Buffers.Binary;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -10,30 +9,33 @@ namespace ZmqSharp.Security;
 /// The context lives only for the duration of <see cref="IZMechanismSession.RunAsync"/>;
 /// the driver disposes it when the session returns, so a session must not
 /// retain the context or the command memories it hands out. Commands are read
-/// into a reusable scratch rented from the shared pool; the returned
-/// <see cref="ZMechanismCommand"/> memories are borrowed and stay valid only
-/// until the next read on this context.
+/// through a framing-specific <c>IZCommandChannel</c> (ZMTP command frames on
+/// the byte connection by default; ZWS binary messages over WebSocket, 0033)
+/// into a reusable scratch; the returned <see cref="ZMechanismCommand"/>
+/// memories are borrowed and stay valid only until the next read on this
+/// context.
 /// </summary>
 public sealed class ZMechanismContext : IDisposable
 {
-    private readonly IZByteReader _reader;
-    private readonly ZmtpFrameEncoder _encoder;
-    private readonly MemoryPool<byte> _pool;
-    private readonly byte[] _headerBuffer = new byte[9];
-    private IMemoryOwner<byte>? _scratchOwner;
-    private Memory<byte> _scratch;
+    private readonly IZCommandChannel _channel;
 
     internal ZMechanismContext(
         IZConnection connection,
         ReadOnlyMemory<byte> localReadyBody,
         long maxCommandSize,
         MemoryPool<byte>? pool = null)
+        : this(new ZmtpCommandChannel(connection, maxCommandSize, pool), localReadyBody, maxCommandSize)
     {
-        _reader = connection;
-        _encoder = new ZmtpFrameEncoder(connection);
+    }
+
+    internal ZMechanismContext(
+        IZCommandChannel channel,
+        ReadOnlyMemory<byte> localReadyBody,
+        long maxCommandSize)
+    {
+        _channel = channel;
         LocalReadyBody = localReadyBody;
         MaxCommandSize = maxCommandSize;
-        _pool = pool ?? MemoryPool<byte>.Shared;
     }
 
     /// <summary>
@@ -46,87 +48,32 @@ public sealed class ZMechanismContext : IDisposable
     /// <summary>Command-frame size limit shared with the traffic parser (0008 Slice B).</summary>
     public long MaxCommandSize { get; }
 
-    /// <summary>Writes one command frame (header + body) during the exclusive handshake phase.</summary>
+    /// <summary>Writes one command (framing is the channel's) during the exclusive handshake phase.</summary>
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
     {
-        return _encoder.WriteCommandAsync(body, token);
+        return _channel.WriteCommandAsync(body, token);
     }
 
     /// <summary>
-    /// Reads one command frame. The returned command's memories are borrowed
-    /// from this context's scratch and stay valid until the next read; a
+    /// Reads one command. The returned command's memories are borrowed
+    /// from the channel's scratch and stay valid until the next read; a
     /// session that must retain them copies them. Returns null on EOF.
     /// </summary>
     public async ValueTask<ZMechanismCommand?> ReadCommandAsync(CancellationToken token = default)
     {
-        if (!await TryReadExactlyAsync(_headerBuffer.AsMemory(0, 1), token)) return null;
+        var body = await _channel.ReadCommandBodyAsync(token);
+        if (body is null) return null;
 
-        var flags = (ZmtpFrameFlags)_headerBuffer[0];
-        if ((flags & (ZmtpFrameFlags)0b1111_1000) != 0)
-            throw new ZeroMqProtocolException("reserved ZMTP frame flag bits are set");
-
-        if (!flags.HasFlag(ZmtpFrameFlags.Command))
-            throw new ZeroMqProtocolException("expected a command frame during handshake");
-
-        if (flags.HasFlag(ZmtpFrameFlags.More))
-            throw new ZeroMqProtocolException("command frame cannot carry the MORE flag");
-
-        var isLong = flags.HasFlag(ZmtpFrameFlags.LongSize);
-        var sizeLength = isLong ? 8 : 1;
-        if (!await TryReadExactlyAsync(_headerBuffer.AsMemory(1, sizeLength), token)) return null;
-
-        var size = isLong
-            ? BinaryPrimitives.ReadInt64BigEndian(_headerBuffer.AsSpan(1, 8))
-            : _headerBuffer[1];
-        if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
-        if (size > MaxCommandSize)
-            throw new ZeroMqProtocolException($"command frame exceeds maximum size of {MaxCommandSize} bytes");
-        // The wire size and the configured bound are both long, so this guard
-        // is live for limits above 2 GB; it protects the narrowing cast below.
-        if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
-
-        var length = (int)size;
-        EnsureScratchCapacity(length);
-        if (!await TryReadExactlyAsync(_scratch[..length], token)) return null;
-
-        var body = _scratch[..length].Span;
-        if (!ZmtpCommandCodec.TryReadCommandName(body, out var name))
+        if (!ZmtpCommandCodec.TryReadCommandName(body.Value.Span, out var name))
             throw new ZeroMqProtocolException("malformed command name");
 
         return new ZMechanismCommand(
-            _scratch.Slice(1, name.Length),
-            _scratch[(1 + name.Length)..length]);
+            body.Value.Slice(1, name.Length),
+            body.Value.Slice(1 + name.Length));
     }
 
     public void Dispose()
     {
-        _scratchOwner?.Dispose();
-        _scratchOwner = null;
-        _scratch = Memory<byte>.Empty;
-    }
-
-    private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)
-    {
-        var filled = 0;
-        while (filled < target.Length)
-        {
-            var count = await _reader.ReadAsync(target[filled..], token);
-            if (count == 0) return false;
-
-            filled += count;
-        }
-
-        return true;
-    }
-
-    private void EnsureScratchCapacity(int required)
-    {
-        if (_scratch.Length >= required) return;
-
-        var newSize = Math.Max(required, Math.Max(4096, _scratch.Length * 2));
-        var newOwner = _pool.Rent(newSize);
-        _scratchOwner?.Dispose();
-        _scratchOwner = newOwner;
-        _scratch = newOwner.Memory;
+        _channel.Dispose();
     }
 }

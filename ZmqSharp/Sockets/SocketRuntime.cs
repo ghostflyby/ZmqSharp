@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using ZmqSharp.Patterns;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
@@ -75,7 +76,7 @@ internal sealed class SocketRuntime : IZSocket
     private readonly Dictionary<ZPeer, PeerRecord> _peers = [];
 
     private readonly List<ZEndpointRegistration> _listeners = [];
-    private readonly ConcurrentQueue<ZmtpParser> _paused = [];
+    private readonly ConcurrentQueue<IZWirePump> _paused = [];
 
     private readonly long _maxCommandSize;
     private readonly IZDispatchPolicy _dispatch;
@@ -256,13 +257,33 @@ internal sealed class SocketRuntime : IZSocket
     public async Task ConnectAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+        switch (parsed)
+        {
+            case WebSocketEndpoint webSocket:
+                await ConnectCoreAsync<WebSocketEndpoint, WebSocketTransport>(webSocket, endpoint, token);
+                break;
+            case EndPoint socketEndpoint:
+                await ConnectCoreAsync<EndPoint, SocketTransport>(socketEndpoint, endpoint, token);
+                break;
+            default:
+                throw new NotSupportedException($"unsupported endpoint scheme in '{endpoint}'");
+        }
     }
 
     public async Task BindAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await BindCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+        switch (parsed)
+        {
+            case WebSocketEndpoint webSocket:
+                await BindCoreAsync<WebSocketEndpoint, WebSocketTransport>(webSocket, endpoint, token);
+                break;
+            case EndPoint socketEndpoint:
+                await BindCoreAsync<EndPoint, SocketTransport>(socketEndpoint, endpoint, token);
+                break;
+            default:
+                throw new NotSupportedException($"unsupported endpoint scheme in '{endpoint}'");
+        }
     }
 
     private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
@@ -360,13 +381,13 @@ internal sealed class SocketRuntime : IZSocket
     public ValueTask UnbindAsync(string endpoint, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, true, token);
+        return StopEndpointAsync(null, ZEndpointParser.TransportTypeOf(endpoint), endpoint, true, token);
     }
 
     public ValueTask DisconnectAsync(string endpoint, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, false, token);
+        return StopEndpointAsync(null, ZEndpointParser.TransportTypeOf(endpoint), endpoint, false, token);
     }
 
     private ZEndpointRegistration[] RequestEndpointStop(object? endpoint, Type transport, string? address, bool listening)
@@ -553,7 +574,7 @@ internal sealed class SocketRuntime : IZSocket
     /// the whole mechanism command sequence, so a peer that stalls mid-handshake
     /// faults exactly as before (0016 section 8).
     /// </summary>
-    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(ZmtpHandshake handshake,
+    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(IZWireEstablisher establisher,
         PeerRecord record)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(record.Registration.Token);
@@ -564,7 +585,7 @@ internal sealed class SocketRuntime : IZSocket
         }, record.Connection);
         try
         {
-            return await handshake.EstablishAsync(timeout.Token);
+            return await establisher.EstablishAsync(timeout.Token);
         }
         catch (OperationCanceledException) when (!record.Registration.Token.IsCancellationRequested)
         {
@@ -630,7 +651,9 @@ internal sealed class SocketRuntime : IZSocket
             if (record.Session is not { } session) throw new IOException("peer has no established session");
             await session.SendAsync(message, token);
         }
-        catch (Exception ex) when (suppressRetirement && ex is ObjectDisposedException or IOException or SocketException) { }
+        catch (Exception ex) when (suppressRetirement &&
+                                   ex is ObjectDisposedException or IOException or SocketException
+                                       or WebSocketException) { }
         catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
         {
@@ -719,10 +742,19 @@ internal sealed class SocketRuntime : IZSocket
                 record.Phase = PeerPhase.Handshaking;
             }
 
-            using var handshake = new ZmtpHandshake(record.Connection, _mechanism, _localReadyBody, _maxCommandSize, Pool);
-            var result = await EstablishWithTimeoutAsync(handshake, record);
-            if (result is not { } established) throw new IOException("peer closed during ZMTP handshake");
-            record.Session = new ZmtpSession(record.Connection, established.Codec, fault => RetirePeer(record.Peer, fault));
+            // Byte connections run the default ZMTP establishment; protocol
+            // connections (ZWS over WebSocket) bring their own establisher and
+            // session, skipping the ZMTP greeting their transport negotiated
+            // away (0033).
+            var protocol = record.Connection as IZProtocolConnection;
+            using var establisher = protocol is null
+                ? new ZmtpHandshake(record.Connection, _mechanism, _localReadyBody, _maxCommandSize, Pool)
+                : protocol.CreateEstablisher(_mechanism, _localReadyBody, _maxCommandSize, Pool);
+            var result = await EstablishWithTimeoutAsync(establisher, record);
+            if (result is not { } established) throw new IOException("peer closed during handshake");
+            record.Session = protocol is null
+                ? new ZmtpSession(record.Connection, established.Codec, fault => RetirePeer(record.Peer, fault))
+                : protocol.CreateSession(established.Codec, fault => RetirePeer(record.Peer, fault));
             var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
             if (!_type.AcceptsPeer(peerType))
             {
@@ -732,7 +764,7 @@ internal sealed class SocketRuntime : IZSocket
 
             PeerEstablished?.Invoke(record.Peer, ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span));
             var aggregate = NeedsAggregation;
-            var parser = record.Session.CreateParser(
+            var parser = record.Session.CreatePump(
                 (self, frame, ct) => aggregate
                     ? OnMessageSinkFrameAsync(record, frame, ct)
                     : OnBorrowedFrameAsync(self, frame, ct),
@@ -835,7 +867,7 @@ internal sealed class SocketRuntime : IZSocket
     /// callback; a false return pauses this peer's pump until ResumePaused.
     /// </summary>
     private ValueTask<bool> OnBorrowedFrameAsync(
-        ZmtpParser parser, ZFrame frame, CancellationToken token)
+        IZWirePump parser, ZFrame frame, CancellationToken token)
     {
         var keepGoing = RaiseOnFrame(frame, token);
         if (!keepGoing) _paused.Enqueue(parser);

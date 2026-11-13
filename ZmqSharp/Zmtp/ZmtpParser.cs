@@ -16,7 +16,7 @@ internal delegate ZFrame ZFrameAllocator(int frameLength, bool more);
 /// connection close (partial data is discarded and never delivered); protocol
 /// violations throw ZeroMqProtocolException.
 /// </summary>
-public sealed class ZmtpParser : IDisposable
+public sealed class ZmtpParser : IDisposable, IZWirePump
 {
     private const int InitialScratchSize = 4096;
     private const int ScratchShrinkThreshold = 1 << 20;
@@ -226,7 +226,7 @@ public sealed class ZmtpParser : IDisposable
         }
     }
 
-    private static void CheckCommand(ReadOnlySpan<byte> body)
+    internal static void CheckCommand(ReadOnlySpan<byte> body)
     {
         if (!ZmtpCommandCodec.TryReadCommandName(body, out var name))
             throw new ZeroMqProtocolException("malformed command name");

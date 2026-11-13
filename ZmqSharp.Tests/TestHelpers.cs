@@ -15,32 +15,37 @@ namespace ZmqSharp.Tests;
 /// <summary>
 /// The endpoint transports the real-socket test suites run over (0015 section
 /// 5.4). Tcp and Ipc (Unix domain sockets) both run on every platform:
-/// ZmqSharp's ipc is real AF_UNIX on Windows 10 1803+ as well (0020). Public
-/// because theory methods take it as a parameter.
+/// ZmqSharp's ipc is real AF_UNIX on Windows 10 1803+ as well (0020). Ws is
+/// the ZWS WebSocket transport (0033). Public because theory methods take it
+/// as a parameter.
 /// </summary>
 public enum TransportKind
 {
     Tcp,
     Ipc,
+    Ws,
 }
 
 internal static class TestTransports
 {
     /// <summary>
-    /// Theory data for transport parameterization: both transports run on
+    /// Theory data for transport parameterization: all transports run on
     /// every platform (ipc is real AF_UNIX on Windows too, 0020).
     /// </summary>
     public static TheoryData<TransportKind> TransportKinds()
     {
-        return [TransportKind.Tcp, TransportKind.Ipc];
+        return [TransportKind.Tcp, TransportKind.Ipc, TransportKind.Ws];
     }
 
     /// <summary>Builds a fresh string endpoint for the transport kind.</summary>
     public static string GetEndpoint(TransportKind kind)
     {
-        return kind == TransportKind.Ipc
-            ? $"ipc://{IpcSocketPath("zmqsharp-test-")}"
-            : $"tcp://127.0.0.1:{GetFreePort()}";
+        return kind switch
+        {
+            TransportKind.Ipc => $"ipc://{IpcSocketPath("zmqsharp-test-")}",
+            TransportKind.Ws => $"ws://127.0.0.1:{GetFreePort()}/",
+            _ => $"tcp://127.0.0.1:{GetFreePort()}",
+        };
     }
 
     /// <summary>

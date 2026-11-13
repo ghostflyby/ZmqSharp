@@ -1,24 +1,46 @@
 using System.Net;
 using System.Net.Sockets;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
 /// <summary>
 /// Parses the string endpoints used by the socket's transport facade
-/// (0015 section 5.2, 0029).
+/// (0015 section 5.2, 0029) and routes each scheme to its transport type.
 /// </summary>
 internal static class ZEndpointParser
 {
-    internal static async Task<EndPoint> ParseEndpointAsync(string endpoint, CancellationToken token)
+    internal static async Task<object> ParseEndpointAsync(string endpoint, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
         var uri = new Uri(endpoint);
         if (uri.Scheme.Equals("tcp", StringComparison.OrdinalIgnoreCase))
             return await ParseTcpAsync(uri, token);
 
-        return uri.Scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)
-            ? ParseIpc(endpoint, uri)
+        if (uri.Scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)) return ParseIpc(endpoint, uri);
+
+        return uri.Scheme.Equals("ws", StringComparison.OrdinalIgnoreCase) ||
+               uri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase)
+            ? ParseWebSocket(uri)
             : throw new NotSupportedException($"unsupported endpoint scheme '{uri.Scheme}' in '{endpoint}'");
+    }
+
+    /// <summary>
+    /// The transport type a scheme routes to, used by the string teardown
+    /// overloads, which match registrations by transport type plus the saved
+    /// address string and never re-parse the endpoint.
+    /// </summary>
+    internal static Type TransportTypeOf(string endpoint)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        var scheme = new Uri(endpoint).Scheme;
+        if (scheme.Equals("tcp", StringComparison.OrdinalIgnoreCase) ||
+            scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)) return typeof(SocketTransport);
+
+        return scheme.Equals("ws", StringComparison.OrdinalIgnoreCase) ||
+               scheme.Equals("wss", StringComparison.OrdinalIgnoreCase)
+            ? typeof(WebSocketTransport)
+            : throw new NotSupportedException($"unsupported endpoint scheme '{scheme}' in '{endpoint}'");
     }
 
     private static async Task<IPEndPoint> ParseTcpAsync(Uri uri, CancellationToken token)
@@ -30,6 +52,21 @@ internal static class ZEndpointParser
         return addresses.Length == 0
             ? throw new InvalidOperationException($"could not resolve endpoint host '{uri.Host}'")
             : new IPEndPoint(addresses[0], port);
+    }
+
+    /// <summary>
+    /// "ws://host:port/path" / "wss://host:port/path" (ZWS, 0033): the path is
+    /// preserved verbatim (including the query) because the WebSocket request
+    /// line carries it, and port sharing setups route on it. The URI parser
+    /// fills in the scheme default ports (80/443).
+    /// </summary>
+    private static WebSocketEndpoint ParseWebSocket(Uri uri)
+    {
+        // Uri.Host may or may not keep IPv6 brackets depending on the runtime;
+        // normalize to the bracketed display form.
+        var host = uri.Host.Contains(':') && !uri.Host.StartsWith('[') ? $"[{uri.Host}]" : uri.Host;
+        var path = uri.PathAndQuery.Length == 0 ? "/" : uri.PathAndQuery;
+        return new WebSocketEndpoint(host, uri.Port, path, uri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

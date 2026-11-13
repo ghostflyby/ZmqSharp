@@ -1,1 +1,19 @@
 #nullable enable
+ZmqSharp.Transports.WebSocketEndpoint
+ZmqSharp.Transports.WebSocketEndpoint.WebSocketEndpoint(string! host, int port, string! path, bool secure) -> void
+ZmqSharp.Transports.WebSocketEndpoint.Host.get -> string!
+ZmqSharp.Transports.WebSocketEndpoint.Port.get -> int
+ZmqSharp.Transports.WebSocketEndpoint.Path.get -> string!
+ZmqSharp.Transports.WebSocketEndpoint.Secure.get -> bool
+override ZmqSharp.Transports.WebSocketEndpoint.ToString() -> string!
+ZmqSharp.Transports.WebSocketEndpoint.Equals(ZmqSharp.Transports.WebSocketEndpoint? other) -> bool
+override ZmqSharp.Transports.WebSocketEndpoint.Equals(object? obj) -> bool
+override ZmqSharp.Transports.WebSocketEndpoint.GetHashCode() -> int
+static ZmqSharp.Transports.WebSocketEndpoint.operator ==(ZmqSharp.Transports.WebSocketEndpoint? left, ZmqSharp.Transports.WebSocketEndpoint? right) -> bool
+static ZmqSharp.Transports.WebSocketEndpoint.operator !=(ZmqSharp.Transports.WebSocketEndpoint? left, ZmqSharp.Transports.WebSocketEndpoint? right) -> bool
+ZmqSharp.Transports.WebSocketTransport
+ZmqSharp.Transports.WebSocketTransport.OnAccept -> System.Func<ZmqSharp.Transports.IZConnection!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
+static ZmqSharp.Transports.WebSocketTransport.ConnectAsync(ZmqSharp.Transports.WebSocketEndpoint! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.IZConnection!>
+static ZmqSharp.Transports.WebSocketTransport.BindAsync(ZmqSharp.Transports.WebSocketEndpoint! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.WebSocketTransport!>
+ZmqSharp.Transports.WebSocketTransport.StartAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Transports.WebSocketTransport.Dispose() -> void
