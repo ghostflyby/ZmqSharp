@@ -14,5 +14,5 @@ namespace ZmqSharp;
 public enum ZReceiveSurface
 {
     Queue,
-    Callback
+    Callback,
 }

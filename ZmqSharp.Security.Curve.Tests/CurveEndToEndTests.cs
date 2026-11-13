@@ -31,15 +31,15 @@ public sealed class CurveEndToEndTests
 
         await using var server = new ZPairSocket(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverKeys.Secret.Span) }
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverKeys.Secret.Span) },
         });
 
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions
             {
-                Mechanism = new CurveMechanism(clientKeys.Secret.Span, serverKeys.Public.Span)
-            }
+                Mechanism = new CurveMechanism(clientKeys.Secret.Span, serverKeys.Public.Span),
+            },
         });
         var path = Path.Combine(Path.GetTempPath(), $"zmq-curve-{Guid.NewGuid().ToString("N")[..12]}.sock");
         var address = ipc ? $"ipc://{path}" : $"tcp://127.0.0.1:{GetFreePort()}";
@@ -78,7 +78,7 @@ public sealed class CurveEndToEndTests
         await using var server = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new CurveMechanism(serverSecret.Span) },
-            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true }
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
         });
 
         await using var client = new ZPairSocket(new ZSocketOptions
@@ -87,8 +87,8 @@ public sealed class CurveEndToEndTests
             {
                 // The client holds a different server public key: the HELLO
                 // box never opens on the server, and establishment must fault.
-                Mechanism = new CurveMechanism(clientSecret.Span, wrongPublic.Span)
-            }
+                Mechanism = new CurveMechanism(clientSecret.Span, wrongPublic.Span),
+            },
         });
 
         var port = GetFreePort();

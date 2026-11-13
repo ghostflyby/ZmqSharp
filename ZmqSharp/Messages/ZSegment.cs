@@ -103,7 +103,7 @@ public readonly struct ZSegment : IReadOnlyList<ZSegment>, IDisposable
         {
             byte[] array => array,
             IMemoryOwner<byte> pooled => pooled.Memory,
-            _ => Memory<byte>.Empty
+            _ => Memory<byte>.Empty,
         };
     }
 

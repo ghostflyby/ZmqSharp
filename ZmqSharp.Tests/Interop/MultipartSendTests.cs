@@ -34,7 +34,7 @@ public sealed class MultipartSendTests
             [.. "hmac"u8],
             [.. "header"u8],
             [.. "parent"u8],
-            [.. "content"u8]
+            [.. "content"u8],
         ];
         await dealer.SendAsync(frames, token);
 
@@ -97,7 +97,7 @@ public sealed class MultipartSendTests
         ReadOnlyMemory<byte>[] request =
         [
             (byte[])[.. "part-1"u8],
-            (byte[])[.. "part-2"u8]
+            (byte[])[.. "part-2"u8],
         ];
         var reply = await req.RequestAsync(request, token);
 
@@ -117,7 +117,7 @@ public sealed class MultipartSendTests
         var routedMessage = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var router = new ZRouterSocket(new ZSocketOptions
         {
-            MessageSink = new TestSink(message => routedMessage.TrySetResult(message))
+            MessageSink = new TestSink(message => routedMessage.TrySetResult(message)),
         });
         var token = TestContext.Current.CancellationToken;
         await router.ConnectAsync($"tcp://127.0.0.1:{port}", token);

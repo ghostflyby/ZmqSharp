@@ -101,7 +101,7 @@ public sealed class ZmtpFrameEncoderTests
             ([.. "AAA"u8], true),
             ([.. "BBBB"u8], true),
             ([.. "C"u8], true),
-            ([.. "DDDDDDD"u8], false)
+            ([.. "DDDDDDD"u8], false),
         };
 
         // Each write concatenates to the exact wire frame (header + payload).

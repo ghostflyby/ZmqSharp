@@ -10,7 +10,7 @@ internal enum PeerPhase
     Handshaking,
     Established,
     Stopping,
-    Closed
+    Closed,
 }
 
 /// <summary>The single lifecycle record and resource owner for a peer.</summary>

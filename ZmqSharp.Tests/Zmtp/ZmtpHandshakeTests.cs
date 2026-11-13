@@ -198,7 +198,7 @@ public sealed class ZmtpHandshakeTests
     public async Task ErrorCommand_ReasonLengthMismatch_Throws()
     {
         await AssertHandshakeCommandRejectedAsync([
-            5, (byte)'E', (byte)'R', (byte)'R', (byte)'O', (byte)'R', 3, (byte)'x'
+            5, (byte)'E', (byte)'R', (byte)'R', (byte)'O', (byte)'R', 3, (byte)'x',
         ]);
     }
 

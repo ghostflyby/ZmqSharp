@@ -9,7 +9,7 @@ public enum ZReceiveMode
     Pooled,
 
     /// <summary>Allocate an uninitialized array; never touches a pool.</summary>
-    Owned
+    Owned,
 }
 
 /// <summary>The complete allocation decision for a message's frames.</summary>
@@ -88,7 +88,7 @@ public sealed class ZReceiveOptions : IZReceivePolicy
         return new ZReceiveAllocation
         {
             Mode = Mode,
-            Segmented = context.FrameLength > ContiguousFrameLimit
+            Segmented = context.FrameLength > ContiguousFrameLimit,
         };
     }
 }

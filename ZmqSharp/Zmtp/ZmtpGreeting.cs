@@ -48,7 +48,7 @@ internal static class ZmtpGreeting
             {
                 0 => "ZMTP 1.0 peers are not supported; only ZMTP 3.0 is implemented",
                 1 => "ZMTP 2.0 peers are not supported; only ZMTP 3.0 is implemented",
-                _ => "unsupported ZMTP version"
+                _ => "unsupported ZMTP version",
             });
 
         var field = greeting.Slice(12, 20);

@@ -378,7 +378,7 @@ internal sealed class SocketRuntime : IZSocket
             matches =
             [
                 .. source.Where(entry => entry.Transport == transport &&
-                                         (address is null ? Equals(entry.Endpoint, endpoint) : entry.Address == address))
+                                         (address is null ? Equals(entry.Endpoint, endpoint) : entry.Address == address)),
             ];
             if (!listening)
                 foreach (var record in _peers.Values)

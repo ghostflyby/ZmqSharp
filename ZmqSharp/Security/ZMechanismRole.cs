@@ -5,5 +5,5 @@ public enum ZMechanismRole
 {
     None,
     Client,
-    Server
+    Server,
 }

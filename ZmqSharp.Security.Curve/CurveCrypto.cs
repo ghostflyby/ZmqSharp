@@ -238,7 +238,7 @@ internal static class CurveCrypto
             0x79622d32,
             ReadLe32(key, 16), ReadLe32(key, 20),
             ReadLe32(key, 24), ReadLe32(key, 28),
-            0x6b206574
+            0x6b206574,
         ];
 
         for (var i = 0; i < 10; i++)

@@ -20,7 +20,7 @@ public sealed class RuntimeLifecycleTests
         var codec = new IdentityCodec();
         var runtime = new SocketRuntime(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = new TestMechanism(codec) }
+            Security = new ZSecurityOptions { Mechanism = new TestMechanism(codec) },
         }, new ZSinglePeerDispatch(), ZSocketTypes.Pair);
         var observed = false;
         // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
@@ -146,7 +146,7 @@ public sealed class RuntimeLifecycleTests
         {
             Pool = pool,
             HandshakeTimeoutMs = 0,
-            Security = new ZSecurityOptions { Mechanism = mechanism }
+            Security = new ZSecurityOptions { Mechanism = mechanism },
         }, new ZSinglePeerDispatch(), ZSocketTypes.Pair);
         var connecting = runtime.ConnectAsync<ByteEndpoint, ByteTransport>(endpoint, token);
         try

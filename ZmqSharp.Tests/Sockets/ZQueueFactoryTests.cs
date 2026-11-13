@@ -61,7 +61,7 @@ public sealed class ZQueueFactoryTests
         var options = new BoundedChannelOptions(1)
         {
             FullMode = BoundedChannelFullMode.DropWrite,
-            SingleWriter = false
+            SingleWriter = false,
         };
         var factory = new ZBoundedQueueFactory(options);
 
@@ -82,7 +82,7 @@ public sealed class ZQueueFactoryTests
     {
         var factory = new ZBoundedQueueFactory(new BoundedChannelOptions(1)
         {
-            FullMode = BoundedChannelFullMode.DropWrite
+            FullMode = BoundedChannelFullMode.DropWrite,
         });
         var dropped = new List<ZMessage>();
         var channel = factory.Create(dropped.Add);

@@ -16,7 +16,7 @@ public static class ZSocketTypes
     public static ZSocketType Pair { get; } = new()
     {
         Name = "PAIR",
-        AcceptsPeer = peerType => peerType == "PAIR"
+        AcceptsPeer = peerType => peerType == "PAIR",
     };
 
     /// <summary>DEALER: accepts DEALER, REP, or ROUTER peers; advertises an identity (0025).</summary>
@@ -24,7 +24,7 @@ public static class ZSocketTypes
     {
         Name = "DEALER",
         AcceptsPeer = peerType => peerType is "DEALER" or "REP" or "ROUTER",
-        AdvertisesIdentity = true
+        AdvertisesIdentity = true,
     };
 
     /// <summary>REQ: accepts a peer advertising REP; advertises an identity (0025).</summary>
@@ -32,28 +32,28 @@ public static class ZSocketTypes
     {
         Name = "REQ",
         AcceptsPeer = peerType => peerType == "REP",
-        AdvertisesIdentity = true
+        AdvertisesIdentity = true,
     };
 
     /// <summary>REP: accepts REQ or DEALER peers.</summary>
     public static ZSocketType Rep { get; } = new()
     {
         Name = "REP",
-        AcceptsPeer = peerType => peerType is "REQ" or "DEALER"
+        AcceptsPeer = peerType => peerType is "REQ" or "DEALER",
     };
 
     /// <summary>PUSH: accepts a peer advertising PULL.</summary>
     public static ZSocketType Push { get; } = new()
     {
         Name = "PUSH",
-        AcceptsPeer = peerType => peerType == "PULL"
+        AcceptsPeer = peerType => peerType == "PULL",
     };
 
     /// <summary>PULL: accepts a peer advertising PUSH.</summary>
     public static ZSocketType Pull { get; } = new()
     {
         Name = "PULL",
-        AcceptsPeer = peerType => peerType == "PUSH"
+        AcceptsPeer = peerType => peerType == "PUSH",
     };
 
     /// <summary>ROUTER: accepts DEALER, REQ, or ROUTER peers; advertises an identity (0025).</summary>
@@ -61,14 +61,14 @@ public static class ZSocketTypes
     {
         Name = "ROUTER",
         AcceptsPeer = peerType => peerType is "DEALER" or "REQ" or "ROUTER",
-        AdvertisesIdentity = true
+        AdvertisesIdentity = true,
     };
 
     /// <summary>PUB: accepts SUB or XSUB peers (libzmq's PUB matrix).</summary>
     public static ZSocketType Pub { get; } = new()
     {
         Name = "PUB",
-        AcceptsPeer = peerType => peerType is "SUB" or "XSUB"
+        AcceptsPeer = peerType => peerType is "SUB" or "XSUB",
     };
 
     /// <summary>
@@ -78,20 +78,20 @@ public static class ZSocketTypes
     public static ZSocketType Sub { get; } = new()
     {
         Name = "SUB",
-        AcceptsPeer = peerType => peerType is "PUB" or "XPUB"
+        AcceptsPeer = peerType => peerType is "PUB" or "XPUB",
     };
 
     /// <summary>XPUB: accepts SUB, XSUB, or XPUB peers (the XPUB/XSUB interchange).</summary>
     public static ZSocketType XPub { get; } = new()
     {
         Name = "XPUB",
-        AcceptsPeer = peerType => peerType is "SUB" or "XSUB" or "XPUB"
+        AcceptsPeer = peerType => peerType is "SUB" or "XSUB" or "XPUB",
     };
 
     /// <summary>XSUB: accepts PUB, XPUB, or XSUB peers.</summary>
     public static ZSocketType XSub { get; } = new()
     {
         Name = "XSUB",
-        AcceptsPeer = peerType => peerType is "PUB" or "XPUB" or "XSUB"
+        AcceptsPeer = peerType => peerType is "PUB" or "XPUB" or "XSUB",
     };
 }

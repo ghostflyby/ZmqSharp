@@ -41,7 +41,7 @@ internal static class ZReceiveGuard
             {
                 Reason = ZReceiveRejectionReason.FrameTooLarge,
                 Limit = maxFrameLength,
-                Actual = frameLength
+                Actual = frameLength,
             };
 
         if (accumulatedLength > maxMessageLength)
@@ -49,7 +49,7 @@ internal static class ZReceiveGuard
             {
                 Reason = ZReceiveRejectionReason.MessageTooLarge,
                 Limit = maxMessageLength,
-                Actual = accumulatedLength
+                Actual = accumulatedLength,
             };
 
         if (frameIndex >= maxFramesPerMessage)
@@ -58,7 +58,7 @@ internal static class ZReceiveGuard
             {
                 Reason = ZReceiveRejectionReason.TooManyFrames,
                 Limit = maxFramesPerMessage,
-                Actual = frameIndex + 1L
+                Actual = frameIndex + 1L,
             };
 
         return null;

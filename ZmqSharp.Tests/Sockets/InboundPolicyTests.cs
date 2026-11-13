@@ -147,14 +147,14 @@ public sealed class InboundPolicyTests
         {
             var frames = new List<ZFrame>(message.Count + 1)
             {
-                new(new ZSegment((byte[])[.. "!"u8], 0, 1))
+                new(new ZSegment((byte[])[.. "!"u8], 0, 1)),
             };
             frames.AddRange(message);
 
             return ValueTask.FromResult(new ZInboundDecision
             {
                 Action = ZInboundAction.Deliver,
-                Message = new ZMessage(new ZMultiMessage([.. frames]))
+                Message = new ZMessage(new ZMultiMessage([.. frames])),
             });
         }
     }
