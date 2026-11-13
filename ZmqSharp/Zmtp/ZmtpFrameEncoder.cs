@@ -29,7 +29,7 @@ public sealed class ZmtpFrameEncoder
             await WriteFrameAsync(new ZmtpFrameData
             {
                 Flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None,
-                Body = _logical.FromFrame(message[i])
+                Body = _logical.FromFrame(message[i]),
             }, token);
     }
 

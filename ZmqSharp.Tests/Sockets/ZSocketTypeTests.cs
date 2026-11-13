@@ -15,7 +15,7 @@ public sealed class ZSocketTypeTests
 {
     private static readonly string[] AllBuiltInNames =
     [
-        "PAIR", "DEALER", "REQ", "REP", "PUSH", "PULL", "ROUTER", "PUB", "SUB", "XPUB", "XSUB"
+        "PAIR", "DEALER", "REQ", "REP", "PUSH", "PULL", "ROUTER", "PUB", "SUB", "XPUB", "XSUB",
     ];
 
     [Theory]
@@ -64,7 +64,7 @@ public sealed class ZSocketTypeTests
         var type = new ZSocketType
         {
             Name = "FOO",
-            AcceptsPeer = peerType => peerType == "FOO"
+            AcceptsPeer = peerType => peerType == "FOO",
         };
 
         Assert.True(type.AcceptsPeer("FOO"));
@@ -111,7 +111,7 @@ public sealed class ZSocketTypeTests
         "SUB" => ZSocketTypes.Sub,
         "XPUB" => ZSocketTypes.XPub,
         "XSUB" => ZSocketTypes.XSub,
-        _ => throw new ArgumentOutOfRangeException(nameof(name), name)
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name),
     };
 
     /// <summary>The libzmq per-end acceptance matrix (the ex-IsCompatibleSocketType switch).</summary>
@@ -130,7 +130,7 @@ public sealed class ZSocketTypeTests
             "SUB" => peer is "PUB" or "XPUB",
             "XPUB" => peer is "SUB" or "XSUB" or "XPUB",
             "XSUB" => peer is "PUB" or "XPUB" or "XSUB",
-            _ => false
+            _ => false,
         };
     }
 }

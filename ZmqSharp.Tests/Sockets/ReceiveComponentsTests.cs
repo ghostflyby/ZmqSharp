@@ -50,7 +50,7 @@ public sealed class ReceiveComponentsTests
         var record = new PeerRecord(connection, registration, false)
         {
             Phase = PeerPhase.Established,
-            Queue = Channel.CreateUnbounded<ZMessage>()
+            Queue = Channel.CreateUnbounded<ZMessage>(),
         };
         var queue = record.Queue;
         Assert.True(queue.Writer.TryWrite(ZMessage.FromPooled(pool.Rent(8))));

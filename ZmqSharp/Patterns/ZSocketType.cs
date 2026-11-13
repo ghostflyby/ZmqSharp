@@ -63,7 +63,7 @@ public sealed class ZSocketType
         return new ZSocketType
         {
             Name = name,
-            AcceptsPeer = peerType => peerType == name
+            AcceptsPeer = peerType => peerType == name,
         };
     }
 }

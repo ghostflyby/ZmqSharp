@@ -118,7 +118,7 @@ public sealed class ZmtpParser : IDisposable
                 var decoded = transform.Decode(new ZmtpFrameData
                 {
                     Flags = header.Flags & ~ZmtpFrameFlags.LongSize,
-                    Body = new ReadOnlySequence<byte>(_scratch[..encodedLength])
+                    Body = new ReadOnlySequence<byte>(_scratch[..encodedLength]),
                 });
                 ZmtpFrameEncoder.ValidateFlags(decoded.Flags);
                 if ((decoded.Flags & ZmtpFrameFlags.Command) != 0)

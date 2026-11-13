@@ -21,7 +21,7 @@ namespace ZmqSharp.Tests;
 public enum TransportKind
 {
     Tcp,
-    Ipc
+    Ipc,
 }
 
 internal static class TestTransports

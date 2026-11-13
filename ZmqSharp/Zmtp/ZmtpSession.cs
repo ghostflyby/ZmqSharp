@@ -32,7 +32,7 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
                     await _encoder.WriteFrameAsync(codec.Encode(new ZmtpFrameData
                     {
                         Flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None,
-                        Body = _sequence.FromFrame(message[i])
+                        Body = _sequence.FromFrame(message[i]),
                     }), token);
         }
         catch (Exception failure)

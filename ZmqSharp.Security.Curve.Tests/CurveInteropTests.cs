@@ -28,7 +28,7 @@ public sealed class CurveInteropTests
             : new CurveMechanism(client.SecretKey, server.PublicKey);
         await using var local = new ZPairSocket(new ZSocketOptions
         {
-            Security = new ZSecurityOptions { Mechanism = mechanism }
+            Security = new ZSecurityOptions { Mechanism = mechanism },
         });
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();

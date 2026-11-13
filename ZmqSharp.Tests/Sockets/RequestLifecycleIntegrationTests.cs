@@ -50,7 +50,7 @@ public sealed class RequestLifecycleIntegrationTests
         var address = TestTransports.GetEndpoint(kind);
         await using var responder = new RawRepSocket(new ZSocketOptions
         {
-            MessageSink = new RequestCaptureSink(received)
+            MessageSink = new RequestCaptureSink(received),
         });
         await using var requester = new ZReqSocket(new ZSocketOptions { Pool = pool });
         requester.PeerEnded += (_, failure) => ended.TrySetResult(failure);

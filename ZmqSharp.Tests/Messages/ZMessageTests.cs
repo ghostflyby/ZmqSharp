@@ -105,7 +105,7 @@ public sealed class ZMessageTests
         ZFrame[] frames =
         [
             new(new ZSegment(firstOwner, 0, 4)),
-            new(new ZSegment(secondOwner, 0, 4))
+            new(new ZSegment(secondOwner, 0, 4)),
         ];
         var multi = new ZMultiMessage(frames);
 

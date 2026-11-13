@@ -42,7 +42,7 @@ internal sealed class FrameSequence
     {
         0 => ReadOnlySequence<byte>.Empty,
         1 => new ReadOnlySequence<byte>(_nodes[0].Memory),
-        _ => new ReadOnlySequence<byte>(_nodes[0], 0, _nodes[_count - 1], _nodes[_count - 1].Memory.Length)
+        _ => new ReadOnlySequence<byte>(_nodes[0], 0, _nodes[_count - 1], _nodes[_count - 1].Memory.Length),
     };
 
     public ReadOnlySequence<byte> FromFrame(ZFrame frame)

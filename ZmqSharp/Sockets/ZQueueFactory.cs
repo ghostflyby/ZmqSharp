@@ -81,7 +81,7 @@ internal sealed class ZBoundedQueueFactory : ZQueueFactory, IZQueueFactory
             SingleReader = true,
             SingleWriter = source.SingleWriter,
             FullMode = source.FullMode,
-            AllowSynchronousContinuations = source.AllowSynchronousContinuations
+            AllowSynchronousContinuations = source.AllowSynchronousContinuations,
         };
     }
 }
@@ -116,7 +116,7 @@ internal sealed class ZUnboundedQueueFactory : ZQueueFactory, IZQueueFactory
         {
             SingleReader = true,
             SingleWriter = source.SingleWriter,
-            AllowSynchronousContinuations = source.AllowSynchronousContinuations
+            AllowSynchronousContinuations = source.AllowSynchronousContinuations,
         };
     }
 }

@@ -139,7 +139,7 @@ public sealed class EndpointLifecycleTests
         await using var receiver = new ZPairSocket(new ZSocketOptions
         {
             Pool = pool,
-            ReceiveQueueFactory = new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.Wait }
+            ReceiveQueueFactory = new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.Wait },
         });
         await server.BindAsync(address, token);
         await receiver.ConnectAsync(address, token);

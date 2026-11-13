@@ -107,7 +107,7 @@ public sealed class ZRouterSocket : ZQueueSocketBase
             var identity = dispatch.AssignIdentity(peer);
             var frames = new List<ZFrame>(message.Count + 1)
             {
-                new(new ZSegment(identity, 0, identity.Length))
+                new(new ZSegment(identity, 0, identity.Length)),
             };
             frames.AddRange(message);
 

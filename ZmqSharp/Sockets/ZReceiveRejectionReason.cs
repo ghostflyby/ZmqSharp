@@ -10,5 +10,5 @@ public enum ZReceiveRejectionReason
     MessageTooLarge,
 
     /// <summary>The message has more frames than the configured per-message limit.</summary>
-    TooManyFrames
+    TooManyFrames,
 }

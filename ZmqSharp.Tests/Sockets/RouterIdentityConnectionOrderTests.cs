@@ -87,7 +87,7 @@ public sealed class RouterIdentityConnectionOrderTests
         var routedMessage = new TaskCompletionSource<ZMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var router = new ZRouterSocket(new ZSocketOptions
         {
-            MessageSink = new TestSink(message => routedMessage.TrySetResult(message))
+            MessageSink = new TestSink(message => routedMessage.TrySetResult(message)),
         });
         var token = TestContext.Current.CancellationToken;
         await router.ConnectAsync($"tcp://127.0.0.1:{port}", token);

@@ -25,7 +25,7 @@ public sealed class CustomSocketTypeTests
         // on it are rejected at construction (0023).
         var exception = Assert.Throws<InvalidOperationException>(() => new CustomTypeSocket(CustomName, new ZSocketOptions
         {
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         }));
         Assert.Contains("never composes a queue", exception.Message);
     }

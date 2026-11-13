@@ -45,7 +45,7 @@ internal sealed class ReceiveMaterializer(
                 FrameLength = length,
                 HasMore = more,
                 FrameIndex = index,
-                AccumulatedLength = accumulated
+                AccumulatedLength = accumulated,
             });
             return AllocateSegments(allocation, length, more);
         };

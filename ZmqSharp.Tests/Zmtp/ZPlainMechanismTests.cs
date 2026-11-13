@@ -156,14 +156,14 @@ public sealed class ZPlainMechanismTests
             Security = new ZSecurityOptions
             {
                 Mechanism = new ZPlainMechanism((user, pass) =>
-                    user == "alice" && pass.SequenceEqual("secret"u8))
+                    user == "alice" && pass.SequenceEqual("secret"u8)),
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "secret"u8) },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
 
         var endpoint = TestTransports.GetEndpoint(kind);
@@ -187,14 +187,14 @@ public sealed class ZPlainMechanismTests
             Security = new ZSecurityOptions
             {
                 Mechanism = new ZPlainMechanism((user, pass) =>
-                    user == "alice" && pass.SequenceEqual("secret"u8))
+                    user == "alice" && pass.SequenceEqual("secret"u8)),
             },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
         await using var client = new ZPairSocket(new ZSocketOptions
         {
             Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("alice", "wrong"u8) },
-            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true }
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
         });
 
         var endpoint = TestTransports.GetEndpoint(kind);

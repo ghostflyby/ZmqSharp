@@ -18,7 +18,7 @@ public enum ZInboundAction
     Drop,
 
     /// <summary>The policy took the message (protocol consumption); nothing is delivered.</summary>
-    Consumed
+    Consumed,
 }
 
 /// <summary>An inbound decision: the action plus, for Deliver, an optional replacement message.</summary>
