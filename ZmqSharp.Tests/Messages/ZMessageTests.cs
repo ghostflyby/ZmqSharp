@@ -370,6 +370,31 @@ public sealed class ZMessageTests
         converted.Dispose();
     }
 
+    [Fact]
+    public void DefaultInstance_IsTheEmptySingleCase()
+    {
+        var message = default(ZMessage);
+        Assert.True(message.TryGetValue(out ZSingleMessage single));
+        Assert.Single(single);
+        Assert.False(message.TryGetValue(out ZMultiMessage _));
+        Assert.Single(message);
+
+        var frame = default(ZFrame);
+        Assert.True(frame.TryGetValue(out ZSegment segment));
+        Assert.True(segment.Memory.IsEmpty);
+        Assert.False(frame.TryGetValue(out ZSegments _));
+        Assert.Single(frame);
+
+        var multi = default(ZMultiMessage);
+        Assert.Empty(multi);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = multi[0]);
+        multi.Dispose();
+
+        var segments = default(ZSegments);
+        Assert.Empty(segments);
+        segments.Dispose();
+    }
+
 #if NET11_0_OR_GREATER
     [Fact]
     public void Union_PatternMatching_DiscriminatesTheActiveCase()
@@ -427,30 +452,14 @@ public sealed class ZMessageTests
     }
 
     [Fact]
-    public void Union_DefaultInstance_IsTheEmptySingleCase()
+    public void Union_DefaultInstance_MatchesTheSingleCase()
     {
         var message = default(ZMessage);
-        Assert.True(message.TryGetValue(out ZSingleMessage single));
-        Assert.Single(single);
-        Assert.False(message.TryGetValue(out ZMultiMessage _));
         Assert.True(message is ZSingleMessage);
         Assert.False(message is null);
 
         var frame = default(ZFrame);
-        Assert.True(frame.TryGetValue(out ZSegment segment));
-        Assert.True(segment.Memory.IsEmpty);
-        Assert.False(frame.TryGetValue(out ZSegments _));
-        Assert.Single(frame);
         Assert.False(frame is null);
-
-        var multi = default(ZMultiMessage);
-        Assert.Empty(multi);
-        Assert.Throws<ArgumentOutOfRangeException>(() => _ = multi[0]);
-        multi.Dispose();
-
-        var segments = default(ZSegments);
-        Assert.Empty(segments);
-        segments.Dispose();
     }
 #endif
 }

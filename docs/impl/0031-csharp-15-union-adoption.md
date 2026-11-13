@@ -86,7 +86,9 @@ This keeps the whole surface total (no member throws
 `NullReferenceException` on a default value) and makes exhaustive switches
 sound at runtime: `default` lands in the empty-case arm instead of falling
 through. A missing message is expressed as `ZMessage?` rather than a
-value-less `ZMessage`.
+value-less `ZMessage`. A case value that is itself `default` (`new
+ZMultiMessage()`, `new ZFrame(new ZSegments())`) collapses to no case in the
+nullable case storage, so it reads as the empty single/contiguous case.
 
 ## 5. Internal usage
 

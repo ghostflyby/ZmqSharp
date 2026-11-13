@@ -145,17 +145,16 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
             _index = -1;
         }
 
+        private int Count => _multiMessage is { } multi ? multi.Count : 1;
+
         public ZFrame Current
         {
             get
             {
-                var count = _singleMessage is not null ? 1 : _multiMessage.GetValueOrDefault().Count;
-                if (_index < 0 || _index >= count)
+                if (_index < 0 || _index >= Count)
                     throw new InvalidOperationException("enumeration has not started or has already finished");
 
-                return _singleMessage is not null
-                    ? _singleMessage.GetValueOrDefault()[_index]
-                    : _multiMessage.GetValueOrDefault()[_index];
+                return _multiMessage is { } multi ? multi[_index] : _singleMessage.GetValueOrDefault()[_index];
             }
         }
 
@@ -163,14 +162,13 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 
         public bool MoveNext()
         {
-            var count = _singleMessage is not null ? 1 : _multiMessage.GetValueOrDefault().Count;
-            if (_index + 1 < count)
+            if (_index + 1 < Count)
             {
                 _index++;
                 return true;
             }
 
-            _index = count;
+            _index = Count;
             return false;
         }
 
