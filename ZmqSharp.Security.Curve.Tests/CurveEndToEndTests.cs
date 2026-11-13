@@ -9,9 +9,10 @@ namespace ZmqSharp.Security.Curve.Tests;
 /// <summary>
 /// End-to-end CURVE tests: two ZmqSharp sockets configured with the in-box
 /// <see cref="CurveMechanism"/> authenticate and then exchange encrypted
-/// messages over TCP. The in-box BouncyCastle primitives are used; per
-/// RFC 25 the primitives are fixed on the wire, so a different crypto
-/// library would ship as a byte-equivalent port, not a swappable backend.
+/// messages over TCP. X25519 comes from <see cref="CurveX25519"/> - the
+/// in-box crypto on net11.0, BouncyCastle on net10.0 (0032); per RFC 25 the
+/// primitives are fixed on the wire, so a different crypto library would
+/// ship as a byte-equivalent port, not a swappable backend.
 /// </summary>
 public sealed class CurveEndToEndTests
 {

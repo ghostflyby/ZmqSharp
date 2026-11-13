@@ -1,5 +1,5 @@
 using System.Security.Cryptography;
-#if NET10_0_OR_GREATER && !NET11_0_OR_GREATER
+#if !NET11_0_OR_GREATER
 using Org.BouncyCastle.Math.EC.Rfc7748;
 #endif
 

@@ -23,8 +23,9 @@ Prefer the in-box algorithm where it exists:
   Z85-decoded 32-byte values and stay that way.
 - net10.0: the BouncyCastle `Rfc7748.X25519` calls are unchanged, selected by
   `#if` in the same seam class.
-- The csproj declares `BouncyCastle.Cryptography` only for `net10.0`
-  (`Condition="'$(TargetFramework)' == 'net10.0'"`), which NuGet flows into
+- The csproj declares `BouncyCastle.Cryptography` for every target except
+  net11.0 (`Condition="'$(TargetFramework)' != 'net11.0'"`), mirroring the
+  `#if !NET11_0_OR_GREATER` branch of `CurveX25519`, which NuGet flows into
   the per-framework dependency groups of the nupkg: net11.0 consumers pull no
   crypto package at all.
 
