@@ -40,7 +40,7 @@
   <ItemGroup>
     <!-- SourceLink: embeds GitHub URLs into the PDB so debuggers fetch the
          exact source of the published commit. -->
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.403" PrivateAssets="all"/>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="11.0.100" PrivateAssets="all"/>
     <!-- Public API surface guard: every public/protected member must be declared
          in PublicAPI.Shipped.txt or PublicAPI.Unshipped.txt. RS0016 (missing
          declaration) and RS0017 (stale declaration) are errors via
