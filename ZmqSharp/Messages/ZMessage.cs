@@ -1,5 +1,8 @@
 using System.Buffers;
 using System.Collections;
+#if NET11_0_OR_GREATER
+using System.Runtime.CompilerServices;
+#endif
 
 namespace ZmqSharp;
 
@@ -8,6 +11,9 @@ namespace ZmqSharp;
 /// The cases are types (ZSingleMessage / ZMultiMessage); this type is constructed from one
 /// of them and exposes each case through a TryGetValue overload.
 /// </summary>
+#if NET11_0_OR_GREATER
+[Union]
+#endif
 public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
 {
     private readonly ZSingleMessage? _single; // Single case
@@ -77,6 +83,12 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
     {
         return new ZMessage(ZSingleMessage.Copy(frame));
     }
+
+    /// <summary>True when the message holds a case value; false for <c>default</c>.</summary>
+    public bool HasValue => _single is not null || _multi is not null;
+
+    /// <summary>The active case value, or null for <c>default</c>.</summary>
+    public object? Value => _multi is { } multi ? multi : _single;
 
     public bool TryGetValue(out ZSingleMessage singleMessage)
     {

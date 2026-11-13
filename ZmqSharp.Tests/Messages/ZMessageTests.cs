@@ -369,4 +369,80 @@ public sealed class ZMessageTests
         Assert.Equal([.. "cde"u8], converted[1].ToSequence().ToArray());
         converted.Dispose();
     }
+
+#if NET11_0_OR_GREATER
+    [Fact]
+    public void Union_PatternMatching_DiscriminatesTheActiveCase()
+    {
+        var single = MessageFactory.SingleFrame([1, 2, 3]);
+        Assert.True(single is ZSingleMessage);
+        Assert.False(single is ZMultiMessage);
+
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
+        Assert.True(multi is ZMultiMessage { Count: 2 });
+        Assert.False(multi is ZSingleMessage);
+
+        var segmented = MessageFactory.SegmentedFrame([1], [2]);
+        Assert.True(segmented[0] is ZSegments { Count: 2 });
+        Assert.False(segmented[0] is ZSegment);
+
+        single.Dispose();
+        multi.Dispose();
+        segmented.Dispose();
+    }
+
+    [Fact]
+    public void Union_SwitchExpression_IsExhaustiveOverCaseTypes()
+    {
+        // The null arm covers the value-less default instance.
+        static int FrameCount(ZMessage message) => message switch
+        {
+            ZSingleMessage => 1,
+            ZMultiMessage multi => multi.Count,
+            null => 0,
+        };
+
+        var single = MessageFactory.SingleFrame([1]);
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
+
+        Assert.Equal(1, FrameCount(single));
+        Assert.Equal(2, FrameCount(multi));
+        Assert.Equal(0, FrameCount(default));
+
+        single.Dispose();
+        multi.Dispose();
+    }
+
+    [Fact]
+    public void Union_Value_ReturnsTheActiveCaseValue()
+    {
+        var single = MessageFactory.SingleFrame([1]);
+        Assert.True(single.HasValue);
+        Assert.IsType<ZSingleMessage>(single.Value);
+
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
+        Assert.True(multi.HasValue);
+        Assert.IsType<ZMultiMessage>(multi.Value);
+
+        single.Dispose();
+        multi.Dispose();
+    }
+
+    [Fact]
+    public void Union_DefaultInstance_HasNoValue()
+    {
+        var message = default(ZMessage);
+
+        Assert.False(message.HasValue);
+        Assert.Null(message.Value);
+        Assert.False(message is ZSingleMessage);
+        Assert.False(message is ZMultiMessage);
+        Assert.True(message is null);
+
+        var frame = default(ZFrame);
+        Assert.False(frame.HasValue);
+        Assert.Null(frame.Value);
+        Assert.True(frame is null);
+    }
+#endif
 }

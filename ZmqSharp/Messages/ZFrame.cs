@@ -1,5 +1,8 @@
 using System.Buffers;
 using System.Collections;
+#if NET11_0_OR_GREATER
+using System.Runtime.CompilerServices;
+#endif
 
 namespace ZmqSharp;
 
@@ -8,6 +11,9 @@ namespace ZmqSharp;
 /// segment table). Constructed from the case type; every case getter is a
 /// TryGetValue overload.
 /// </summary>
+#if NET11_0_OR_GREATER
+[Union]
+#endif
 public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 {
     private readonly ZSegment? _contiguous;     // Contiguous case
@@ -49,6 +55,12 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
     /// <summary>True when more frames of the same message follow.</summary>
     public bool More { get; }
+
+    /// <summary>True when the frame holds a case value; false for <c>default</c>.</summary>
+    public bool HasValue => _contiguous is not null || _nonContiguous is not null;
+
+    /// <summary>The active case value, or null for <c>default</c>.</summary>
+    public object? Value => _contiguous is { } segment ? segment : _nonContiguous;
 
     public bool TryGetValue(out ZSegment segment)
     {
