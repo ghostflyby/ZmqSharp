@@ -84,16 +84,13 @@ public readonly struct ZMessage : IReadOnlyList<ZFrame>, IDisposable
         return new ZMessage(ZSingleMessage.Copy(frame));
     }
 
-    /// <summary>True when the message holds a case value; false for <c>default</c>.</summary>
-    public bool HasValue => _single is not null || _multi is not null;
-
-    /// <summary>The active case value, or null for <c>default</c>.</summary>
-    public object? Value => _multi is { } multi ? multi : _single;
+    /// <summary>The active case value; never null.</summary>
+    public object Value => _multi is { } multi ? multi : _single.GetValueOrDefault();
 
     public bool TryGetValue(out ZSingleMessage singleMessage)
     {
         singleMessage = _single.GetValueOrDefault();
-        return _single is not null;
+        return _multi is null;
     }
 
     public bool TryGetValue(out ZMultiMessage multiMessage)

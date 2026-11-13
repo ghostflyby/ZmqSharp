@@ -394,12 +394,12 @@ public sealed class ZMessageTests
     [Fact]
     public void Union_SwitchExpression_IsExhaustiveOverCaseTypes()
     {
-        // The null arm covers the value-less default instance.
+        // A switch over both case types needs no fallback: the default
+        // instance is the single case.
         static int FrameCount(ZMessage message) => message switch
         {
             ZSingleMessage => 1,
             ZMultiMessage multi => multi.Count,
-            null => 0,
         };
 
         var single = MessageFactory.SingleFrame([1]);
@@ -407,7 +407,7 @@ public sealed class ZMessageTests
 
         Assert.Equal(1, FrameCount(single));
         Assert.Equal(2, FrameCount(multi));
-        Assert.Equal(0, FrameCount(default));
+        Assert.Equal(1, FrameCount(default));
 
         single.Dispose();
         multi.Dispose();
@@ -417,11 +417,9 @@ public sealed class ZMessageTests
     public void Union_Value_ReturnsTheActiveCaseValue()
     {
         var single = MessageFactory.SingleFrame([1]);
-        Assert.True(single.HasValue);
         Assert.IsType<ZSingleMessage>(single.Value);
 
         var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
-        Assert.True(multi.HasValue);
         Assert.IsType<ZMultiMessage>(multi.Value);
 
         single.Dispose();
@@ -429,20 +427,30 @@ public sealed class ZMessageTests
     }
 
     [Fact]
-    public void Union_DefaultInstance_HasNoValue()
+    public void Union_DefaultInstance_IsTheEmptySingleCase()
     {
         var message = default(ZMessage);
-
-        Assert.False(message.HasValue);
-        Assert.Null(message.Value);
-        Assert.False(message is ZSingleMessage);
-        Assert.False(message is ZMultiMessage);
-        Assert.True(message is null);
+        Assert.True(message.TryGetValue(out ZSingleMessage single));
+        Assert.Single(single);
+        Assert.False(message.TryGetValue(out ZMultiMessage _));
+        Assert.True(message is ZSingleMessage);
+        Assert.False(message is null);
 
         var frame = default(ZFrame);
-        Assert.False(frame.HasValue);
-        Assert.Null(frame.Value);
-        Assert.True(frame is null);
+        Assert.True(frame.TryGetValue(out ZSegment segment));
+        Assert.True(segment.Memory.IsEmpty);
+        Assert.False(frame.TryGetValue(out ZSegments _));
+        Assert.Single(frame);
+        Assert.False(frame is null);
+
+        var multi = default(ZMultiMessage);
+        Assert.Empty(multi);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = multi[0]);
+        multi.Dispose();
+
+        var segments = default(ZSegments);
+        Assert.Empty(segments);
+        segments.Dispose();
     }
 #endif
 }

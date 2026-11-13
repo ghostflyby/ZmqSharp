@@ -1,5 +1,3 @@
 #nullable enable
-ZmqSharp.ZFrame.HasValue.get -> bool
-ZmqSharp.ZFrame.Value.get -> object?
-ZmqSharp.ZMessage.HasValue.get -> bool
-ZmqSharp.ZMessage.Value.get -> object?
+ZmqSharp.ZFrame.Value.get -> object!
+ZmqSharp.ZMessage.Value.get -> object!

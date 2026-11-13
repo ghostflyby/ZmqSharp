@@ -56,16 +56,13 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
     /// <summary>True when more frames of the same message follow.</summary>
     public bool More { get; }
 
-    /// <summary>True when the frame holds a case value; false for <c>default</c>.</summary>
-    public bool HasValue => _contiguous is not null || _nonContiguous is not null;
-
-    /// <summary>The active case value, or null for <c>default</c>.</summary>
-    public object? Value => _contiguous is { } segment ? segment : _nonContiguous;
+    /// <summary>The active case value; never null.</summary>
+    public object Value => _nonContiguous is { } many ? many : _contiguous.GetValueOrDefault();
 
     public bool TryGetValue(out ZSegment segment)
     {
         segment = _contiguous.GetValueOrDefault();
-        return _contiguous is not null;
+        return _nonContiguous is null;
     }
 
     public bool TryGetValue(out ZSegments segments)
@@ -136,15 +133,16 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
             _index = -1;
         }
 
+        private int Count => _many is { } many ? many.Count : 1;
+
         public ZSegment Current
         {
             get
             {
-                var count = _single is not null ? 1 : _many.GetValueOrDefault().Count;
-                if (_index < 0 || _index >= count)
+                if (_index < 0 || _index >= Count)
                     throw new InvalidOperationException("enumeration has not started or has already finished");
 
-                return _single ?? _many.GetValueOrDefault()[_index];
+                return _many is { } many ? many[_index] : _single.GetValueOrDefault();
             }
         }
 
@@ -152,14 +150,13 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
 
         public bool MoveNext()
         {
-            var count = _single is not null ? 1 : _many.GetValueOrDefault().Count;
-            if (_index + 1 < count)
+            if (_index + 1 < Count)
             {
                 _index++;
                 return true;
             }
 
-            _index = count;
+            _index = Count;
             return false;
         }
 
