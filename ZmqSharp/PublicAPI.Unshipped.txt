@@ -1,3 +1,1 @@
 #nullable enable
-ZmqSharp.ZFrame.Value.get -> object!
-ZmqSharp.ZMessage.Value.get -> object!

@@ -206,6 +206,7 @@ ZmqSharp.ZFrame.this[int index].get -> ZmqSharp.ZSegment
 ZmqSharp.ZFrame.ToSequence() -> System.Buffers.ReadOnlySequence<byte>
 ZmqSharp.ZFrame.TryGetValue(out ZmqSharp.ZSegment segment) -> bool
 ZmqSharp.ZFrame.TryGetValue(out ZmqSharp.ZSegments segments) -> bool
+ZmqSharp.ZFrame.Value.get -> object!
 ZmqSharp.ZFrame.ZFrame() -> void
 ZmqSharp.ZFrame.ZFrame(ZmqSharp.ZSegment segment) -> void
 ZmqSharp.ZFrame.ZFrame(ZmqSharp.ZSegments segments) -> void
@@ -222,6 +223,7 @@ ZmqSharp.ZMessage.GetEnumerator() -> ZmqSharp.ZMessage.Enumerator
 ZmqSharp.ZMessage.this[int index].get -> ZmqSharp.ZFrame
 ZmqSharp.ZMessage.TryGetValue(out ZmqSharp.ZMultiMessage multiMessage) -> bool
 ZmqSharp.ZMessage.TryGetValue(out ZmqSharp.ZSingleMessage singleMessage) -> bool
+ZmqSharp.ZMessage.Value.get -> object!
 ZmqSharp.ZMessage.ZMessage() -> void
 ZmqSharp.ZMessage.ZMessage(ZmqSharp.ZMultiMessage multi) -> void
 ZmqSharp.ZMessage.ZMessage(ZmqSharp.ZSingleMessage single) -> void
