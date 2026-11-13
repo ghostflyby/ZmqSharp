@@ -15,7 +15,7 @@ namespace ZmqSharp.Sockets;
 /// command before faulting (the RFC 23 pattern the socket-type check also
 /// uses).
 /// </summary>
-internal sealed class ZmtpHandshake : IDisposable
+internal sealed class ZmtpHandshake : IZWireEstablisher
 {
     private readonly IZConnection _connection;
     private readonly IZSecurityMechanism _mechanism;

@@ -4,7 +4,8 @@ using ZmqSharp.Transports;
 namespace ZmqSharp.Zmtp;
 
 /// <summary>Owns message serialization and codec lifetime, while borrowing the byte connection.</summary>
-internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec = null, Action<Exception>? retire = null) : IDisposable
+internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec = null, Action<Exception>? retire = null)
+    : IZWireSession
 {
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly ZmtpFrameEncoder _encoder = new(connection);
@@ -20,6 +21,12 @@ internal sealed class ZmtpSession(IZConnection connection, IZFrameCodec? codec =
         _parser = new ZmtpParser(connection, handler, allocator, pool, maxCommandSize, codec, maxFrameLength);
         return _parser;
     }
+
+    IZWirePump IZWireSession.CreatePump(
+        Func<IZWirePump, ZFrame, CancellationToken, ValueTask<bool>> onFrame, ZFrameAllocator? allocator,
+        MemoryPool<byte> pool, long maxCommandSize, long maxFrameLength)
+        => CreateParser((self, frame, token) => onFrame(self, frame, token), allocator, pool, maxCommandSize,
+            maxFrameLength);
 
     public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
     {

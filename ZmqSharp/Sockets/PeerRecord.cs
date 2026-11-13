@@ -24,7 +24,7 @@ internal sealed class PeerRecord(IZConnection connection, ZEndpointRegistration 
     public volatile PeerPhase Phase = PeerPhase.Registered;
     public bool HandshakeCounted { get; set; } = accepted;
     public TaskCompletionSource Established { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public ZmtpSession? Session { get; set; }
+    public IZWireSession? Session { get; set; }
     public ReceiveMaterializer? Materializer { get; set; }
     public MessageAccumulator Accumulator { get; } = new();
     public Channel<ZMessage>? Queue { get; set; }
