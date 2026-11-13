@@ -22,7 +22,7 @@
          no Version property here so the file never drifts from the released version.
          A local `dotnet pack` therefore defaults to 1.0.0 - only for local experiments. -->
     <Authors>ZmqSharp contributors</Authors>
-    <Description>Optional CURVE security mechanism (RFC 25 / CurveZMQ) for ZmqSharp, built on the public mechanism seam with a pluggable crypto backend (BouncyCastle).</Description>
+    <Description>Optional CURVE security mechanism (RFC 25 / CurveZMQ) for ZmqSharp, built on the public mechanism seam; X25519 comes from the in-box crypto on .NET 11 and from BouncyCastle on .NET 10.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryType>git</RepositoryType>
@@ -55,7 +55,13 @@
     <InternalsVisibleTo Include="Measure"/>
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- X25519 backend selection (0032): net11.0 has the in-box
+       System.Security.Cryptography.X25519DiffieHellman, so the package
+       carries no crypto dependency there; every other target keeps
+       BouncyCastle, mirroring the `#if !NET11_0_OR_GREATER` branch of
+       CurveX25519.cs. The condition flows into the nuspec's per-framework
+       dependency groups. -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net11.0'">
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0"/>
   </ItemGroup>
 

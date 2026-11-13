@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Xunit;
 
 namespace ZmqSharp.Security.Curve.Tests;
@@ -108,5 +109,17 @@ public sealed class LibsodiumKnownVectorTests
         var publicKey = new byte[32];
         CurveCrypto.DerivePublicKey(Sk1, publicKey);
         Assert.Equal(Pk1, publicKey);
+    }
+
+    [Fact]
+    public void DeriveSharedSecret_RejectsLowOrderPublicKey()
+    {
+        // The all-zero public key is a low-order point whose X25519 output is
+        // all zero; libsodium's crypto_scalarmult rejects it. Both X25519
+        // backends (in-box on net11.0, BouncyCastle on net10.0) must reject
+        // it the same way (0032).
+        var derived = new byte[32];
+        Assert.Throws<CryptographicException>(
+            () => CurveCrypto.DeriveSharedSecret(Sk1, new byte[32], derived));
     }
 }

@@ -16,8 +16,7 @@ the License.
 Third-party notices
 -------------------
 
-The ZmqSharp test project depends on the following packages (test-only; the
-library itself has no runtime dependencies):
+The ZmqSharp test projects depend on the following packages (test-only):
 
 - NetMQ (4.x) - https://github.com/zeromq/netmq - used as the managed
   libzmq-compatible peer for interoperability tests. NetMQ is distributed
@@ -28,3 +27,8 @@ library itself has no runtime dependencies):
 - Microsoft.Testing.Platform and Microsoft.Testing.Extensions.TrxReport -
   https://github.com/microsoft/testfx - MIT License. Provides the test host
   (the xUnit.net v3 runner is built on it) and TRX result reporting.
+
+The ZmqSharp core package has no runtime dependencies. The
+ZmqSharp.Security.Curve package has one, and only on .NET 10:
+BouncyCastle.Cryptography - https://github.com/bcgit/bc-csharp - MIT License.
+Its .NET 11 build uses the in-box X25519 and carries no runtime dependency.
