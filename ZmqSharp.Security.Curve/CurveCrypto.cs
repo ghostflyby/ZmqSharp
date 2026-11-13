@@ -2,7 +2,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using Org.BouncyCastle.Math.EC.Rfc7748;
 
 namespace ZmqSharp.Security.Curve;
 
@@ -75,14 +74,15 @@ internal struct Key32 : IEquatable<Key32>
 }
 
 /// <summary>
-/// The RFC 25 CurveZMQ primitives over BouncyCastle (0017 recommendation):
-/// pure managed, no native dependency, IsAotCompatible. The crypto_box
-/// construction composes XSalsa20 + Poly1305 the way libsodium's
-/// crypto_secretbox does: the first 32 bytes of the XSalsa20 keystream form
-/// the one-time Poly1305 key, the rest encrypts the message. The Salsa20 core
-/// and Poly1305 are hand-written (0027) in the style of the existing HSalsa20,
-/// so the hot path is stateless and allocates nothing; BouncyCastle is used
-/// only for X25519. libsodium known vectors lock the wire bytes.
+/// The RFC 25 CurveZMQ primitives (0017 recommendation): pure managed except
+/// X25519, IsAotCompatible. The crypto_box construction composes XSalsa20 +
+/// Poly1305 the way libsodium's crypto_secretbox does: the first 32 bytes of
+/// the XSalsa20 keystream form the one-time Poly1305 key, the rest encrypts
+/// the message. The Salsa20 core and Poly1305 are hand-written (0027) in the
+/// style of the existing HSalsa20, so the hot path is stateless and allocates
+/// nothing; X25519 lives in <see cref="CurveX25519"/> - the in-box
+/// System.Security.Cryptography implementation on net11.0, BouncyCastle on
+/// net10.0 (0032). libsodium known vectors lock the wire bytes.
 /// </summary>
 internal static class CurveCrypto
 {
@@ -90,7 +90,7 @@ internal static class CurveCrypto
     {
         ArgumentOutOfRangeException.ThrowIfNotEqual(secretKey.Length, 32);
         ArgumentOutOfRangeException.ThrowIfLessThan(publicKey.Length, 32);
-        X25519.GeneratePublicKey(secretKey, publicKey);
+        CurveX25519.DerivePublicKey(secretKey, publicKey);
     }
 
     public static void GenerateKeyPair(out Key32 publicKey, out Key32 secretKey)
@@ -115,8 +115,7 @@ internal static class CurveCrypto
             throw new ArgumentException("destination is too small for the shared secret", nameof(destination));
 
         Span<byte> x25519 = stackalloc byte[32];
-        if (!X25519.CalculateAgreement(senderSecret, recipientPublic, x25519))
-            throw new CryptographicException("X25519 agreement rejected the recipient public key");
+        CurveX25519.DeriveRawSecretAgreement(senderSecret, recipientPublic, x25519);
 
         Span<byte> zeroInput = stackalloc byte[16];
         Hsalsa20(x25519, zeroInput, destination);
