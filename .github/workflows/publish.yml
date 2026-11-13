@@ -218,20 +218,26 @@ jobs:
             $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $path))
             try
             {
-              $dll = @($zip.Entries | Where-Object { $_.FullName -like 'lib/net10.0/*.dll' })
-              $nuspec = @($zip.Entries | Where-Object { $_.FullName -like '*.nuspec' })
-              if ($dll.Count -ne 1)
-              {
-                throw "${name}: expected 1 lib dll, found $( $dll.Count )"
-              }
-              if ($nuspec.Count -ne 1)
-              {
-                throw "${name}: expected 1 nuspec, found $( $nuspec.Count )"
-              }
+                # One managed dll per target framework: the packages are
+                # multi-targeted (net10.0;net11.0), and a silent packing miss of a
+                # whole TFM must fail the gate, not ship a half-empty nupkg.
+                foreach ($tfm in @('net10.0', 'net11.0'))
+                {
+                    $dll = @($zip.Entries | Where-Object { $_.FullName -like "lib/$tfm/*.dll" })
+                    if ($dll.Count -ne 1)
+                    {
+                        throw "${name}: expected 1 lib dll for $tfm, found $( $dll.Count )"
+                    }
+                }
+                $nuspec = @($zip.Entries | Where-Object { $_.FullName -like '*.nuspec' })
+                if ($nuspec.Count -ne 1)
+                {
+                    throw "${name}: expected 1 nuspec, found $( $nuspec.Count )"
+                }
             }
             finally
             {
-              $zip.Dispose()
+                $zip.Dispose()
             }
           }
 
