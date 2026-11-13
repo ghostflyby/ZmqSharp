@@ -36,7 +36,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
           cache: true
           cache-dependency-path: '**/*.csproj'
       - name: Restore
@@ -58,7 +58,7 @@ jobs:
         # under VSTest: the allocation suite samples a thread-local GC counter
         # and is the suite most sensitive to a noisy, shared thread pool, and
         # hosted runners have few cores. Costs ~6s per matrix job.
-        run: dotnet test ZmqSharp.slnx --no-build --configuration Release --report-trx --results-directory TestResults --max-parallel-test-modules 1
+        run: dotnet test --solution ZmqSharp.slnx --no-build --configuration Release --report-trx --results-directory TestResults --max-parallel-test-modules 1
 
       - name: Upload test results
         uses: actions/upload-artifact@v7

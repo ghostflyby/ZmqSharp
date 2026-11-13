@@ -30,7 +30,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
           cache: true
           cache-dependency-path: '**/*.csproj'
 
@@ -43,7 +43,7 @@ jobs:
       # assertions only compile there, and analyzing the Debug half reports
       # their helpers as unused.
       - name: Run InspectCode
-        run: dotnet tool exec JetBrains.ReSharper.GlobalTools@2026.2.3.1 -- inspectcode ZmqSharp.slnx --properties:Configuration=Release --output=inspect.sarif --format=Sarif --severity=WARNING --swea --verbosity=WARN
+        run: dotnet tool exec --yes JetBrains.ReSharper.GlobalTools@2026.2.3.1 -- inspectcode ZmqSharp.slnx --properties:Configuration=Release --output=inspect.sarif --format=Sarif --severity=WARNING --swea --verbosity=WARN
 
       # InspectCode exits 0 regardless of findings; only error level fails.
       - name: Enforce the failure gate
