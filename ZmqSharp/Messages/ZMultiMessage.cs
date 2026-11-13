@@ -97,19 +97,20 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
             : new ZMultiMessage([.. message]);
     }
 
-    public int Count => _frames.Length;
+    public int Count => _frames?.Length ?? 0;
 
     public ZFrame this[int index]
     {
         get
         {
             ArgumentOutOfRangeException.ThrowIfNegative(index);
-            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, _frames.Length);
-            return _frames[index];
+            if (_frames is not { } frames) throw new ArgumentOutOfRangeException(nameof(index));
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, frames.Length);
+            return frames[index];
         }
     }
 
-    public Enumerator GetEnumerator() => new(_frames);
+    public Enumerator GetEnumerator() => new(_frames ?? []);
 
     IEnumerator<ZFrame> IEnumerable<ZFrame>.GetEnumerator() => GetEnumerator();
 
@@ -117,7 +118,8 @@ public readonly struct ZMultiMessage : IReadOnlyList<ZFrame>, IDisposable
 
     public void Dispose()
     {
-        foreach (var frame in _frames) frame.Dispose();
+        if (_frames is not { } frames) return;
+        foreach (var frame in frames) frame.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZFrame>

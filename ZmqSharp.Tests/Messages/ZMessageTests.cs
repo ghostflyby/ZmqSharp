@@ -369,4 +369,97 @@ public sealed class ZMessageTests
         Assert.Equal([.. "cde"u8], converted[1].ToSequence().ToArray());
         converted.Dispose();
     }
+
+    [Fact]
+    public void DefaultInstance_IsTheEmptySingleCase()
+    {
+        var message = default(ZMessage);
+        Assert.True(message.TryGetValue(out ZSingleMessage single));
+        Assert.Single(single);
+        Assert.False(message.TryGetValue(out ZMultiMessage _));
+        Assert.Single(message);
+
+        var frame = default(ZFrame);
+        Assert.True(frame.TryGetValue(out ZSegment segment));
+        Assert.True(segment.Memory.IsEmpty);
+        Assert.False(frame.TryGetValue(out ZSegments _));
+        Assert.Single(frame);
+
+        var multi = default(ZMultiMessage);
+        Assert.Empty(multi);
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = multi[0]);
+        multi.Dispose();
+
+        var segments = default(ZSegments);
+        Assert.Empty(segments);
+        segments.Dispose();
+    }
+
+#if NET11_0_OR_GREATER
+    [Fact]
+    public void Union_PatternMatching_DiscriminatesTheActiveCase()
+    {
+        var single = MessageFactory.SingleFrame([1, 2, 3]);
+        Assert.True(single is ZSingleMessage);
+        Assert.False(single is ZMultiMessage);
+
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
+        Assert.True(multi is ZMultiMessage { Count: 2 });
+        Assert.False(multi is ZSingleMessage);
+
+        var segmented = MessageFactory.SegmentedFrame([1], [2]);
+        Assert.True(segmented[0] is ZSegments { Count: 2 });
+        Assert.False(segmented[0] is ZSegment);
+
+        single.Dispose();
+        multi.Dispose();
+        segmented.Dispose();
+    }
+
+    [Fact]
+    public void Union_SwitchExpression_IsExhaustiveOverCaseTypes()
+    {
+        // A switch over both case types needs no fallback: the default
+        // instance is the single case.
+        static int FrameCount(ZMessage message) => message switch
+        {
+            ZSingleMessage => 1,
+            ZMultiMessage multi => multi.Count,
+        };
+
+        var single = MessageFactory.SingleFrame([1]);
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
+
+        Assert.Equal(1, FrameCount(single));
+        Assert.Equal(2, FrameCount(multi));
+        Assert.Equal(1, FrameCount(default));
+
+        single.Dispose();
+        multi.Dispose();
+    }
+
+    [Fact]
+    public void Union_Value_ReturnsTheActiveCaseValue()
+    {
+        var single = MessageFactory.SingleFrame([1]);
+        Assert.IsType<ZSingleMessage>(single.Value);
+
+        var multi = MessageFactory.Multipart([.. "a"u8], [.. "b"u8]);
+        Assert.IsType<ZMultiMessage>(multi.Value);
+
+        single.Dispose();
+        multi.Dispose();
+    }
+
+    [Fact]
+    public void Union_DefaultInstance_MatchesTheSingleCase()
+    {
+        var message = default(ZMessage);
+        Assert.True(message is ZSingleMessage);
+        Assert.False(message is null);
+
+        var frame = default(ZFrame);
+        Assert.False(frame is null);
+    }
+#endif
 }

@@ -15,19 +15,20 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
         _segments = segments;
     }
 
-    public int Count => _segments.Length;
+    public int Count => _segments?.Length ?? 0;
 
     public ZSegment this[int index]
     {
         get
         {
             ArgumentOutOfRangeException.ThrowIfNegative(index);
-            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, _segments.Length);
-            return _segments[index];
+            if (_segments is not { } segments) throw new ArgumentOutOfRangeException(nameof(index));
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, segments.Length);
+            return segments[index];
         }
     }
 
-    public Enumerator GetEnumerator() => new(_segments);
+    public Enumerator GetEnumerator() => new(_segments ?? []);
 
     IEnumerator<ZSegment> IEnumerable<ZSegment>.GetEnumerator() => GetEnumerator();
 
@@ -35,7 +36,8 @@ public readonly struct ZSegments : IReadOnlyList<ZSegment>, IDisposable
 
     public void Dispose()
     {
-        foreach (var segment in _segments) segment.Dispose();
+        if (_segments is not { } segments) return;
+        foreach (var segment in segments) segment.Dispose();
     }
 
     public struct Enumerator : IEnumerator<ZSegment>
