@@ -1,1 +1,4 @@
 #nullable enable
+ZmqSharp.Transports.IZMessageConnection
+ZmqSharp.Transports.IZMessageConnection.ReadMessageAsync(long maxBytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.ReadOnlyMemory<byte>?>
+ZmqSharp.Transports.IZMessageConnection.WriteMessageAsync(System.Buffers.ReadOnlySequence<byte> message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
