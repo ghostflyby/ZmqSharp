@@ -16,7 +16,7 @@ namespace ZmqSharp.Tests.Zmtp;
 /// </summary>
 public sealed class ZmtpHandshakeTests
 {
-    private const long MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
+    private const long MaxCommandSize = ZmtpFraming.DefaultMaxCommandSize;
 
     private static ReadOnlySpan<byte> ReadyName => "READY"u8;
 
@@ -228,7 +228,7 @@ public sealed class ZmtpHandshakeTests
         using var handshake = NewHandshake(connection);
 
         var ex = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
-        Assert.Contains("exceeds maximum size", ex.Message);
+        Assert.Contains("exceeds maximum length", ex.Message);
     }
 
     [Fact]
@@ -245,9 +245,10 @@ public sealed class ZmtpHandshakeTests
         return new ZConnection(new ChunkedMemoryStream(peerBytes));
     }
 
-    private static ZmtpHandshake NewHandshake(IZConnection connection)
+    private static IZWireEstablisher NewHandshake(IZConnection connection)
     {
-        return new ZmtpHandshake(
+        return ZmqProtocol.Instance.CreateEstablisher(
+            ZmtpFraming.Instance.Adapt(connection, null, MaxCommandSize),
             connection,
             ZNullMechanism.Instance,
             ZmtpCommands.BuildReady("PAIR"),

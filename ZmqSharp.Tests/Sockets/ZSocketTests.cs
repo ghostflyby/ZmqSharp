@@ -609,8 +609,9 @@ public sealed class ZSocketTests
         Assert.Equal([.. "ping"u8], message[0].ToSequence().ToArray());
         Assert.Equal([.. "pong"u8], message[1].ToSequence().ToArray());
 
-        // The surface owns the message and disposes it; the only remaining
-        // rental is the server parser's greeting scratch, released on dispose.
+        // The surface owns the message and disposes it; the borrowed
+        // delivery tier's only lasting rental is the framing's staging
+        // scratch, released with the connection (0033).
         message.Dispose();
         Assert.Equal(1, pool.Outstanding);
 
@@ -1696,10 +1697,20 @@ public sealed class ZSocketTests
         GC.Collect();
         var before = GC.GetAllocatedBytesForCurrentThread();
         var received = 0;
-        while (server.Messages.TryRead(out var message))
+        var drained = false;
+        while (!drained)
         {
-            message.Dispose();
-            received++;
+            while (server.Messages.TryRead(out var message))
+            {
+                message.Dispose();
+                received++;
+            }
+
+            // All count frames are rented, but the last delivery may still be
+            // riding a pump continuation (0033's frame layer adds async hops);
+            // yield until it lands, without allocating on this thread.
+            if (received < count) await Task.Yield();
+            else drained = true;
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;

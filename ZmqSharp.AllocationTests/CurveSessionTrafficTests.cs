@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using Xunit;
 using ZmqSharp.Security.Curve;
 using ZmqSharp.Sockets;
+using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.AllocationTests;
@@ -13,12 +14,15 @@ public sealed class CurveSessionTrafficTests
     internal static CurveFrameCodec NewCodec() => new(Key32.From(new byte[32]),
         encodeServerToClient: false, decodeServerToClient: false, 1, 0);
 
+    internal static IZWireSession NewSession(RecordingByteConnection raw, IZFrameCodec? codec = null)
+        => ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
+
     [Fact]
     public async Task LargeFrame_RoundTrips_WithLongSizeFlag()
     {
         var token = TestContext.Current.CancellationToken;
         using var raw = new RecordingByteConnection();
-        using var session = new ZmtpSession(raw, NewCodec());
+        using var session = NewSession(raw, NewCodec());
         var payload = new byte[300];
         for (var i = 0; i < payload.Length; i++) payload[i] = (byte)i;
         using var message = ZMessage.FromOwned(payload);
@@ -36,7 +40,7 @@ public sealed class CurveSessionTrafficTests
     {
         var token = TestContext.Current.CancellationToken;
         using var raw = new RecordingByteConnection();
-        using var session = new ZmtpSession(raw, NewCodec());
+        using var session = NewSession(raw, NewCodec());
         using var message = ZMessage.Copy((byte[][])[[.. "first"u8], [.. "second"u8], [.. "third"u8]]);
         await session.SendAsync(message, token);
         var frames = await ReadAsync(raw.Recorded);
@@ -50,7 +54,7 @@ public sealed class CurveSessionTrafficTests
     {
         var token = TestContext.Current.CancellationToken;
         using var raw = new RecordingByteConnection(yieldWrites: true);
-        using var session = new ZmtpSession(raw, NewCodec());
+        using var session = NewSession(raw, NewCodec());
         using var one = ZMessage.Copy((byte[][])[[.. "1-a"u8], [.. "1-b"u8], [.. "1-c"u8]]);
         using var two = ZMessage.Copy((byte[][])[[.. "2-a"u8], [.. "2-b"u8], [.. "2-c"u8]]);
         await Task.WhenAll(session.SendAsync(one, token).AsTask(), session.SendAsync(two, token).AsTask());
@@ -108,7 +112,7 @@ public sealed class CurveSessionTrafficTests
     }
 
     [Fact]
-    public async Task Parser_ChecksEncodedUpperBoundBeforeReadingBody()
+    public async Task Framing_ChecksEncodedUpperBoundBeforeReadingBody()
     {
         var token = TestContext.Current.CancellationToken;
         using var codec = NewCodec();
@@ -117,19 +121,23 @@ public sealed class CurveSessionTrafficTests
         header[0] = (byte)ZmtpFrameFlags.LongSize;
         BinaryPrimitives.WriteInt64BigEndian(header.AsSpan(1), codec.GetMaximumEncodedLength(256) + 1);
         using var raw = new RecordingByteConnection(header);
-        using var parser = new ZmtpParser(raw, (_, _, _) => throw new InvalidOperationException("unexpected delivery"),
-            null, MemoryPool<byte>.Shared, maxCommandSize: 256, codec: codec, maxFrameLength: 8);
+        // The codec-aware bound rides on the framing: a header declaring an
+        // encoded size beyond it rejects before any body is read.
+        using var session = ZmqProtocol.Instance.CreateSession(
+            ZmtpFraming.Instance.Adapt(raw, null, 256), null);
+        var pump = session.CreatePump(
+            (_, _, _) => throw new InvalidOperationException("unexpected delivery"), null, 256, 8);
         // There is no body: ignoring the header bound would silently hit EOF.
-        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => parser.ParseAsync(token).AsTask());
-        Assert.Contains("encoded frame", exception.Message);
+        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => pump.ParseAsync(token).AsTask());
+        Assert.Contains("exceeds maximum length", exception.Message);
     }
 
     [Fact]
-    public async Task Parser_LogicalLimitRejectsAfterAuthenticationBeforeFinalAllocation()
+    public async Task Pump_LogicalLimitRejectsAfterAuthenticationBeforeFinalAllocation()
     {
         var token = TestContext.Current.CancellationToken;
         using var recording = new RecordingByteConnection();
-        using (var session = new ZmtpSession(recording, NewCodec()))
+        using (var session = NewSession(recording, NewCodec()))
         {
             using var message = ZMessage.FromOwned(new byte[9]);
             await session.SendAsync(message, token);
@@ -139,9 +147,15 @@ public sealed class CurveSessionTrafficTests
         using var codec = NewCodec();
         using var pool = new CountingRentPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 8, 100, 10, () => { });
-        using var parser = new ZmtpParser(input, (_, _, _) => throw new InvalidOperationException("unexpected delivery"),
-            materializer.CreateAllocator(), pool, maxCommandSize: 256, codec: codec, maxFrameLength: 8);
-        var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => parser.ParseAsync(token).AsTask());
+        // The framing's pooled rent carries the encoded body (the old parser's
+        // scratch rent); the decoded frame then materializes through the
+        // allocator, whose 8-byte limit rejects before renting.
+        using var readSession = ZmqProtocol.Instance.CreateSession(
+            ZmtpFraming.Instance.Adapt(input, null, long.MaxValue, pool), codec);
+        var pump = readSession.CreatePump(
+            (_, _, _) => throw new InvalidOperationException("unexpected delivery"),
+            materializer.CreateAllocator(), 256, 8);
+        var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => pump.ParseAsync(token).AsTask());
         Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, failure.Rejection.Reason);
         Assert.Equal(1, pool.Rentals);
     }
@@ -151,32 +165,40 @@ public sealed class CurveSessionTrafficTests
     {
         var token = TestContext.Current.CancellationToken;
         using var recording = new RecordingByteConnection();
-        using (var session = new ZmtpSession(recording, NewCodec()))
+        using (var sealSession = NewSession(recording, NewCodec()))
         {
             using var first = ZMessage.FromOwned([17]);
             using var second = ZMessage.FromOwned([23]);
-            await session.SendAsync(first, token);
-            await session.SendAsync(second, token);
+            await sealSession.SendAsync(first, token);
+            await sealSession.SendAsync(second, token);
         }
 
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var raw = new RecordingByteConnection(recording.Recorded);
         using var codec = NewCodec();
+        using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
         var count = 0;
-        using var parser = new ZmtpParser(raw, async (frame, _) =>
+        var pump = session.CreatePump(async (_, frame, _) =>
         {
-            if (++count == 1)
+            try
             {
-                entered.TrySetResult();
-                await release.Task;
-                Assert.Equal(17, frame[0].Memory.Span[0]);
-            }
-            else Assert.Equal(23, frame[0].Memory.Span[0]);
+                if (++count == 1)
+                {
+                    entered.TrySetResult();
+                    await release.Task;
+                    Assert.Equal(17, frame[0].Memory.Span[0]);
+                }
+                else Assert.Equal(23, frame[0].Memory.Span[0]);
 
-            return true;
-        }, codec);
-        var parsing = parser.ParseAsync(token).AsTask();
+                return true;
+            }
+            finally
+            {
+                frame.Dispose();
+            }
+        }, null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
+        var parsing = pump.ParseAsync(token).AsTask();
         try
         {
             await entered.Task.WaitAsync(token);
@@ -185,7 +207,7 @@ public sealed class CurveSessionTrafficTests
         }
         finally
         {
-            release.TrySetResult();
+            release.SetResult();
         }
 
         await parsing.WaitAsync(token);
@@ -195,7 +217,7 @@ public sealed class CurveSessionTrafficTests
     private static async Task<byte[]> SealAsync()
     {
         using var raw = new RecordingByteConnection();
-        using var session = new ZmtpSession(raw, NewCodec());
+        using var session = NewSession(raw, NewCodec());
         using var message = ZMessage.FromOwned([.. "secret"u8]);
         await session.SendAsync(message);
         return raw.Recorded;
@@ -206,12 +228,14 @@ public sealed class CurveSessionTrafficTests
         using var raw = new RecordingByteConnection(wire);
         using var codec = NewCodec();
         var frames = new List<(bool, byte[])>();
-        using var parser = new ZmtpParser(raw, (frame, _) =>
+        using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
+        var pump = session.CreatePump((_, frame, _) =>
         {
             frames.Add((frame.More, frame.ToSequence().ToArray()));
+            frame.Dispose();
             return ValueTask.FromResult(true);
-        }, codec);
-        await parser.ParseAsync();
+        }, null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
+        await pump.ParseAsync();
         return frames;
     }
 }

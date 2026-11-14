@@ -18,7 +18,7 @@ namespace ZmqSharp.Tests.Zmtp;
 /// </summary>
 public sealed class ZPlainMechanismTests
 {
-    private const long MaxCommandSize = ZmtpParser.DefaultMaxCommandSize;
+    private const long MaxCommandSize = ZmtpFraming.DefaultMaxCommandSize;
 
     [Fact]
     public async Task Client_CompletesHandshake_WithWelcomeThenReady()
@@ -235,9 +235,10 @@ public sealed class ZPlainMechanismTests
 
     // ---- Fixtures ----
 
-    private static ZmtpHandshake NewHandshake(IZConnection connection, ZPlainMechanism mechanism)
+    private static IZWireEstablisher NewHandshake(IZConnection connection, ZPlainMechanism mechanism)
     {
-        return new ZmtpHandshake(
+        return ZmqProtocol.Instance.CreateEstablisher(
+            ZmtpFraming.Instance.Adapt(connection, null, MaxCommandSize),
             connection,
             mechanism,
             ZmtpCommands.BuildReady("PAIR"),

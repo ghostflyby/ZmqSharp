@@ -33,9 +33,9 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             Assert.NotNull(session);
-            using var sender = new ZmtpSession(client);
+            using var sender = ZmtpTestRunner.CreateSession(client);
 
-            await sender.SendFrameAsync("hello"u8.ToArray(), more: false, token: token);
+            await sender.SendAsync(ZMessage.FromOwned([.. "hello"u8]), token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
             var frame = Assert.Single(recorder.Frames);
@@ -56,7 +56,7 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             Assert.NotNull(session);
-            using var sender = new ZmtpSession(client);
+            using var sender = ZmtpTestRunner.CreateSession(client);
 
             // A multi-segment frame exercises the buffer-list scatter write:
             // header + each segment, sent with one SendAsync call.
@@ -82,10 +82,10 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             Assert.NotNull(session);
-            using var sender = new ZmtpSession(client);
+            using var sender = ZmtpTestRunner.CreateSession(client);
 
             var payload = Enumerable.Range(0, 300).Select(i => (byte)(i % 251)).ToArray();
-            await sender.SendFrameAsync(payload, more: false, token: token);
+            await sender.SendAsync(ZMessage.FromOwned(payload), token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
             var frame = Assert.Single(recorder.Frames);
@@ -127,9 +127,9 @@ public sealed class ZSocketConnectionTests
 
             var session = await ZmtpTestRunner.EstablishAsync(client);
             Assert.NotNull(session);
-            using var sender = new ZmtpSession(client);
+            using var sender = ZmtpTestRunner.CreateSession(client);
 
-            await sender.SendFrameAsync(ReadOnlyMemory<byte>.Empty, more: false, token);
+            await sender.SendAsync(ZMessage.FromOwned(Array.Empty<byte>()), token);
 
             await recorder.FirstFrameAsync.WaitAsync(token);
             var frame = Assert.Single(recorder.Frames);
@@ -156,20 +156,30 @@ public sealed class ZSocketConnectionTests
             using var server = await listener.AcceptAsync(token);
             using var writer = new ZSocketConnection(client);
             using var reader = new ZSocketConnection(server);
-            using var session = new ZmtpSession(writer);
+            using var session = ZmtpTestRunner.CreateSession(writer);
             var first = Enumerable.Repeat((byte)17, 700_000).ToArray();
             var second = Enumerable.Repeat((byte)23, 800_000).ToArray();
             using var message = MessageFactory.SegmentedFrame(first, second);
             var delivered = 0;
-            using var parser = new ZmtpParser(reader, (frame, _) =>
-            {
-                var content = frame.ToSequence().ToArray();
-                Assert.Equal(first.Length + second.Length, content.Length);
-                Assert.True(content.AsSpan(0, first.Length).SequenceEqual(first));
-                Assert.True(content.AsSpan(first.Length).SequenceEqual(second));
-                delivered++;
-                return ValueTask.FromResult(true);
-            });
+            using var receiveSession = ZmtpTestRunner.CreateSession(reader);
+            var parser = receiveSession.CreatePump(
+                async (_, frame, _) =>
+                {
+                    try
+                    {
+                        var content = frame.ToSequence().ToArray();
+                        Assert.Equal(first.Length + second.Length, content.Length);
+                        Assert.True(content.AsSpan(0, first.Length).SequenceEqual(first));
+                        Assert.True(content.AsSpan(first.Length).SequenceEqual(second));
+                        delivered++;
+                        return true;
+                    }
+                    finally
+                    {
+                        frame.Dispose();
+                    }
+                },
+                null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
             var receiving = parser.ParseAsync(token).AsTask();
             await session.SendAsync(message, token);
             writer.Abort();

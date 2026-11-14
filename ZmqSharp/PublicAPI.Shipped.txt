@@ -1,6 +1,5 @@
 #nullable enable
 abstract ZmqSharp.ZQueueFactory.Create(System.Action<ZmqSharp.ZMessage>! itemDropped) -> System.Threading.Channels.Channel<ZmqSharp.ZMessage>!
-const ZmqSharp.Zmtp.ZmtpParser.DefaultMaxCommandSize = 1048576 -> long
 const ZmqSharp.ZSocketOptions.MinMaxCommandSize = 256 -> long
 static ZmqSharp.Patterns.ZInboundDecision.Consumed() -> ZmqSharp.Patterns.ZInboundDecision
 static ZmqSharp.Patterns.ZInboundDecision.Deliver() -> ZmqSharp.Patterns.ZInboundDecision
@@ -241,23 +240,11 @@ ZmqSharp.Zmtp.ZmtpFrameData.Body.init -> void
 ZmqSharp.Zmtp.ZmtpFrameData.Flags.get -> ZmqSharp.Zmtp.ZmtpFrameFlags
 ZmqSharp.Zmtp.ZmtpFrameData.Flags.init -> void
 ZmqSharp.Zmtp.ZmtpFrameData.ZmtpFrameData() -> void
-ZmqSharp.Zmtp.ZmtpFrameEncoder
-ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteCommandAsync(System.ReadOnlyMemory<byte> body, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
-ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteFrameAsync(System.Buffers.ReadOnlySequence<byte> body, bool more, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
-ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteFrameAsync(ZmqSharp.Zmtp.ZmtpFrameData frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
-ZmqSharp.Zmtp.ZmtpFrameEncoder.WriteMessageAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
-ZmqSharp.Zmtp.ZmtpFrameEncoder.ZmtpFrameEncoder(System.IO.Stream! stream) -> void
-ZmqSharp.Zmtp.ZmtpFrameEncoder.ZmtpFrameEncoder(ZmqSharp.Transports.IZByteWriter! writer) -> void
 ZmqSharp.Zmtp.ZmtpFrameFlags
 ZmqSharp.Zmtp.ZmtpFrameFlags.Command = 4 -> ZmqSharp.Zmtp.ZmtpFrameFlags
 ZmqSharp.Zmtp.ZmtpFrameFlags.LongSize = 2 -> ZmqSharp.Zmtp.ZmtpFrameFlags
 ZmqSharp.Zmtp.ZmtpFrameFlags.More = 1 -> ZmqSharp.Zmtp.ZmtpFrameFlags
 ZmqSharp.Zmtp.ZmtpFrameFlags.None = 0 -> ZmqSharp.Zmtp.ZmtpFrameFlags
-ZmqSharp.Zmtp.ZmtpParser
-ZmqSharp.Zmtp.ZmtpParser.Dispose() -> void
-ZmqSharp.Zmtp.ZmtpParser.ParseAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
-ZmqSharp.Zmtp.ZmtpParser.Resume() -> void
-ZmqSharp.Zmtp.ZmtpParser.ZmtpParser(ZmqSharp.Transports.IZByteReader! reader, ZmqSharp.Zmtp.ZFrameHandlerAsync! onFrame, ZmqSharp.Zmtp.IZFrameCodec? codec = null, System.Buffers.MemoryPool<byte>? pool = null) -> void
 ZmqSharp.ZMultiMessage
 ZmqSharp.ZMultiMessage.Count.get -> int
 ZmqSharp.ZMultiMessage.Dispose() -> void

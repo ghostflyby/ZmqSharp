@@ -106,7 +106,7 @@ public sealed class ZmtpParserTests
             return false;
         });
         var session = await ZmtpTestRunner.EstablishAsync(connection);
-        using var parser =
+        var parser =
             ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
                 recorder);
 

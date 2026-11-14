@@ -415,7 +415,7 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
 }
 
 /// <summary>
-/// Captures every logical write the encoder hands to a sink, preserving the
+/// Captures every logical write the framing hands to a sink, preserving the
 /// per-write segment structure (0015 section 6.1). Used to assert that a frame
 /// is written as one logical write of header + all segments.
 /// </summary>
@@ -438,42 +438,94 @@ internal sealed class CaptureSink : IZByteWriter
     }
 }
 
+/// <summary>
+/// A write-only byte connection over a <see cref="CaptureSink"/>: EOF on
+/// read, every write captured. The framing/session send paths exercise their
+/// one-logical-write contract through it.
+/// </summary>
+internal sealed class SinkConnection(CaptureSink sink) : IZConnection
+{
+    public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        => ValueTask.FromResult(0);
+
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+        => sink.WriteAsync(bytes, token);
+
+    public ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        => sink.WriteAsync(bytes, token);
+
+    public void Abort() { }
+
+    public void Dispose() { }
+}
+
 internal static class ZmtpTestRunner
 {
     /// <summary>
-    /// Completes the NULL handshake (greeting + READY) on the connection and
-    /// returns the session connection to run the traffic parser on.
+    /// Completes the NULL handshake (greeting + READY) on the connection via
+    /// the frame-layer seams (ZMTP framing + the built-in protocol) and
+    /// returns the connection to run the traffic pump on.
     /// </summary>
     public static async Task<IZConnection?> EstablishAsync(IZConnection connection, string socketType = "PAIR")
     {
-        using var handshake = new ZmtpHandshake(
-            connection,
-            ZNullMechanism.Instance,
-            ZmtpCommands.BuildReady(socketType),
-            ZmtpParser.DefaultMaxCommandSize);
-        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
+        using var establisher = Establisher(connection, ZNullMechanism.Instance, socketType);
+        var result = await establisher.EstablishAsync(TestContext.Current.CancellationToken);
         return result is not null ? connection : null;
     }
 
-    public static ZmtpParser CreateParser(IZConnection connection, ITestFrameSink sink)
+    /// <summary>The protocol establisher over the connection's ZMTP framing.</summary>
+    public static IZWireEstablisher Establisher(
+        IZConnection connection, IZSecurityMechanism mechanism, string socketType = "PAIR")
+        => ZmqProtocol.Instance.CreateEstablisher(
+            ZmtpFraming.Instance.Adapt(connection, null, ZmtpFraming.DefaultMaxCommandSize),
+            connection,
+            mechanism,
+            ZmtpCommands.BuildReady(socketType),
+            ZmtpFraming.DefaultMaxCommandSize);
+
+    /// <summary>The established session over the connection's ZMTP framing.</summary>
+    public static IZWireSession CreateSession(
+        IZConnection connection, IZFrameCodec? codec = null, Action<Exception>? retire = null)
+        => ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(connection), codec, retire);
+
+    /// <summary>
+    /// The session's receive pump streaming frames to the sink; delivered
+    /// frames are owned (0033) and released after the sink returns.
+    /// </summary>
+    public static IZWirePump CreateParser(IZConnection connection, ITestFrameSink sink)
     {
-        return new ZmtpParser(connection, sink.OnFrameAsync);
+        return CreateSession(connection).CreatePump(
+            async (_, frame, ct) =>
+            {
+                try
+                {
+                    return await sink.OnFrameAsync(frame, ct);
+                }
+                finally
+                {
+                    frame.Dispose();
+                }
+            },
+            null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
     }
 
     /// <summary>Completes the NULL handshake on the connection, then streams its traffic frames to the sink.</summary>
     public static async Task RunParserAsync(IZConnection connection, ITestFrameSink sink)
     {
-        var session = await EstablishAsync(connection);
-        if (session is null) return;
+        var established = await EstablishAsync(connection);
+        if (established is null) return;
 
-        using var parser = CreateParser(session, sink);
-        await parser.ParseAsync(TestContext.Current.CancellationToken);
+        using var session = CreateSession(established);
+        var pump = session.CreatePump(
+            (_, frame, ct) => sink.OnFrameAsync(frame, ct),
+            null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
+        await pump.ParseAsync(TestContext.Current.CancellationToken);
     }
 
-    /// <summary>Runs an already-configured parser to completion.</summary>
-    public static async Task RunParserAsync(ZmtpParser parser)
+    /// <summary>Runs an already-configured pump to completion.</summary>
+    public static async Task RunParserAsync(IZWirePump pump)
     {
-        await parser.ParseAsync(TestContext.Current.CancellationToken);
+        await pump.ParseAsync(TestContext.Current.CancellationToken);
     }
 }
 

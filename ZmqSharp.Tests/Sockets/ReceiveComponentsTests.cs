@@ -47,7 +47,7 @@ public sealed class ReceiveComponentsTests
         using var pool = new CountingMemoryPool();
         using var connection = new EstablishedFakeConnection();
         var registration = new ZEndpointRegistration(connection, null, null, null, CancellationToken.None, abort: connection.Abort);
-        var record = new PeerRecord(connection, registration, false)
+        var record = new PeerRecord(ZmtpFraming.Instance.Adapt(connection), connection, registration, false)
         {
             Phase = PeerPhase.Established,
             Queue = Channel.CreateUnbounded<ZMessage>(),
@@ -78,7 +78,7 @@ public sealed class ReceiveComponentsTests
         var surface = runtime.QueueSurface ?? throw new InvalidOperationException();
         using var connection = new EstablishedFakeConnection();
         var registration = new ZEndpointRegistration(connection, null, null, null, CancellationToken.None, abort: connection.Abort);
-        var record = new PeerRecord(connection, registration, false) { Phase = PeerPhase.Established };
+        var record = new PeerRecord(ZmtpFraming.Instance.Adapt(connection), connection, registration, false) { Phase = PeerPhase.Established };
         lock (runtime.StateLock) surface.Add(record);
         var owners = Enumerable.Range(0, 8).Select(_ => new OnceOwner()).ToArray();
         foreach (var owner in owners) await surface.DeliverAsync(record, ZMessage.FromPooled(owner), token);
@@ -124,13 +124,15 @@ public sealed class ReceiveComponentsTests
         var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
-        using var parser = new ZmtpParser(new HeaderThenFailure(), (_, _, _) =>
-            throw new InvalidOperationException("frame must not be delivered"), materializer.CreateAllocator(), pool);
-        await Assert.ThrowsAsync<IOException>(() => parser.ParseAsync(token).AsTask());
+        var frames = ZmtpFraming.Instance.Adapt(new HeaderThenFailure(), materializer.CreateAllocator(), 100);
+        using var session = ZmqProtocol.Instance.CreateSession(frames, null, null);
+        var pump = session.CreatePump(
+            (_, _, _) => throw new InvalidOperationException("frame must not be delivered"), null, 100, 100);
+        await Assert.ThrowsAsync<IOException>(() => pump.ParseAsync(token).AsTask());
         Assert.Equal(0, pool.Outstanding);
     }
 
-    private sealed class HeaderThenFailure : IZByteReader
+    private sealed class HeaderThenFailure : IZConnection
     {
         private int _position;
 
@@ -140,6 +142,16 @@ public sealed class ReceiveComponentsTests
             destination.Span[0] = _position++ == 0 ? (byte)0 : (byte)8;
             return ValueTask.FromResult(1);
         }
+
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+            => throw new NotSupportedException("the read-failure fixture never writes");
+
+        public ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+            => throw new NotSupportedException("the read-failure fixture never writes");
+
+        public void Abort() { }
+
+        public void Dispose() { }
     }
 
     [Fact]

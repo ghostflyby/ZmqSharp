@@ -14,8 +14,28 @@ public interface IZSocket : IAsyncDisposable
     Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
+    Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing,
+        CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+
     Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
+
+    Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing,
+        CancellationToken token = default)
+        where TTransport : IZTransport<TTransport, TEndpoint>;
+
+    Task BindFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+
+    Task ConnectFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+
+    ValueTask UnbindFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+
+    ValueTask DisconnectFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
 
     void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;
