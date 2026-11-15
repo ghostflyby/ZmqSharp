@@ -120,6 +120,43 @@ public sealed class FrameLayerIntegrationTests
         }
     }
 
+    [Fact(Timeout = 15_000)]
+    public async Task RetainingTransport_PooledMessageContentSurvivesSend()
+    {
+        // The retention contract (0033): a retaining connection takes
+        // ownership at completion, so the runtime must NOT dispose a pooled
+        // message under the receiving chain - the peer reads intact frames,
+        // and its own dispose returns the buffers exactly once.
+        using var pool = new CountingMemoryPool();
+        await using var server = new ZPairSocket(new ZSocketOptions
+        {
+            Pool = pool,
+            ReceiveQueueFactory = new BoundedChannelOptions(4) { SingleWriter = true },
+        });
+        await using var client = new ZPairSocket(new ZSocketOptions { Pool = pool });
+        var token = TestContext.Current.CancellationToken;
+        var endpoint = new LoopbackEndpoint();
+
+        await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+
+        var payload = new byte[2048];
+        for (var i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 251);
+        var pooledOwner = pool.Rent(payload.Length);
+        payload.CopyTo(pooledOwner.Memory);
+        await client.SendAsync(new ZMessage(new ZSingleMessage(
+            new ZFrame(new ZSegment(pooledOwner, 0, payload.Length)))), token);
+
+        using (var received = await server.Messages.ReadAsync(token))
+        {
+            Assert.Equal(payload, received[0].ToSequence().ToArray());
+        }
+
+        // The receiving chain disposed the message; the buffers returned to
+        // the shared pool (both sockets rent from it).
+        await pool.WaitForOutstandingAsync(2, TimeSpan.FromSeconds(5));
+    }
+
     private static int GetFreePort()
     {
         var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -236,6 +273,12 @@ public sealed class FrameLayerIntegrationTests
             => outbound.Writer.WriteAsync(
                 new ZWireUnit(ZmtpFrameFlags.Command, ZMessage.FromOwned(body.ToArray())), token);
 
+        /// <summary>
+        /// Zero-copy channel handoff: the unit stays referenced until the
+        /// receiving chain disposes it (0033's retention contract).
+        /// </summary>
+        public bool RetainsMessages => true;
+
         public void Abort() => outbound.Writer.TryComplete();
 
         public void Dispose()
@@ -324,6 +367,8 @@ public sealed class FrameLayerIntegrationTests
                     pooled.Owner.Dispose();
                 }
             }
+
+            public bool RetainsMessages => false;
 
             public void Abort() => connection.Abort();
 
@@ -444,6 +489,8 @@ public sealed class FrameLayerIntegrationTests
 
                 return null;
             }
+
+            public bool RetainsSentMessages => connection.RetainsMessages;
 
             public void Dispose() => _gate.Dispose();
         }

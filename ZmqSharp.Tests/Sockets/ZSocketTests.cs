@@ -1313,8 +1313,10 @@ public sealed class ZSocketTests
         Assert.Equal([0, 1], received);
 
         // The eight dropped messages were disposed by the library, never seen
-        // by the consumer (0006 section 2.2).
-        Assert.Equal(0, pool.Outstanding);
+        // by the consumer (0006 section 2.2); the server connection's one
+        // lasting rental is its establishment READY's recycled owner, held
+        // until the connection disposes (0033).
+        Assert.Equal(1, pool.Outstanding);
 
         await server.DisposeAsync();
         Assert.Equal(0, pool.Outstanding);
@@ -1420,8 +1422,10 @@ public sealed class ZSocketTests
         for (var i = 0; i < 4; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
 
         // The two buffered items are rented (the materializer allocates each
-        // frame's buffer directly; there is no persistent parser scratch).
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        // frame's buffer directly), plus the establishment READY command's
+        // recycled copy owner, which stays outstanding until the connection
+        // disposes (0033).
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
 
         await client.DisposeAsync();
         await peerEnded.Task.WaitAsync(token);
@@ -1453,7 +1457,9 @@ public sealed class ZSocketTests
 
         await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
         await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        // Two buffered frames plus the establishment READY's recycled owner
+        // (0033).
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
 
         // Disposing with unread buffered messages reclaims them; PeerEnded is
         // unsubscribed during disposal, so this is the only reclaim path.

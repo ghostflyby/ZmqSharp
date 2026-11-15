@@ -11,8 +11,8 @@ namespace ZmqSharp.Transports;
 /// size, and body segments, byte-identical to every ZMTP peer. Reads parse
 /// the frame grammar and re-aggregate More chains into complete messages
 /// (into the receive policy's allocator segments - the zero-copy path - or
-/// staged in one per-connection scratch with borrowed views); non-ERROR
-/// commands arriving mid-traffic are consumed inline. The framing is
+/// staged in one per-connection scratch with owned recycled copies);
+/// commands surface as units for the protocol to consume. The framing is
 /// codec-blind: the encoded-bound rebind and per-frame decoding belong to
 /// the protocol session.
 /// </summary>
@@ -65,6 +65,7 @@ public sealed class ZmtpFraming : IZFraming
         private readonly List<ZFrame> _messageFrames = [];
         private IMemoryOwner<byte>? _scratchOwner;
         private Memory<byte> _scratch;
+        private readonly Lock _ownedPoolGate = new();
         private readonly Stack<RecycledOwner> _ownedPool = new();
 
         public async ValueTask<ZWireUnit?> ReadUnitAsync(CancellationToken token = default)
@@ -102,12 +103,15 @@ public sealed class ZmtpFraming : IZFraming
                     if (_messageFrames.Count > 0)
                         throw new ZeroMqProtocolException("command frame interrupts a More chain");
 
-                    // A command is a single-frame control message; command
-                    // consumption (ERROR faulting, skipping) belongs to the
-                    // protocol above - the framing is codec-blind and must
-                    // not inspect possibly-encoded bodies.
+                    // A command is a single-frame control message, copied to
+                    // an owned buffer so every unit honors the same caller
+                    // ownership (the scratch view would die at the next
+                    // read); command consumption (ERROR faulting, skipping)
+                    // belongs to the protocol above - the framing is
+                    // codec-blind and must not inspect possibly-encoded
+                    // bodies.
                     return new ZWireUnit(ZmtpFrameFlags.Command,
-                        new ZMessage(new ZSingleMessage(wire.frame)));
+                        new ZMessage(new ZSingleMessage(CopyToOwned(wire.frame))));
                 }
 
                 // Aggregated frames must be OWNED: a message outlives the
@@ -124,11 +128,14 @@ public sealed class ZmtpFraming : IZFraming
 
                 if ((wire.flags & ZmtpFrameFlags.More) != 0) continue;
 
+                // The boundary callback runs while the frames are still in
+                // the list, so a throwing callback releases them through the
+                // catch above instead of leaking a half-built message.
+                _onMessageBoundary?.Invoke();
                 var message = _messageFrames.Count == 1
                     ? new ZMessage(new ZSingleMessage(_messageFrames[0]))
                     : new ZMessage(new ZMultiMessage([.. _messageFrames]));
                 _messageFrames.Clear();
-                _onMessageBoundary?.Invoke();
                 return new ZWireUnit(ZmtpFrameFlags.None, message);
             }
         }
@@ -186,6 +193,12 @@ public sealed class ZmtpFraming : IZFraming
         internal ValueTask WriteStagedFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
             => WriteFrameAsync(flags, frame, token);
 
+        /// <summary>
+        /// Copying dialect: the wire writes consume the frames during the
+        /// call, so the sender keeps disposal (0033).
+        /// </summary>
+        public bool RetainsMessages => false;
+
         public void Abort() => connection.Abort();
 
         public void Dispose()
@@ -193,7 +206,10 @@ public sealed class ZmtpFraming : IZFraming
             _scratchOwner?.Dispose();
             _scratchOwner = null;
             _scratch = Memory<byte>.Empty;
-            while (_ownedPool.TryPop(out var recycled)) recycled.DisposeInner();
+            lock (_ownedPoolGate)
+            {
+                while (_ownedPool.TryPop(out var recycled)) recycled.DisposeInner();
+            }
 
             connection.Dispose();
         }
@@ -320,52 +336,92 @@ public sealed class ZmtpFraming : IZFraming
         /// </summary>
         private RecycledOwner RentOwned(int length)
         {
-            while (_ownedPool.TryPop(out var recycled))
+            lock (_ownedPoolGate)
             {
-                if (recycled.Ensure(length)) return recycled;
+                while (_ownedPool.TryPop(out var recycled))
+                {
+                    if (recycled.Ensure(length)) return recycled;
 
-                recycled.DisposeInner();
+                    recycled.DisposeInner();
+                }
             }
 
             return new RecycledOwner(this, length);
         }
 
+        /// <summary>
+        /// A recycled pool buffer. Dispose is idempotent and thread-safe: the
+        /// first dispose recycles the buffer (consumers may dispose on any
+        /// thread), later disposes are no-ops - a double dispose must never
+        /// re-push one buffer to two live messages.
+        /// </summary>
         private sealed class RecycledOwner(ZmtpFramingConnection parent, int length) : IMemoryOwner<byte>
         {
+            private readonly Lock _gate = new();
             private IMemoryOwner<byte>? _owner = parent._pool.Rent(Math.Max(length, 4096));
+            private bool _resident = true;
 
-            public Memory<byte> Memory => _owner?.Memory ?? throw new ObjectDisposedException(nameof(RecycledOwner));
+            public Memory<byte> Memory
+            {
+                get
+                {
+                    lock (_gate)
+                    {
+                        return _owner?.Memory ?? throw new ObjectDisposedException(nameof(RecycledOwner));
+                    }
+                }
+            }
 
             /// <summary>Grows the underlying buffer when a larger frame arrives.</summary>
             public bool Ensure(int length)
             {
-                if (_owner is null || _owner.Memory.Length >= length) return _owner is not null;
+                lock (_gate)
+                {
+                    if (_owner is null || _owner.Memory.Length >= length) return _owner is not null;
 
-                var grown = parent._pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
-                _owner.Dispose();
-                _owner = grown;
-                return true;
+                    var grown = parent._pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
+                    _owner.Dispose();
+                    _owner = grown;
+                    return true;
+                }
             }
 
             public void Dispose()
             {
-                // The segment released this frame; recycle the buffer.
-                var owner = _owner;
-                if (owner is null) return;
-
-                _owner = null;
-                if (parent._ownedPool.Count < 8)
+                IMemoryOwner<byte>? toRelease = null;
+                lock (_gate)
                 {
-                    _owner = owner;
-                    parent._ownedPool.Push(this);
+                    if (!_resident || _owner is null) return;
+
+                    lock (parent._ownedPoolGate)
+                    {
+                        if (parent._ownedPool.Count < 8)
+                        {
+                            // Recycled: the handle stays resident and is
+                            // handed to the next RentOwned; a later dispose
+                            // finds _resident true only after that re-rent.
+                            parent._ownedPool.Push(this);
+                        }
+                        else
+                        {
+                            _resident = false;
+                            toRelease = _owner;
+                            _owner = null;
+                        }
+                    }
                 }
-                else owner.Dispose();
+
+                toRelease?.Dispose();
             }
 
             internal void DisposeInner()
             {
-                _owner?.Dispose();
-                _owner = null;
+                lock (_gate)
+                {
+                    _owner?.Dispose();
+                    _owner = null;
+                    _resident = false;
+                }
             }
         }
 

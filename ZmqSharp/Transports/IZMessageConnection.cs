@@ -45,6 +45,20 @@ public interface IZMessageConnection : IDisposable
 
     /// <summary>Idempotently aborts in-flight I/O without a close handshake.</summary>
     void Abort();
+
+    /// <summary>
+    /// Whether the connection retains a message's frames after
+    /// <see cref="WriteMessageAsync"/> completes. Copying connections
+    /// (framings, kernel-mediated transports) return false: the wire copy
+    /// consumed the bytes during the call and the sender disposes. Retaining
+    /// connections (zero-copy in-proc channels, proxies) return true:
+    /// ownership transfers on completion, the sender must not touch or
+    /// dispose the message, and the receiving chain releases it - for those,
+    /// a completed write says nothing about when the peer is done with the
+    /// storage. When a write throws, ownership stays with the sender
+    /// regardless.
+    /// </summary>
+    bool RetainsMessages { get; }
 }
 
 /// <summary>

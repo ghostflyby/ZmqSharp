@@ -597,33 +597,132 @@ internal sealed class SocketRuntime : IZSocket
     {
         // The closed check is inside the try so a send on a closed socket
         // still disposes the message (a byte-input overload that constructed
-        // it just before the call must not leak its rented buffers).
+        // it just before the call must not leak its rented buffers); a
+        // retaining connection took the original, and its receiving chain
+        // releases it instead (0033).
+        var transferred = false;
         try
         {
             ThrowIfClosed();
-            await SendToTargetsAsync(message, token);
+            transferred = await SendToTargetsAsync(message, token);
         }
         finally
         {
-            message.Dispose();
+            if (!transferred) message.Dispose();
         }
     }
 
-    private async ValueTask SendToTargetsAsync(ZMessage message, CancellationToken token)
+    /// <summary>
+    /// Broadcast send (0033 retention contract): copying connections consume
+    /// the frames during their write; the FIRST retaining connection takes
+    /// the original (and with it the disposal obligation), every further
+    /// retaining connection gets its own copy - each channel holds a unit
+    /// only it will release. Returns true when the original was handed off
+    /// and the caller must NOT dispose it.
+    /// </summary>
+    private async ValueTask<bool> SendToTargetsAsync(ZMessage message, CancellationToken token)
     {
         var snapshot = _peerSnapshot;
         // The policy may select up to every peer; the target buffer is rented
         // so the steady-state path stays GC-allocation-free (ArrayPool reuses
         // the array, 0006 3.6).
         var targets = ArrayPool<ZPeer>.Shared.Rent(snapshot.Length);
+        var transferred = false;
         try
         {
             var count = _dispatch.SelectTargets(message, snapshot, targets.AsSpan(0, snapshot.Length));
-            for (var i = 0; i < count; i++) await SendToPeerAsync(targets[i], message, token);
+            for (var i = 0; i < count; i++)
+            {
+                var target = targets[i];
+                if (transferred && RetainsSent(target))
+                {
+                    // The original already lives in another retaining
+                    // channel; this peer needs its own copy (owned by its
+                    // receiving chain, not the runtime).
+                    await SendToPeerAsync(target, CopyMessage(message), token,
+                        suppressRetirement: true, disposeMessage: true);
+                }
+                else if (await SendToPeerAsync(target, message, token))
+                {
+                    transferred = true;
+                }
+            }
         }
         finally
         {
             ArrayPool<ZPeer>.Shared.Return(targets);
+        }
+
+        return transferred;
+    }
+
+    /// <summary>
+    /// A pooled deep copy for fan-out to a further retaining connection:
+    /// each frame's body rents its own buffer, so the copy's lifetime is
+    /// independent of the original (0033).
+    /// </summary>
+    private static ZMessage CopyMessage(ZMessage message)
+    {
+        var frames = new ZFrame[message.Count];
+        try
+        {
+            for (var i = 0; i < message.Count; i++)
+            {
+                var sequence = message[i].ToSequence();
+                var length = checked((int)sequence.Length);
+                var owner = MemoryPool<byte>.Shared.Rent(length == 0 ? 1 : length);
+                try
+                {
+                    sequence.CopyTo(owner.Memory.Span);
+                    frames[i] = new ZFrame(new ZSegment(owner, 0, length), message[i].More);
+                }
+                catch
+                {
+                    owner.Dispose();
+                    throw;
+                }
+            }
+
+            return frames.Length == 1
+                ? new ZMessage(new ZSingleMessage(frames[0]))
+                : new ZMessage(new ZMultiMessage(frames));
+        }
+        catch
+        {
+            foreach (var frame in frames) frame.Dispose();
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Codec sessions on sink/callback sockets (no receive materializer)
+    /// still need owned decoded frames: their consumers may retain messages
+    /// arbitrarily long, which the session's staged window forbids (0033
+    /// review). One pooled segment per frame; disposal returns it.
+    /// </summary>
+    private ZFrameAllocator PooledDecodedAllocator()
+    {
+        return (length, more) =>
+        {
+            var owner = Pool.Rent(length == 0 ? 1 : length);
+            try
+            {
+                return new ZFrame(new ZSegment(owner, 0, length), more);
+            }
+            catch
+            {
+                owner.Dispose();
+                throw;
+            }
+        };
+    }
+
+    private bool RetainsSent(ZPeer peer)
+    {
+        lock (StateLock)
+        {
+            return _peers.TryGetValue(peer, out var record) && record.Session is { RetainsSentMessages: true };
         }
     }
 
@@ -675,21 +774,31 @@ internal sealed class SocketRuntime : IZSocket
         }
     }
 
-    internal ValueTask SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
+    internal ValueTask<bool> SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         => SendToPeerAsync(peer, message, token, disposeMessage: true);
 
     /// <summary>Borrows a framed request until the write finishes; the request core owns disposal.</summary>
     internal ValueTask SendRequestToAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         ThrowIfClosed();
-        return SendToPeerAsync(peer, message, token, false);
+        return DiscardRetentionAsync(SendToPeerAsync(peer, message, token, false));
     }
 
-    private async ValueTask SendToPeerAsync(ZPeer peer, ZMessage message, CancellationToken token,
+    /// <summary>
+    /// Drops the retention result for callers with the old ValueTask shape:
+    /// disposal was decided inside SendToPeerAsync either way.
+    /// </summary>
+    private static async ValueTask DiscardRetentionAsync(ValueTask<bool> send)
+    {
+        _ = await send;
+    }
+
+    private async ValueTask<bool> SendToPeerAsync(ZPeer peer, ZMessage message, CancellationToken token,
         bool suppressRetirement = true, bool disposeMessage = false)
     {
         PeerRecord? record = null;
         var leased = false;
+        var retained = false;
         try
         {
             token.ThrowIfCancellationRequested();
@@ -698,7 +807,7 @@ internal sealed class SocketRuntime : IZSocket
             {
                 if (!_peers.TryGetValue(peer, out record) || record.Phase >= PeerPhase.Stopping)
                 {
-                    if (suppressRetirement) return;
+                    if (suppressRetirement) return false;
                     throw new IOException("peer retired before send");
                 }
 
@@ -710,15 +819,23 @@ internal sealed class SocketRuntime : IZSocket
                 await record.Established.Task.WaitAsync(token);
             if (record.Session is not { } session) throw new IOException("peer has no established session");
             await session.SendAsync(message, token);
+            // A completed send on a retaining connection transferred
+            // ownership: the receiving chain releases it (0033). The signal
+            // is independent of disposeMessage - broadcast callers decide
+            // disposal from the return value, directed callers from the skip
+            // below.
+            retained = session.RetainsSentMessages;
         }
         catch (Exception ex) when (suppressRetirement && ex is ObjectDisposedException or IOException or SocketException) { }
         catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
         {
-            // Owned background sends release their message before teardown can dispose the session.
+            // Owned background sends release their message before teardown can
+            // dispose the session - unless the connection retained it (a
+            // thrown send never transferred ownership, so failures dispose).
             try
             {
-                if (disposeMessage) message.Dispose();
+                if (disposeMessage && !retained) message.Dispose();
             }
             finally
             {
@@ -730,6 +847,8 @@ internal sealed class SocketRuntime : IZSocket
                     }
             }
         }
+
+        return retained;
     }
 
     /// <summary>
@@ -886,7 +1005,7 @@ internal sealed class SocketRuntime : IZSocket
 
             record.Session = _protocol.CreateSession(
                 record.Frames, established.Codec, fault => RetirePeer(record.Peer, fault),
-                established.Codec is null ? null : record.Materializer?.CreateAllocator(),
+                established.Codec is null ? null : record.Materializer?.CreateAllocator() ?? PooledDecodedAllocator(),
                 _maxCommandSize, _maxFrameLength);
             var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
             if (!_type.AcceptsPeer(peerType))
@@ -929,11 +1048,34 @@ internal sealed class SocketRuntime : IZSocket
                     throw;
                 }
 
-                if (keepGoing) continue;
+                if (!aggregate)
+                {
+                    // The dissected frames were handed to the raw callbacks
+                    // synchronously; the message is consumed (the old borrowed
+                    // tier's valid-until-the-pump-continues semantics).
+                    if (keepGoing)
+                    {
+                        message.Dispose();
+                        continue;
+                    }
+                }
+                else if (keepGoing) continue;
 
+                // Pause: the retained message stays valid until ResumePaused
+                // releases it (0033); a peer that tears down while paused
+                // releases it here - the stale queue entry drained later is
+                // a harmless second dispose.
                 var gate = new MessagePauseGate();
                 _paused.Enqueue((gate, message));
-                await gate.WaitAsync(token);
+                try
+                {
+                    await gate.WaitAsync(token);
+                }
+                catch (OperationCanceledException)
+                {
+                    message.Dispose();
+                    throw;
+                }
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested || record.Phase >= PeerPhase.Stopping)
@@ -1031,8 +1173,13 @@ internal sealed class SocketRuntime : IZSocket
 
         if (handler is not null)
             foreach (var item in Delegate.EnumerateInvocationList(handler))
+            {
                 for (var i = 0; i < message.Count; i++)
+                {
                     keepGoing &= item(message[i], token);
+                    if (!keepGoing) return false;
+                }
+            }
 
         return keepGoing;
     }

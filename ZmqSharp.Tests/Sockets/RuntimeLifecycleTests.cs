@@ -156,7 +156,9 @@ public sealed class RuntimeLifecycleTests
             await cancelled.Task.WaitAsync(token);
             Assert.False(stopping.IsCompleted);
             Assert.Equal(0, endpoint.Connection.Disposals);
-            Assert.Equal(1, pool.Outstanding);
+            // The pending request frame plus the establishment READY's
+            // recycled owner (0033).
+            Assert.Equal(2, pool.Outstanding);
             release.TrySetResult();
             await stopping.WaitAsync(token);
             _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connecting);

@@ -119,14 +119,17 @@ public sealed class ZmqProtocol : IZWireProtocol
         // allocation (0033).
         private byte[] _sendBuffer = [];
         private readonly List<byte[]> _readStaging = [];
+        private readonly List<byte[]> _assemblyStaging = [];
         private readonly List<ZFrame> _decodedFrames = [];
+
+        public bool RetainsSentMessages => connection.RetainsMessages;
 
         public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
         {
             await _sendGate.WaitAsync(token);
             try
             {
-                if (codec is null)
+                if (codec is not { } encoder)
                 {
                     await connection.WriteMessageAsync(message, token);
                     return;
@@ -142,7 +145,7 @@ public sealed class ZmqProtocol : IZWireProtocol
                     for (var i = 0; i < message.Count; i++)
                     {
                         var flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None;
-                        var encoded = codec.Encode(new ZmtpFrameData
+                        var encoded = encoder.Encode(new ZmtpFrameData
                         {
                             Flags = flags,
                             Body = _logical.FromFrame(message[i]),
@@ -155,8 +158,19 @@ public sealed class ZmqProtocol : IZWireProtocol
                     return;
                 }
 
-                var assembled = EncodeMessage(message);
-                await connection.WriteMessageAsync(assembled, token);
+                // Assembled fallback (a custom or native message connection):
+                // each frame stages in its OWN buffer - staging all frames
+                // over one reused buffer would alias them into the last
+                // frame's bytes (0033 review).
+                var assembledMessage = EncodeMessage(encoder, message);
+                try
+                {
+                    await connection.WriteMessageAsync(assembledMessage, token);
+                }
+                finally
+                {
+                    ReleaseStaging(_assemblyStaging);
+                }
             }
             catch (Exception failure)
             {
@@ -180,7 +194,13 @@ public sealed class ZmqProtocol : IZWireProtocol
                     return;
                 }
 
-                var encoded = codec.Encode(new ZmtpFrameData
+                if (codec is not { } commandEncoder)
+                {
+                    await connection.WriteCommandAsync(body, token);
+                    return;
+                }
+
+                var encoded = commandEncoder.Encode(new ZmtpFrameData
                 {
                     Flags = ZmtpFrameFlags.Command,
                     Body = new ReadOnlySequence<byte>(body),
@@ -221,24 +241,27 @@ public sealed class ZmqProtocol : IZWireProtocol
                             throw new ZeroMqProtocolException(
                                 $"command frame exceeds maximum size of {maxCommandSize} bytes");
 
-                        var body = codec is null
-                            ? ZWireFrameLogic.Contiguous(unit.Message[0])
-                            : DecodeBody(unit.Message);
+                        var body = codec is { } decoder ? DecodeBody(decoder, unit.Message)
+                            : ZWireFrameLogic.Contiguous(unit.Message[0]);
                         CheckCommand(body.Span);
                     }
 
+                    // The staged command body was consumed by CheckCommand
+                    // inside this iteration; releasing here bounds a peer
+                    // driving an endless command stream (0033 review).
+                    ReleaseStaging(_readStaging);
                     continue;
                 }
 
-                if (codec is null) return unit.Message;
+                if (codec is not { } sessionCodec) return unit.Message;
 
                 // Codec sessions decode each frame of the aggregated
                 // (encoded) message into fresh frames and rebuild; logical
                 // limits apply after authentication (0008). Without a
                 // decoded allocator the staged frames are valid until the
                 // NEXT read on this session (documented window); the runtime
-                // always supplies the materializer's allocator, which owns
-                // its frames outright.
+                // always supplies an allocator (the materializer's, or its
+                // pooled fallback), which owns its frames outright.
                 ReleaseStaging(_readStaging);
                 _decodedFrames.Clear();
                 var decodedFrames = _decodedFrames;
@@ -249,7 +272,7 @@ public sealed class ZmqProtocol : IZWireProtocol
                         var wireFlags = i < unit.Message.Count - 1
                             ? ZmtpFrameFlags.More
                             : ZmtpFrameFlags.None;
-                        var decoded = codec.Decode(new ZmtpFrameData
+                        var decoded = sessionCodec.Decode(new ZmtpFrameData
                         {
                             Flags = wireFlags,
                             Body = unit.Message[i].ToSequence(),
@@ -318,12 +341,13 @@ public sealed class ZmqProtocol : IZWireProtocol
                 }
 
                 ReleaseStaging(_readStaging);
+                ReleaseStaging(_assemblyStaging);
                 _decodedFrames.Clear();
                 _sendGate.Dispose();
             }
         }
 
-        private ZMessage EncodeMessage(ZMessage message)
+        private ZMessage EncodeMessage(IZFrameCodec encoder, ZMessage message)
         {
             var frames = new ZFrame[message.Count];
             try
@@ -331,13 +355,13 @@ public sealed class ZmqProtocol : IZWireProtocol
                 for (var i = 0; i < message.Count; i++)
                 {
                     var flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None;
-                    var encoded = codec!.Encode(new ZmtpFrameData
+                    var encoded = encoder.Encode(new ZmtpFrameData
                     {
                         Flags = flags,
                         Body = _logical.FromFrame(message[i]),
                     });
                     ZWireFrameLogic.Validate(encoded.Flags);
-                    frames[i] = StageEncoded(encoded);
+                    frames[i] = StageAssembly(encoded);
                 }
 
                 return BuildMessage(frames);
@@ -346,8 +370,24 @@ public sealed class ZmqProtocol : IZWireProtocol
             {
                 foreach (var frame in frames) frame.Dispose();
 
+                ReleaseStaging(_assemblyStaging);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Stages one encoded frame over its OWN pooled buffer (the assembled
+        /// fallback's frames must all stay alive until the write completes),
+        /// tracked for release once the write finishes.
+        /// </summary>
+        private ZFrame StageAssembly(ZmtpFrameData encoded)
+        {
+            var length = checked((int)encoded.Body.Length);
+            var buffer = ArrayPool<byte>.Shared.Rent(Math.Max(length, 4096));
+            _assemblyStaging.Add(buffer);
+            encoded.Body.CopyTo(buffer.AsSpan(0, length));
+            var more = (encoded.Flags & ZmtpFrameFlags.More) != 0;
+            return new ZFrame(new ZSegment(buffer, 0, length), more);
         }
 
         private static ZMessage BuildMessage(List<ZFrame> frames)
@@ -364,7 +404,12 @@ public sealed class ZmqProtocol : IZWireProtocol
         private ZFrame StageEncoded(ZmtpFrameData encoded)
         {
             var length = checked((int)encoded.Body.Length);
-            if (_sendBuffer.Length < length) _sendBuffer = ArrayPool<byte>.Shared.Rent(Math.Max(length, 4096));
+            if (_sendBuffer.Length < length)
+            {
+                if (_sendBuffer.Length > 0) ArrayPool<byte>.Shared.Return(_sendBuffer);
+                _sendBuffer = ArrayPool<byte>.Shared.Rent(Math.Max(length, 4096));
+            }
+
             encoded.Body.CopyTo(_sendBuffer.AsSpan(0, length));
             var more = (encoded.Flags & ZmtpFrameFlags.More) != 0;
             return new ZFrame(new ZSegment(_sendBuffer, 0, length), more);
@@ -394,9 +439,9 @@ public sealed class ZmqProtocol : IZWireProtocol
         }
 
         /// <summary>The decoded body of a single-frame (command) message, staged in read buffers.</summary>
-        private ReadOnlyMemory<byte> DecodeBody(ZMessage message)
+        private ReadOnlyMemory<byte> DecodeBody(IZFrameCodec decoder, ZMessage message)
         {
-            var decoded = codec!.Decode(new ZmtpFrameData
+            var decoded = decoder.Decode(new ZmtpFrameData
             {
                 Flags = ZmtpFrameFlags.Command,
                 Body = message[0].ToSequence(),

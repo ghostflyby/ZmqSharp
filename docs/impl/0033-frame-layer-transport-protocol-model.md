@@ -82,6 +82,22 @@ legitimately group a chain (e.g. one datagram per message). A command is
 a single-frame control message - the establishment currency, surfaced
 beside data messages rather than hidden inside the framing.
 
+### The retention contract (send-side ownership)
+
+`IZMessageConnection.RetainsMessages` declares what a completed write means
+for the message's storage. Copying connections (framings, kernel-mediated
+transports) consume the bytes during the call and return false - the sender
+disposes. Retaining connections (zero-copy in-proc channels, proxies) hand
+the frames onward and return true - ownership transfers on completion, the
+sender must not touch or dispose the message, and the receiving chain
+releases it; a thrown write never transferred ownership, so failures
+dispose. The runtime honors this at the only point that sees a message's
+full fan-out: a broadcast hands the original to the FIRST retaining target
+and copies for each further one (each channel holds a unit only it will
+release); directed and borrowed sends skip disposal when the session
+retains. `IZWireSession.RetainsSentMessages` forwards the declaration so
+protocol implementers surface it from their connection.
+
 ## 3. Existing API impact (0.9.0 breaking changes)
 
 - **Removed** (absorbed, per the repo's retirement precedent - 0022

@@ -51,3 +51,5 @@ ZmqSharp.ZSocketBase.BindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint,
 ZmqSharp.ZSocketBase.ConnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 ZmqSharp.ZSocketBase.DisconnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.ZSocketBase.UnbindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ZmqSharp.Transports.IZMessageConnection.RetainsMessages.get -> bool
+ZmqSharp.Zmtp.IZWireSession.RetainsSentMessages.get -> bool

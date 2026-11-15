@@ -93,4 +93,12 @@ public interface IZWireSession : IDisposable
     /// (and disposes) the returned message.
     /// </summary>
     ValueTask<ZMessage?> ReadMessageAsync(CancellationToken token = default);
+
+    /// <summary>
+    /// Whether the underlying connection retains sent frames after a send
+    /// completes (0033's retention contract): true means ownership
+    /// transferred to the connection and the sender must not dispose; false
+    /// means the wire copy consumed the bytes and the sender disposes.
+    /// </summary>
+    bool RetainsSentMessages { get; }
 }
