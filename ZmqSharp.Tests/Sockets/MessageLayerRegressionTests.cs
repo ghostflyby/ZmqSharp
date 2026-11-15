@@ -57,10 +57,10 @@ public sealed class MessageLayerRegressionTests
         var endpoint = TestTransports.GetEndpoint(TransportKind.Tcp);
 
         await using (var server = new ZPairSocket(new ZSocketOptions
-                     {
-                         Pool = pool,
-                         ReceiveSurface = ZReceiveSurface.Callback,
-                     }))
+        {
+            Pool = pool,
+            ReceiveSurface = ZReceiveSurface.Callback,
+        }))
         await using (var client = new ZPairSocket())
         {
             await server.BindAsync(endpoint, token);
