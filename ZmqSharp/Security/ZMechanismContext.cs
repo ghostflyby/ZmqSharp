@@ -22,7 +22,7 @@ public sealed class ZMechanismContext : IDisposable
         ReadOnlyMemory<byte> localReadyBody,
         long maxCommandSize,
         MemoryPool<byte>? pool = null)
-        : this(new FrameCommandChannel(ZmtpFraming.Instance.Adapt(connection), maxCommandSize),
+        : this(new UnitCommandChannel(ZmtpFraming.Instance.Adapt(connection), maxCommandSize),
             localReadyBody, maxCommandSize)
     {
         // The public constructor keeps its byte-connection shape: ZMTP

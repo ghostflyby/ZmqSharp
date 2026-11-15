@@ -68,14 +68,12 @@ public class CurveTrafficAllocationTests
         long allocated = 0;
         var thread = Environment.CurrentManagedThreadId;
         using var readSession = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(input), codec);
-        var parser = readSession.CreatePump((_, frame, _) =>
+        while (await readSession.ReadMessageAsync(TestContext.Current.CancellationToken) is { } message)
         {
             if (++seen == warmup) before = GC.GetAllocatedBytesForCurrentThread();
             if (seen == count + warmup) allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-            frame.Dispose();
-            return ValueTask.FromResult(true);
-        }, null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
-        await parser.ParseAsync(TestContext.Current.CancellationToken);
+            message.Dispose();
+        }
         Assert.Equal(count + warmup, seen);
         Assert.Equal(thread, Environment.CurrentManagedThreadId);
 #if !DEBUG

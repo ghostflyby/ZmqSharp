@@ -463,8 +463,8 @@ internal static class ZmtpTestRunner
 {
     /// <summary>
     /// Completes the NULL handshake (greeting + READY) on the connection via
-    /// the frame-layer seams (ZMTP framing + the built-in protocol) and
-    /// returns the connection to run the traffic pump on.
+    /// the message-layer seams (ZMTP framing + the built-in protocol) and
+    /// returns the connection to run message reads on.
     /// </summary>
     public static async Task<IZConnection?> EstablishAsync(IZConnection connection, string socketType = "PAIR")
     {
@@ -489,43 +489,31 @@ internal static class ZmtpTestRunner
         => ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(connection), codec, retire);
 
     /// <summary>
-    /// The session's receive pump streaming frames to the sink; delivered
-    /// frames are owned (0033) and released after the sink returns.
+    /// Streams traffic messages to the sink's frames: each complete message
+    /// is dissected into its (stable, materialized) frames and the sink sees
+    /// them in order; the message is released after its frames are consumed
+    /// (0033).
     /// </summary>
-    public static IZWirePump CreateParser(IZConnection connection, ITestFrameSink sink)
-    {
-        return CreateSession(connection).CreatePump(
-            async (_, frame, ct) =>
-            {
-                try
-                {
-                    return await sink.OnFrameAsync(frame, ct);
-                }
-                finally
-                {
-                    frame.Dispose();
-                }
-            },
-            null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
-    }
-
-    /// <summary>Completes the NULL handshake on the connection, then streams its traffic frames to the sink.</summary>
     public static async Task RunParserAsync(IZConnection connection, ITestFrameSink sink)
     {
         var established = await EstablishAsync(connection);
         if (established is null) return;
 
         using var session = CreateSession(established);
-        var pump = session.CreatePump(
-            (_, frame, ct) => sink.OnFrameAsync(frame, ct),
-            null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
-        await pump.ParseAsync(TestContext.Current.CancellationToken);
-    }
-
-    /// <summary>Runs an already-configured pump to completion.</summary>
-    public static async Task RunParserAsync(IZWirePump pump)
-    {
-        await pump.ParseAsync(TestContext.Current.CancellationToken);
+        var token = TestContext.Current.CancellationToken;
+        while (await session.ReadMessageAsync(token) is { } message)
+        {
+            try
+            {
+                foreach (var frame in message)
+                    if (!await sink.OnFrameAsync(frame, token))
+                        break;
+            }
+            finally
+            {
+                message.Dispose();
+            }
+        }
     }
 }
 

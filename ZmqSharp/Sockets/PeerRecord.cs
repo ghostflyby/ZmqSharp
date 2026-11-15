@@ -20,7 +20,7 @@ internal enum PeerPhase
 /// protocol session and pump run over it. Aborting and disposing the frame
 /// connection releases the byte origin with it.
 /// </summary>
-internal sealed class PeerRecord(IZFrameConnection frames, IZConnection? bytes,
+internal sealed class PeerRecord(IZMessageConnection frames, IZConnection? bytes,
     ZEndpointRegistration registration, bool accepted)
 {
     public ZPeer Peer { get; } = new();
@@ -30,7 +30,7 @@ internal sealed class PeerRecord(IZFrameConnection frames, IZConnection? bytes,
     /// re-adapts the byte origin after establishment (codec-aware bounds and
     /// the zero-copy allocator, 0033).
     /// </summary>
-    public IZFrameConnection Frames { get; internal set; } = frames;
+    public IZMessageConnection Frames { get; internal set; } = frames;
     public IZConnection? Bytes { get; } = bytes;
     public ZEndpointRegistration Registration { get; } = registration;
     public bool Accepted { get; } = accepted;

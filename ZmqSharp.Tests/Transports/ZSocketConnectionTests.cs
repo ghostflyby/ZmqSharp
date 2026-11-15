@@ -162,25 +162,23 @@ public sealed class ZSocketConnectionTests
             using var message = MessageFactory.SegmentedFrame(first, second);
             var delivered = 0;
             using var receiveSession = ZmtpTestRunner.CreateSession(reader);
-            var parser = receiveSession.CreatePump(
-                async (_, frame, _) =>
+            var receiving = Task.Run(async () =>
+            {
+                while (await receiveSession.ReadMessageAsync(token) is { } message)
                 {
-                    try
+                    using (message)
                     {
-                        var content = frame.ToSequence().ToArray();
-                        Assert.Equal(first.Length + second.Length, content.Length);
-                        Assert.True(content.AsSpan(0, first.Length).SequenceEqual(first));
-                        Assert.True(content.AsSpan(first.Length).SequenceEqual(second));
-                        delivered++;
-                        return true;
+                        foreach (var frame in message)
+                        {
+                            var content = frame.ToSequence().ToArray();
+                            Assert.Equal(first.Length + second.Length, content.Length);
+                            Assert.True(content.AsSpan(0, first.Length).SequenceEqual(first));
+                            Assert.True(content.AsSpan(first.Length).SequenceEqual(second));
+                            delivered++;
+                        }
                     }
-                    finally
-                    {
-                        frame.Dispose();
-                    }
-                },
-                null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
-            var receiving = parser.ParseAsync(token).AsTask();
+                }
+            }, token);
             await session.SendAsync(message, token);
             writer.Abort();
             await receiving.WaitAsync(token);

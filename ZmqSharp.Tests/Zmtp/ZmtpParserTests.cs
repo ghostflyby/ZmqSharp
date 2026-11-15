@@ -105,18 +105,28 @@ public sealed class ZmtpParserTests
             firstDelivered.TrySetResult();
             return false;
         });
-        var session = await ZmtpTestRunner.EstablishAsync(connection);
-        var parser =
-            ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
-                recorder);
+        var session = await ZmtpTestRunner.EstablishAsync(connection)
+                      ?? throw new InvalidOperationException("handshake failed");
 
+        // The message-currency reader (0033): a consumer that stops reading
+        // parks the stream - the pause the old pump's Resume() performed.
         var token = TestContext.Current.CancellationToken;
-        var parseTask = parser.ParseAsync(token).AsTask();
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parseTask = Task.Run(async () =>
+        {
+            using var messageSession = ZmtpTestRunner.CreateSession(session);
+            while (await messageSession.ReadMessageAsync(token) is { } message)
+            {
+                foreach (var frame in message) recorder.OnFrameAsync(frame, token);
+                message.Dispose();
+                if (frames.Count == 1) await resume.Task.WaitAsync(token);
+            }
+        }, token);
         await firstDelivered.Task.WaitAsync(token);
         Assert.Single(frames);
         Assert.False(parseTask.IsCompleted);
 
-        parser.Resume();
+        resume.SetResult();
         await parseTask.WaitAsync(token);
         Assert.Equal(2, frames.Count);
         Assert.Equal([.. "two"u8], frames[1]);
@@ -146,13 +156,21 @@ public sealed class ZmtpParserTests
             await release.Task; // pending ValueTask = backpressure
             return true;
         });
-        var session = await ZmtpTestRunner.EstablishAsync(connection);
-        var parser =
-            ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
-                sink);
+        var session = await ZmtpTestRunner.EstablishAsync(connection)
+                      ?? throw new InvalidOperationException("handshake failed");
 
+        // A pending sink task is backpressure by itself (0033): the read
+        // loop awaits the sink before reading on.
         var token = TestContext.Current.CancellationToken;
-        var parseTask = parser.ParseAsync(token).AsTask();
+        using var messageSession = ZmtpTestRunner.CreateSession(session);
+        var parseTask = Task.Run(async () =>
+        {
+            while (await messageSession.ReadMessageAsync(token) is { } message)
+            {
+                foreach (var frame in message) await sink.OnFrameAsync(frame, token);
+                message.Dispose();
+            }
+        }, token);
         await firstSeen.Task.WaitAsync(token);
         Assert.Single(frames);
         Assert.False(parseTask.IsCompleted);

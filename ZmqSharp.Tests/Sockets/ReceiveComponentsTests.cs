@@ -124,11 +124,9 @@ public sealed class ReceiveComponentsTests
         var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
-        var frames = ZmtpFraming.Instance.Adapt(new HeaderThenFailure(), materializer.CreateAllocator(), 100);
-        using var session = ZmqProtocol.Instance.CreateSession(frames, null, null);
-        var pump = session.CreatePump(
-            (_, _, _) => throw new InvalidOperationException("frame must not be delivered"), null, 100, 100);
-        await Assert.ThrowsAsync<IOException>(() => pump.ParseAsync(token).AsTask());
+        var messages = ZmtpFraming.Instance.Adapt(new HeaderThenFailure(), materializer.CreateAllocator(), 100);
+        using var session = ZmqProtocol.Instance.CreateSession(messages, null, null);
+        await Assert.ThrowsAsync<IOException>(() => session.ReadMessageAsync(token).AsTask());
         Assert.Equal(0, pool.Outstanding);
     }
 

@@ -9,18 +9,18 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Tests.Transports;
 
 /// <summary>
-/// The frame-layer integration proofs (0033): each plug point hosts a real
-/// socket end to end through the socket runtime. (a) A native frame transport
-/// (an in-proc channel pair passing whole owned frames, zero-copy) via the
-/// frame-transport factory and Bind/ConnectFrameAsync. (b) A custom framing
-/// over a byte transport (a 4-byte big-endian length prefix instead of ZMTP's
-/// flag+size) via the framing overload. (c) A custom wire protocol (a
-/// greeting-less one-command establishment) via ZSocketOptions.WireProtocol.
+/// The message-layer integration proofs (0033): each plug point hosts a real
+/// socket end to end through the socket runtime. (a) A native message
+/// transport (an in-proc channel pair passing whole messages, zero-copy) via
+/// the message-transport factory and Bind/ConnectMessageAsync. (b) A custom
+/// framing over a byte transport (a 4-byte big-endian length prefix instead
+/// of ZMTP's flag+size) via the framing overload. (c) A custom wire protocol
+/// (a greeting-less one-command establishment) via ZSocketOptions.WireProtocol.
 /// </summary>
 public sealed class FrameLayerIntegrationTests
 {
     [Fact(Timeout = 15_000)]
-    public async Task NativeFrameTransport_ExchangesMessagesEndToEnd()
+    public async Task NativeMessageTransport_ExchangesMessagesEndToEnd()
     {
         await using var server = new ZPairSocket(
             new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
@@ -29,8 +29,8 @@ public sealed class FrameLayerIntegrationTests
         var token = TestContext.Current.CancellationToken;
         var endpoint = new LoopbackEndpoint();
 
-        await server.BindFrameAsync<LoopbackEndpoint, LoopbackFrameTransport>(endpoint, token);
-        await client.ConnectFrameAsync<LoopbackEndpoint, LoopbackFrameTransport>(endpoint, token);
+        await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
 
         await client.SendAsync(ZMessage.FromOwned([.. "alpha"u8]), token);
         using (var received = await server.Messages.ReadAsync(token))
@@ -44,7 +44,7 @@ public sealed class FrameLayerIntegrationTests
             Assert.Equal([.. "beta"u8], echoed[0].ToSequence().ToArray());
         }
 
-        // Multipart frames keep their boundaries across the channel pair.
+        // Multipart messages cross the channel pair whole.
         await client.SendAsync(MessageFactory.Multipart([.. "one"u8], [.. "two"u8], [.. "three"u8]), token);
         using (var multipart = await server.Messages.ReadAsync(token))
         {
@@ -54,8 +54,8 @@ public sealed class FrameLayerIntegrationTests
             Assert.Equal([.. "three"u8], multipart[2].ToSequence().ToArray());
         }
 
-        await client.DisconnectFrameAsync<LoopbackEndpoint, LoopbackFrameTransport>(endpoint, token);
-        await server.UnbindFrameAsync<LoopbackEndpoint, LoopbackFrameTransport>(endpoint, token);
+        await client.DisconnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await server.UnbindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
     }
 
     [Fact(Timeout = 15_000)]
@@ -91,8 +91,8 @@ public sealed class FrameLayerIntegrationTests
     public async Task CustomWireProtocol_EstablishesWithoutGreeting_AndExchangesFrames()
     {
         // A greeting-less protocol: the establishment is a single READY
-        // command frame in each direction, then frame-per-message traffic -
-        // the shape a native frame transport wants when no raw greeting can
+        // command in each direction, then message-per-unit traffic - the
+        // shape a native message transport wants when no raw greeting can
         // exist. Both ends run the custom protocol via WireProtocol.
         var protocol = new HandshakeFreeProtocol();
         await using var server = new ZPairSocket(new ZSocketOptions
@@ -108,8 +108,8 @@ public sealed class FrameLayerIntegrationTests
         var token = TestContext.Current.CancellationToken;
         var endpoint = new LoopbackEndpoint();
 
-        await server.BindFrameAsync<LoopbackEndpoint, LoopbackFrameTransport>(endpoint, token);
-        await client.ConnectFrameAsync<LoopbackEndpoint, LoopbackFrameTransport>(endpoint, token);
+        await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
 
         Assert.Equal(2, protocol.Establishments); // both endpoints ran the custom establishment
 
@@ -130,28 +130,28 @@ public sealed class FrameLayerIntegrationTests
     }
 
     /// <summary>
-    /// An in-proc frame transport: BindAsync registers the bound side in a
+    /// An in-proc message transport: BindAsync registers the bound side in a
     /// static map; ConnectAsync pairs the two ends through a duplex channel
-    /// of whole owned frames (the zero-copy native-frame path) and wakes the
+    /// of whole wire units (the zero-copy native-message path) and wakes the
     /// listener's accept loop.
     /// </summary>
     private sealed class LoopbackEndpoint;
 
-    private sealed class LoopbackFrameTransport : IZFrameTransport<LoopbackFrameTransport, LoopbackEndpoint>
+    private sealed class LoopbackMessageTransport : IZMessageTransport<LoopbackMessageTransport, LoopbackEndpoint>
     {
         private static readonly Dictionary<LoopbackEndpoint, BoundPair> Bound = new();
         private static readonly Lock Gate = new();
 
         private BoundPair? _pair;
-        private Func<IZFrameConnection, CancellationToken, ValueTask>? _onAccept;
+        private Func<IZMessageConnection, CancellationToken, ValueTask>? _onAccept;
 
-        public event Func<IZFrameConnection, CancellationToken, ValueTask>? OnAccept
+        public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
         {
             add => _onAccept += value;
             remove => _onAccept -= value;
         }
 
-        public static async ValueTask<IZFrameConnection> ConnectAsync(LoopbackEndpoint endpoint,
+        public static async ValueTask<IZMessageConnection> ConnectAsync(LoopbackEndpoint endpoint,
             CancellationToken token = default)
         {
             BoundPair bound;
@@ -161,15 +161,15 @@ public sealed class FrameLayerIntegrationTests
                     throw new InvalidOperationException("no loopback endpoint bound");
             }
 
-            var connection = new LoopbackFrameConnection(bound.ServerToClient, bound.ClientToServer);
+            var connection = new LoopbackMessageConnection(bound.ServerToClient, bound.ClientToServer);
             bound.Incoming.SetResult(connection);
-            return new LoopbackFrameConnection(bound.ClientToServer, bound.ServerToClient);
+            return new LoopbackMessageConnection(bound.ClientToServer, bound.ServerToClient);
         }
 
-        public static ValueTask<LoopbackFrameTransport> BindAsync(LoopbackEndpoint endpoint,
+        public static ValueTask<LoopbackMessageTransport> BindAsync(LoopbackEndpoint endpoint,
             CancellationToken token = default)
         {
-            var transport = new LoopbackFrameTransport();
+            var transport = new LoopbackMessageTransport();
             lock (Gate)
             {
                 transport._pair = new BoundPair();
@@ -201,36 +201,40 @@ public sealed class FrameLayerIntegrationTests
 
         private sealed class BoundPair
         {
-            public TaskCompletionSource<IZFrameConnection> Incoming { get; } =
+            public TaskCompletionSource<IZMessageConnection> Incoming { get; } =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            public Channel<ZWireFrame> ServerToClient { get; } =
-                Channel.CreateUnbounded<ZWireFrame>(new UnboundedChannelOptions { SingleReader = true });
+            public Channel<ZWireUnit> ServerToClient { get; } =
+                Channel.CreateUnbounded<ZWireUnit>(new UnboundedChannelOptions { SingleReader = true });
 
-            public Channel<ZWireFrame> ClientToServer { get; } =
-                Channel.CreateUnbounded<ZWireFrame>(new UnboundedChannelOptions { SingleReader = true });
+            public Channel<ZWireUnit> ClientToServer { get; } =
+                Channel.CreateUnbounded<ZWireUnit>(new UnboundedChannelOptions { SingleReader = true });
         }
     }
 
     /// <summary>
-    /// A channel-backed frame connection: reads take frame ownership from the
-    /// channel; writes transfer the caller's frame into the channel. The
-    /// peer's channel completion is EOF.
+    /// A channel-backed message connection: reads take unit ownership from
+    /// the channel; writes transfer the caller's message into the channel.
+    /// The peer's channel completion is EOF.
     /// </summary>
-    private sealed class LoopbackFrameConnection(
-        Channel<ZWireFrame> inbound, Channel<ZWireFrame> outbound) : IZFrameConnection
+    private sealed class LoopbackMessageConnection(
+        Channel<ZWireUnit> inbound, Channel<ZWireUnit> outbound) : IZMessageConnection
     {
         private bool _disposed;
 
-        public async ValueTask<ZWireFrame?> ReadFrameAsync(CancellationToken token = default)
+        public async ValueTask<ZWireUnit?> ReadUnitAsync(CancellationToken token = default)
         {
             if (!await inbound.Reader.WaitToReadAsync(token)) return null;
 
             return await inbound.Reader.ReadAsync(token);
         }
 
-        public ValueTask WriteFrameAsync(ZWireFrame frame, CancellationToken token = default)
-            => outbound.Writer.WriteAsync(frame, token);
+        public ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
+            => outbound.Writer.WriteAsync(new ZWireUnit(ZmtpFrameFlags.None, message), token);
+
+        public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
+            => outbound.Writer.WriteAsync(
+                new ZWireUnit(ZmtpFrameFlags.Command, ZMessage.FromOwned(body.ToArray())), token);
 
         public void Abort() => outbound.Writer.TryComplete();
 
@@ -248,47 +252,88 @@ public sealed class FrameLayerIntegrationTests
     {
         public static LengthPrefixFraming Instance { get; } = new();
 
-        public IZFrameConnection Adapt(IZConnection connection)
+        public IZMessageConnection Adapt(IZConnection connection)
             => new LengthPrefixConnection(connection);
 
-        private sealed class LengthPrefixConnection(IZConnection connection) : IZFrameConnection
+        private sealed class LengthPrefixConnection(IZConnection connection) : IZMessageConnection
         {
             private readonly byte[] _header = new byte[5];
             private readonly FrameSequence _wire = new();
+            private readonly List<ZFrame> _frames = [];
 
-            public async ValueTask<ZWireFrame?> ReadFrameAsync(CancellationToken token = default)
+            public async ValueTask<ZWireUnit?> ReadUnitAsync(CancellationToken token = default)
             {
-                if (!await TryReadExactlyAsync(_header, token)) return null;
-
-                var flags = (ZmtpFrameFlags)_header[0];
-                ZWireFrame.Validate(flags);
-                var length = BinaryPrimitives.ReadInt32BigEndian(_header.AsSpan(1));
-                if (length < 0) throw new IOException("negative frame length");
-
-                var owner = MemoryPool<byte>.Shared.Rent(length == 0 ? 1 : length);
-                try
+                while (true)
                 {
-                    if (!await TryReadExactlyAsync(owner.Memory[..length], token))
-                    {
-                        owner.Dispose();
-                        return null;
-                    }
+                    if (!await TryReadExactlyAsync(_header, token)) return null;
+
+                    var flags = (ZmtpFrameFlags)_header[0];
+                    ZWireFrameLogic.Validate(flags);
+                    var length = BinaryPrimitives.ReadInt32BigEndian(_header.AsSpan(1));
+                    if (length < 0) throw new IOException("negative frame length");
 
                     var more = (flags & ZmtpFrameFlags.More) != 0;
-                    return new ZWireFrame(flags, new ZFrame(new ZSegment(owner, 0, length), more));
-                }
-                catch
-                {
-                    owner.Dispose();
-                    throw;
+                    var owner = MemoryPool<byte>.Shared.Rent(length == 0 ? 1 : length);
+                    ZFrame frame;
+                    try
+                    {
+                        if (!await TryReadExactlyAsync(owner.Memory[..length], token))
+                        {
+                            owner.Dispose();
+                            return null;
+                        }
+
+                        frame = new ZFrame(new ZSegment(owner, 0, length), more);
+                    }
+                    catch
+                    {
+                        owner.Dispose();
+                        throw;
+                    }
+
+                    if ((flags & ZmtpFrameFlags.Command) != 0)
+                        return new ZWireUnit(ZmtpFrameFlags.Command, new ZMessage(new ZSingleMessage(frame)));
+
+                    _frames.Add(frame);
+                    if (more) continue;
+
+                    var message = _frames.Count == 1
+                        ? new ZMessage(new ZSingleMessage(_frames[0]))
+                        : new ZMessage(new ZMultiMessage([.. _frames]));
+                    _frames.Clear();
+                    return new ZWireUnit(ZmtpFrameFlags.None, message);
                 }
             }
 
-            public async ValueTask WriteFrameAsync(ZWireFrame frame, CancellationToken token = default)
+            public async ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
             {
-                ZWireFrame.Validate(frame.Flags);
-                var body = frame.Frame.ToSequence();
-                _header[0] = (byte)frame.Flags;
+                for (var i = 0; i < message.Count; i++)
+                    await WriteFrameAsync(i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None,
+                        message[i], token);
+            }
+
+            public async ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
+            {
+                var pooled = ZWireFrameLogic.Copy(ZmtpFrameFlags.Command, body.Span);
+                try
+                {
+                    await WriteFrameAsync(ZmtpFrameFlags.Command, pooled.Wire, token);
+                }
+                finally
+                {
+                    pooled.Owner.Dispose();
+                }
+            }
+
+            public void Abort() => connection.Abort();
+
+            public void Dispose() => connection.Dispose();
+
+            private async ValueTask WriteFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
+            {
+                ZWireFrameLogic.Validate(flags);
+                var body = frame.ToSequence();
+                _header[0] = (byte)flags;
                 BinaryPrimitives.WriteInt32BigEndian(_header.AsSpan(1), checked((int)body.Length));
 
                 _wire.Clear();
@@ -296,10 +341,6 @@ public sealed class FrameLayerIntegrationTests
                 foreach (var segment in body) _wire.Add(segment);
                 await connection.WriteAsync(_wire.Sequence, token);
             }
-
-            public void Abort() => connection.Abort();
-
-            public void Dispose() => connection.Dispose();
 
             private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)
             {
@@ -318,42 +359,43 @@ public sealed class FrameLayerIntegrationTests
     }
 
     /// <summary>
-    /// A greeting-less wire protocol: establishment is one READY command
-    /// frame in each direction (no greeting, no mechanism), then frame-per-
-    /// message traffic straight through - the custom-protocol plug point.
+    /// A greeting-less wire protocol: establishment is one READY command in
+    /// each direction (no greeting, no mechanism), then message-per-unit
+    /// traffic straight through - the custom-protocol plug point.
     /// </summary>
     private sealed class HandshakeFreeProtocol : IZWireProtocol
     {
         public int Establishments { get; private set; }
 
         public IZWireEstablisher CreateEstablisher(
-            IZFrameConnection frames, IZConnection? byteConnection,
+            IZMessageConnection connection, IZConnection? byteConnection,
             IZSecurityMechanism mechanism, ReadOnlyMemory<byte> localReadyBody, long maxCommandSize,
             MemoryPool<byte>? pool = null)
-            => new Establisher(this, frames, localReadyBody);
+            => new Establisher(this, connection, localReadyBody);
 
-        public IZWireSession CreateSession(IZFrameConnection frames, IZFrameCodec? codec = null,
-            Action<Exception>? retire = null)
-            => new Session(frames);
+        public IZWireSession CreateSession(IZMessageConnection connection, IZFrameCodec? codec = null,
+            Action<Exception>? retire = null, ZFrameAllocator? decodedAllocator = null,
+            long maxCommandSize = ZmtpFraming.DefaultMaxCommandSize, long maxFrameLength = long.MaxValue)
+            => new Session(connection);
 
-        private sealed class Establisher(HandshakeFreeProtocol owner, IZFrameConnection frames,
+        private sealed class Establisher(HandshakeFreeProtocol owner, IZMessageConnection connection,
             ReadOnlyMemory<byte> localReadyBody) : IZWireEstablisher
         {
             public async ValueTask<ZMechanismResult?> EstablishAsync(CancellationToken token = default)
             {
-                await WriteCommandAsync(frames, localReadyBody, token);
-                if (await frames.ReadFrameAsync(token) is not { } peer) return null;
+                await connection.WriteCommandAsync(localReadyBody, token);
+                if (await connection.ReadUnitAsync(token) is not { } peer) return null;
 
                 byte[] peerReady;
-                using (peer.Frame)
+                using (peer.Message)
                 {
-                    if ((peer.Flags & ZmtpFrameFlags.Command) == 0)
-                        throw new ZeroMqProtocolException("expected the peer's READY command frame");
+                    if (!peer.IsCommand || peer.Message.Count != 1)
+                        throw new ZeroMqProtocolException("expected the peer's READY command");
 
                     // ZMechanismResult.PeerReadyBody is the metadata section
                     // after the command name - the same convention the
                     // mechanism context hands to protocol sessions.
-                    var body = ZWireFrame.Contiguous(peer.Frame);
+                    var body = ZWireFrameLogic.Contiguous(peer.Message[0]);
                     if (!ZmtpCommandCodec.TryReadCommandName(body.Span, out var name))
                         throw new ZeroMqProtocolException("malformed READY command name");
 
@@ -361,29 +403,22 @@ public sealed class FrameLayerIntegrationTests
                 }
 
                 owner.Establishments++;
-                // The mechanism result carries the PEER's READY body (the
-                // runtime parses the peer's socket type from it).
                 return new ZMechanismResult(null, peerReady);
             }
 
             public void Dispose() { }
         }
 
-        private sealed class Session(IZFrameConnection frames) : IZWireSession
+        private sealed class Session(IZMessageConnection connection) : IZWireSession
         {
             private readonly SemaphoreSlim _gate = new(1, 1);
-            private readonly FrameSequence _sequence = new();
 
             public async ValueTask SendAsync(ZMessage message, CancellationToken token = default)
             {
                 await _gate.WaitAsync(token);
                 try
                 {
-                    for (var i = 0; i < message.Count; i++)
-                    {
-                        var flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None;
-                        await frames.WriteFrameAsync(new ZWireFrame(flags, message[i]), token);
-                    }
+                    await connection.WriteMessageAsync(message, token);
                 }
                 finally
                 {
@@ -392,38 +427,25 @@ public sealed class FrameLayerIntegrationTests
             }
 
             public ValueTask SendCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-                => WriteCommandAsync(frames, body, token);
+                => connection.WriteCommandAsync(body, token);
 
-            public IZWirePump CreatePump(
-                Func<IZWirePump, ZFrame, CancellationToken, ValueTask<bool>> onFrame,
-                ZFrameAllocator? allocator = null, long maxCommandSize = 0, long maxFrameLength = 0)
-                => new Pump(frames, onFrame);
+            public async ValueTask<ZMessage?> ReadMessageAsync(CancellationToken token = default)
+            {
+                while (await connection.ReadUnitAsync(token) is { } unit)
+                {
+                    if (unit.IsCommand)
+                    {
+                        unit.Message.Dispose();
+                        continue;
+                    }
+
+                    return unit.Message;
+                }
+
+                return null;
+            }
 
             public void Dispose() => _gate.Dispose();
         }
-
-        private sealed class Pump(
-            IZFrameConnection frames,
-            Func<IZWirePump, ZFrame, CancellationToken, ValueTask<bool>> onFrame) : IZWirePump
-        {
-            public async ValueTask ParseAsync(CancellationToken token = default)
-            {
-                while (await frames.ReadFrameAsync(token) is { } wire)
-                {
-                    using var frame = wire.Frame;
-                    if ((wire.Flags & ZmtpFrameFlags.Command) != 0) continue;
-
-                    if (!await onFrame(this, wire.Frame, token)) await ResumeGate;
-                }
-            }
-
-            private Task ResumeGate => Task.CompletedTask;
-
-            public void Resume() { }
-        }
-
-        private static ValueTask WriteCommandAsync(IZFrameConnection frames,
-            ReadOnlyMemory<byte> body, CancellationToken token)
-            => frames.WriteFrameAsync(ZWireFrame.Copy(ZmtpFrameFlags.Command, body.Span).Wire, token);
     }
 }

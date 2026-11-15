@@ -25,17 +25,17 @@ public interface IZSocket : IAsyncDisposable
         CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>;
 
-    Task BindFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+    Task BindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZMessageTransport<TTransport, TEndpoint>;
 
-    Task ConnectFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+    Task ConnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZMessageTransport<TTransport, TEndpoint>;
 
-    ValueTask UnbindFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+    ValueTask UnbindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZMessageTransport<TTransport, TEndpoint>;
 
-    ValueTask DisconnectFrameAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZFrameTransport<TTransport, TEndpoint>;
+    ValueTask DisconnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
+        where TTransport : IZMessageTransport<TTransport, TEndpoint>;
 
     void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint>;

@@ -116,10 +116,11 @@ public class ReceiveAllocationTests
             peer.Enqueue(AllocationFrameData.Frame([(byte)i]));
         await sink.WaitForAsync(count);
 
-        // One rent per single-frame message (the aggregation handler's copy of
-        // the borrowed frame, unchanged); the +1 covers the framing scratch,
-        // rented once and rebound in place after establishment (0033).
-        Assert.Equal(count + 1, pool.Rentals);
+        // The framing's aggregation copies ride the connection's recycled
+        // owner pool: one socket-pool rent per live buffer (reused across
+        // messages), plus the framing scratch - both released at connection
+        // dispose (0033).
+        Assert.Equal(2, pool.Rentals);
     }
 
     [Fact(Timeout = 15_000)]

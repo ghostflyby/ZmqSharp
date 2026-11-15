@@ -125,10 +125,9 @@ public sealed class CurveSessionTrafficTests
         // encoded size beyond it rejects before any body is read.
         using var session = ZmqProtocol.Instance.CreateSession(
             ZmtpFraming.Instance.Adapt(raw, null, 256), null);
-        var pump = session.CreatePump(
-            (_, _, _) => throw new InvalidOperationException("unexpected delivery"), null, 256, 8);
         // There is no body: ignoring the header bound would silently hit EOF.
-        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => pump.ParseAsync(token).AsTask());
+        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(
+            () => session.ReadMessageAsync(token).AsTask());
         Assert.Contains("exceeds maximum length", exception.Message);
     }
 
@@ -151,13 +150,14 @@ public sealed class CurveSessionTrafficTests
         // scratch rent); the decoded frame then materializes through the
         // allocator, whose 8-byte limit rejects before renting.
         using var readSession = ZmqProtocol.Instance.CreateSession(
-            ZmtpFraming.Instance.Adapt(input, null, long.MaxValue, pool), codec);
-        var pump = readSession.CreatePump(
-            (_, _, _) => throw new InvalidOperationException("unexpected delivery"),
-            materializer.CreateAllocator(), 256, 8);
-        var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => pump.ParseAsync(token).AsTask());
+            ZmtpFraming.Instance.Adapt(input, null, long.MaxValue, pool), codec,
+            decodedAllocator: materializer.CreateAllocator(), maxCommandSize: 256, maxFrameLength: 8);
+        var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(
+            () => readSession.ReadMessageAsync(token).AsTask());
         Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, failure.Rejection.Reason);
-        Assert.Equal(1, pool.Rentals);
+        // The framing scratch plus one recycled owner for the encoded
+        // aggregate (0033); the rejected frame never rents.
+        Assert.Equal(2, pool.Rentals);
     }
 
     [Fact(Timeout = 15_000)]
@@ -179,26 +179,22 @@ public sealed class CurveSessionTrafficTests
         using var codec = NewCodec();
         using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
         var count = 0;
-        var pump = session.CreatePump(async (_, frame, _) =>
+        var parsing = Task.Run(async () =>
         {
-            try
+            while (await session.ReadMessageAsync(token) is { } message)
             {
-                if (++count == 1)
+                using (message)
                 {
-                    entered.TrySetResult();
-                    await release.Task;
-                    Assert.Equal(17, frame[0].Memory.Span[0]);
+                    if (++count == 1)
+                    {
+                        entered.TrySetResult();
+                        await release.Task;
+                        Assert.Equal(17, message[0][0].Memory.Span[0]);
+                    }
+                    else Assert.Equal(23, message[0][0].Memory.Span[0]);
                 }
-                else Assert.Equal(23, frame[0].Memory.Span[0]);
-
-                return true;
             }
-            finally
-            {
-                frame.Dispose();
-            }
-        }, null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
-        var parsing = pump.ParseAsync(token).AsTask();
+        }, token);
         try
         {
             await entered.Task.WaitAsync(token);
@@ -229,13 +225,11 @@ public sealed class CurveSessionTrafficTests
         using var codec = NewCodec();
         var frames = new List<(bool, byte[])>();
         using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
-        var pump = session.CreatePump((_, frame, _) =>
+        while (await session.ReadMessageAsync() is { } message)
         {
-            frames.Add((frame.More, frame.ToSequence().ToArray()));
-            frame.Dispose();
-            return ValueTask.FromResult(true);
-        }, null, ZmtpFraming.DefaultMaxCommandSize, long.MaxValue);
-        await pump.ParseAsync();
+            foreach (var frame in message) frames.Add((frame.More, frame.ToSequence().ToArray()));
+            message.Dispose();
+        }
         return frames;
     }
 }

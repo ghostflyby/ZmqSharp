@@ -5,17 +5,19 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Transports;
 
 /// <summary>
-/// The ZMTP framing (0033): one frame per flag-and-length-prefixed unit on a
-/// byte connection - the wire dialect tcp/ipc speak today, decomposed out of
-/// the former public parser/encoder. The reader materializes whole owned
-/// frames (into the caller's allocator segments when the runtime supplies
-/// one - preserving the byte path's zero-copy - or into pooled segments);
-/// the writer gathers the flag byte, the short or long size, and the body
-/// segments into one logical write, exactly as the encoder always did.
+/// The ZMTP framing (0033): the wire dialect tcp/ipc speak, decomposed out of
+/// the retired parser/encoder and now message-currency. Writes iterate a
+/// message's frames - each as one logical write of flag byte, short or long
+/// size, and body segments, byte-identical to every ZMTP peer. Reads parse
+/// the frame grammar and re-aggregate More chains into complete messages
+/// (into the receive policy's allocator segments - the zero-copy path - or
+/// staged in one per-connection scratch with borrowed views); non-ERROR
+/// commands arriving mid-traffic are consumed inline. The framing is
+/// codec-blind: the encoded-bound rebind and per-frame decoding belong to
+/// the protocol session.
 /// </summary>
 public sealed class ZmtpFraming : IZFraming
 {
-    /// <summary>Default command-size limit (0008 Slice B).</summary>
     public const long DefaultMaxCommandSize = 1L << 20;
 
     public static ZmtpFraming Instance { get; } = new();
@@ -25,52 +27,206 @@ public sealed class ZmtpFraming : IZFraming
     }
 
     /// <summary>
-    /// Adapts a byte connection into a frame connection. The default bound is
-    /// unbounded (limits are policy concerns - the receive policy's allocator
-    /// and the command channel's command limit); supply the internal overload
-    /// to cap what the reader will materialize.
+    /// Adapts a byte connection into a message connection. The default frame
+    /// bound is unbounded (limits are policy concerns - the receive policy's
+    /// allocator and the command limit); the internal overload caps what the
+    /// reader accepts.
     /// </summary>
-    public IZFrameConnection Adapt(IZConnection connection)
-        => new ZmtpFramingConnection(connection, initialAllocator: null, long.MaxValue, initialPool: null);
+    public IZMessageConnection Adapt(IZConnection connection)
+        => new ZmtpFramingConnection(connection, initialAllocator: null, long.MaxValue,
+            initialPool: null, onMessageBoundary: null);
 
     /// <summary>
-    /// Runtime composition: the allocator supplies the final segments for
-    /// materialized frames (the receive policy's zero-copy path); the bound
-    /// caps the frame length the reader will accept; the pool backs the
-    /// pooled path (no allocator) - the socket pool, so allocation budgets
-    /// observe its rents.
+    /// Runtime composition (0033): the allocator supplies the final segments
+    /// per frame (the receive policy's zero-copy path); the bound caps what a
+    /// single frame header may declare; the message limits bound the
+    /// aggregation; the pool backs the staging scratch. The establishment
+    /// composition passes the command bound and no allocator - establishment
+    /// traffic is greeting and commands, not policy-materialized frames.
     /// </summary>
-    internal IZFrameConnection Adapt(IZConnection connection, ZFrameAllocator? allocator, long maxFrameLength,
-        MemoryPool<byte>? pool = null)
-        => new ZmtpFramingConnection(connection, allocator, maxFrameLength, pool);
+    internal IZMessageConnection Adapt(IZConnection connection, ZFrameAllocator? allocator, long bound,
+        MemoryPool<byte>? pool = null, Action? onMessageBoundary = null)
+        => new ZmtpFramingConnection(connection, allocator, bound, pool, onMessageBoundary);
 
     internal sealed class ZmtpFramingConnection(
-        IZConnection connection, ZFrameAllocator? initialAllocator, long initialMaxFrameLength,
-        MemoryPool<byte>? initialPool) : IZFrameConnection
+        IZConnection connection, ZFrameAllocator? initialAllocator, long initialBound,
+        MemoryPool<byte>? initialPool, Action? onMessageBoundary) : IZMessageConnection
     {
-        private ZFrameAllocator? _allocator = initialAllocator;
-        private long _maxFrameLength = initialMaxFrameLength;
         private readonly MemoryPool<byte> _pool = initialPool ?? MemoryPool<byte>.Shared;
+        private ZFrameAllocator? _allocator = initialAllocator;
+        private long _bound = initialBound;
+        private readonly Action? _onMessageBoundary = onMessageBoundary;
 
         // One reader and one writer may overlap (0030 section 3), so the
         // read and write sides keep separate reusable state.
         private readonly byte[] _readHeader = new byte[9];
         private readonly byte[] _writeHeader = new byte[9];
         private readonly FrameSequence _writeWire = new();
+        private readonly List<ZFrame> _messageFrames = [];
         private IMemoryOwner<byte>? _scratchOwner;
         private Memory<byte> _scratch;
+        private readonly Stack<RecycledOwner> _ownedPool = new();
 
-        private void EnsureScratchCapacity(int required)
+        public async ValueTask<ZWireUnit?> ReadUnitAsync(CancellationToken token = default)
         {
-            if (_scratch.Length >= required && _scratchOwner is not null) return;
+            try
+            {
+                return await ReadUnitCoreAsync(token);
+            }
+            catch
+            {
+                // A failed read mid-aggregation owns its accumulated frames;
+                // release them rather than leaking half a message.
+                foreach (var accumulated in _messageFrames) accumulated.Dispose();
 
-            var owner = _pool.Rent(Math.Max(required, Math.Max(4096, _scratch.Length * 2)));
-            _scratchOwner?.Dispose();
-            _scratchOwner = owner;
-            _scratch = owner.Memory;
+                _messageFrames.Clear();
+                throw;
+            }
         }
 
-        public async ValueTask<ZWireFrame?> ReadFrameAsync(CancellationToken token = default)
+        private async ValueTask<ZWireUnit?> ReadUnitCoreAsync(CancellationToken token)
+        {
+            while (true)
+            {
+                var read = await ReadFrameAsync(token);
+                if (read is not { } wire)
+                {
+                    foreach (var accumulated in _messageFrames) accumulated.Dispose();
+
+                    _messageFrames.Clear();
+                    return null;
+                }
+
+                if ((wire.flags & ZmtpFrameFlags.Command) != 0)
+                {
+                    if (_messageFrames.Count > 0)
+                        throw new ZeroMqProtocolException("command frame interrupts a More chain");
+
+                    // A command is a single-frame control message; command
+                    // consumption (ERROR faulting, skipping) belongs to the
+                    // protocol above - the framing is codec-blind and must
+                    // not inspect possibly-encoded bodies.
+                    return new ZWireUnit(ZmtpFrameFlags.Command,
+                        new ZMessage(new ZSingleMessage(wire.frame)));
+                }
+
+                // Aggregated frames must be OWNED: a message outlives the
+                // read loop (queues retain it), and the scratch path's views
+                // die at the next read - so the staging view is copied into
+                // an owned segment here (allocator frames are owned already).
+                // The receive policy's allocator enforces the per-frame and
+                // per-message limits itself (0008 D1).
+                if (wire.frame.TryGetValue(out ZSegments segments)) _messageFrames.Add(wire.frame);
+                else if (wire.frame.TryGetValue(out ZSegment owned) && !owned.IsBorrowed)
+                    _messageFrames.Add(wire.frame);
+                else
+                    _messageFrames.Add(CopyToOwned(wire.frame));
+
+                if ((wire.flags & ZmtpFrameFlags.More) != 0) continue;
+
+                var message = _messageFrames.Count == 1
+                    ? new ZMessage(new ZSingleMessage(_messageFrames[0]))
+                    : new ZMessage(new ZMultiMessage([.. _messageFrames]));
+                _messageFrames.Clear();
+                _onMessageBoundary?.Invoke();
+                return new ZWireUnit(ZmtpFrameFlags.None, message);
+            }
+        }
+
+        public ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
+        {
+            // One logical write per frame, contiguously - the message is the
+            // send transaction; the wire grammar is the framing's business.
+            return WriteFramesAsync(message, token);
+        }
+
+        public async ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
+        {
+            // The pooled copy travels with the frame to the wire (a native
+            // message transport carries it to the peer instead).
+            var pooled = ZWireFrameLogic.Copy(ZmtpFrameFlags.Command, body.Span);
+            try
+            {
+                await WriteFrameAsync(ZmtpFrameFlags.Command, pooled.Wire, token);
+            }
+            finally
+            {
+                pooled.Owner.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Rebinds the reader's policy in place (0033): the runtime knows the
+        /// codec only after establishment, so the same connection swaps its
+        /// allocator and bound instead of stacking a second adapter - one
+        /// scratch per connection, released exactly once.
+        /// </summary>
+        internal void Rebind(ZFrameAllocator? reboundAllocator, long reboundBound)
+        {
+            _allocator = reboundAllocator;
+            _bound = reboundBound;
+            if (reboundAllocator is not null)
+            {
+                // A materializing allocator reads frames into its own
+                // segments; the establishment-phase staging scratch is dead
+                // weight now, so release it instead of holding it for the
+                // connection's lifetime.
+                _scratchOwner?.Dispose();
+                _scratchOwner = null;
+                _scratch = Memory<byte>.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Streams one already-encoded frame directly (the codec session's
+        /// fast path, 0033): one logical write, no message assembly - the
+        /// public contract stays message-level, the built-in protocol and
+        /// framing co-optimize their shared hot path.
+        /// </summary>
+        internal ValueTask WriteStagedFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
+            => WriteFrameAsync(flags, frame, token);
+
+        public void Abort() => connection.Abort();
+
+        public void Dispose()
+        {
+            _scratchOwner?.Dispose();
+            _scratchOwner = null;
+            _scratch = Memory<byte>.Empty;
+            while (_ownedPool.TryPop(out var recycled)) recycled.DisposeInner();
+
+            connection.Dispose();
+        }
+
+        private async ValueTask WriteFramesAsync(ZMessage message, CancellationToken token)
+        {
+            for (var i = 0; i < message.Count; i++)
+            {
+                var flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None;
+                await WriteFrameAsync(flags, message[i], token);
+            }
+        }
+
+        private async ValueTask WriteFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
+        {
+            ZWireFrameLogic.Validate(flags);
+            var body = frame.ToSequence();
+            var length = body.Length;
+            var longSize = length > 255;
+            _writeHeader[0] = (byte)(flags | (longSize ? ZmtpFrameFlags.LongSize : ZmtpFrameFlags.None));
+            if (longSize) BinaryPrimitives.WriteInt64BigEndian(_writeHeader.AsSpan(1), length);
+            else _writeHeader[1] = (byte)length;
+
+            // One logical write per frame, as the wire contract demands; the
+            // sequence nodes are reused across sends (single-writer).
+            _writeWire.Clear();
+            _writeWire.Add(_writeHeader.AsMemory(0, longSize ? 9 : 2));
+            foreach (var segment in body) _writeWire.Add(segment);
+
+            await connection.WriteAsync(_writeWire.Sequence, token);
+        }
+
+        private async ValueTask<(ZmtpFrameFlags flags, ZFrame frame)?> ReadFrameAsync(CancellationToken token)
         {
             // Flag byte + size: exactly the header the parser always read.
             if (!await TryReadExactlyAsync(_readHeader.AsMemory(0, 1), token)) return null;
@@ -90,12 +246,12 @@ public sealed class ZmtpFraming : IZFraming
                 ? BinaryPrimitives.ReadInt64BigEndian(_readHeader.AsSpan(1, 8))
                 : _readHeader[1];
             if (size < 0) throw new ZeroMqProtocolException("negative ZMTP frame size");
-            if (size > _maxFrameLength)
-                throw new ZeroMqProtocolException($"ZMTP frame exceeds maximum length of {_maxFrameLength} bytes");
+            if (size > _bound)
+                throw new ZeroMqProtocolException($"ZMTP frame exceeds maximum length of {_bound} bytes");
             if (size > int.MaxValue) throw new ZeroMqProtocolException("ZMTP frame exceeds supported size");
 
-            // The long-size bit is the framing's internal marker; the frame
-            // layer carries the logical flags only.
+            // The long-size bit is the framing's internal marker; frames
+            // carry the logical flags only.
             var logical = flags & ~ZmtpFrameFlags.LongSize;
             var more = (logical & ZmtpFrameFlags.More) != 0;
 
@@ -118,7 +274,7 @@ public sealed class ZmtpFraming : IZFraming
                     throw;
                 }
 
-                return new ZWireFrame(logical, frame);
+                return (logical, frame);
             }
             else
             {
@@ -130,59 +286,97 @@ public sealed class ZmtpFraming : IZFraming
                 EnsureScratchCapacity(length);
                 if (!await TryReadExactlyAsync(_scratch[..length], token)) return null;
 
-                return new ZWireFrame(logical, new ZFrame(ZSegment.Borrowed(_scratch[..length]), more));
+                return (logical, new ZFrame(ZSegment.Borrowed(_scratch[..length]), more));
             }
-        }
-
-        public async ValueTask WriteFrameAsync(ZWireFrame frame, CancellationToken token = default)
-        {
-            ZWireFrame.Validate(frame.Flags);
-            var body = frame.Frame.ToSequence();
-            var length = body.Length;
-            var longSize = length > 255;
-            _writeHeader[0] = (byte)(frame.Flags | (longSize ? ZmtpFrameFlags.LongSize : ZmtpFrameFlags.None));
-            if (longSize) BinaryPrimitives.WriteInt64BigEndian(_writeHeader.AsSpan(1), length);
-            else _writeHeader[1] = (byte)length;
-
-            // One logical write per frame, as the wire contract demands; the
-            // sequence nodes are reused across sends (single-writer).
-            _writeWire.Clear();
-            _writeWire.Add(_writeHeader.AsMemory(0, longSize ? 9 : 2));
-            foreach (var segment in body) _writeWire.Add(segment);
-
-            await connection.WriteAsync(_writeWire.Sequence, token);
         }
 
         /// <summary>
-        /// Rebinds the reader's policy in place (0033): the runtime knows the
-        /// codec only after establishment, so the same connection swaps its
-        /// allocator, bound and pool instead of stacking a second adapter -
-        /// one scratch per connection, released exactly once.
+        /// Copies a borrowed (scratch) frame's body into a pool-owned segment;
+        /// aggregated messages must survive the next read.
         /// </summary>
-        internal void Rebind(ZFrameAllocator? reboundAllocator, long reboundMaxFrameLength)
+        private ZFrame CopyToOwned(ZFrame frame)
         {
-            _allocator = reboundAllocator;
-            _maxFrameLength = reboundMaxFrameLength;
-            if (reboundAllocator is not null)
+            var sequence = frame.ToSequence();
+            var length = checked((int)sequence.Length);
+            var handle = RentOwned(length);
+            try
             {
-                // A materializing allocator reads frames into its own
-                // segments; the establishment-phase staging scratch is dead
-                // weight now, so release it instead of holding it for the
-                // connection's lifetime.
-                _scratchOwner?.Dispose();
-                _scratchOwner = null;
-                _scratch = Memory<byte>.Empty;
+                sequence.CopyTo(handle.Memory[..length].Span);
+                return new ZFrame(new ZSegment(handle, 0, length), frame.More);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
             }
         }
 
-        public void Abort() => connection.Abort();
-
-        public void Dispose()
+        /// <summary>
+        /// Rent from the connection's recycled owner pool: a message's
+        /// dispose flows through <c>ZSegment</c> to the handle, which returns
+        /// the underlying buffer here instead of the shared pool - one handle
+        /// object per buffer, allocated once, reused for the connection's
+        /// lifetime (the steady-state receive budget stays GC-free).
+        /// </summary>
+        private RecycledOwner RentOwned(int length)
         {
+            while (_ownedPool.TryPop(out var recycled))
+            {
+                if (recycled.Ensure(length)) return recycled;
+
+                recycled.DisposeInner();
+            }
+
+            return new RecycledOwner(this, length);
+        }
+
+        private sealed class RecycledOwner(ZmtpFramingConnection parent, int length) : IMemoryOwner<byte>
+        {
+            private IMemoryOwner<byte>? _owner = parent._pool.Rent(Math.Max(length, 4096));
+
+            public Memory<byte> Memory => _owner?.Memory ?? throw new ObjectDisposedException(nameof(RecycledOwner));
+
+            /// <summary>Grows the underlying buffer when a larger frame arrives.</summary>
+            public bool Ensure(int length)
+            {
+                if (_owner is null || _owner.Memory.Length >= length) return _owner is not null;
+
+                var grown = parent._pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
+                _owner.Dispose();
+                _owner = grown;
+                return true;
+            }
+
+            public void Dispose()
+            {
+                // The segment released this frame; recycle the buffer.
+                var owner = _owner;
+                if (owner is null) return;
+
+                _owner = null;
+                if (parent._ownedPool.Count < 8)
+                {
+                    _owner = owner;
+                    parent._ownedPool.Push(this);
+                }
+                else owner.Dispose();
+            }
+
+            internal void DisposeInner()
+            {
+                _owner?.Dispose();
+                _owner = null;
+            }
+        }
+
+        private void EnsureScratchCapacity(int required)
+        {
+            if (_scratch.Length >= required && _scratchOwner is not null) return;
+
+            var owner = _pool.Rent(Math.Max(required, Math.Max(4096, _scratch.Length * 2)));
             _scratchOwner?.Dispose();
-            _scratchOwner = null;
-            _scratch = Memory<byte>.Empty;
-            connection.Dispose();
+            _scratchOwner = owner;
+            _scratch = owner.Memory;
         }
 
         private async ValueTask<bool> TryReadExactlyAsync(Memory<byte> target, CancellationToken token)
@@ -198,5 +392,64 @@ public sealed class ZmtpFraming : IZFraming
 
             return true;
         }
+    }
+}
+
+/// <summary>
+/// Frame-grammar helpers the framing and protocol share (0033): flag
+/// validation, pooled frame copies, and contiguous body views over the
+/// library's own frame model.
+/// </summary>
+internal static class ZWireFrameLogic
+{
+    public static void Validate(ZmtpFrameFlags flags)
+    {
+        if ((flags & ~(ZmtpFrameFlags.More | ZmtpFrameFlags.Command)) != 0 ||
+            (flags & (ZmtpFrameFlags.More | ZmtpFrameFlags.Command)) == (ZmtpFrameFlags.More | ZmtpFrameFlags.Command))
+            throw new ZeroMqProtocolException("invalid logical frame flags");
+    }
+
+    /// <summary>A frame copied into a pooled segment; dispose the owner when done.</summary>
+    internal readonly struct Pooled(ZFrame frame, IDisposable owner)
+    {
+        public ZFrame Wire { get; } = frame;
+        public IDisposable Owner { get; } = owner;
+    }
+
+    /// <summary>Copies a body into a pooled frame (cold paths: commands, greetings, codec output).</summary>
+    internal static Pooled Copy(ZmtpFrameFlags flags, ReadOnlySpan<byte> body)
+    {
+        var owner = MemoryPool<byte>.Shared.Rent(body.Length == 0 ? 1 : body.Length);
+        try
+        {
+            body.CopyTo(owner.Memory.Span);
+            return Build(flags, owner, body.Length);
+        }
+        catch
+        {
+            owner.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// A frame's body as one contiguous memory, copying multi-segment frames
+    /// (cold path); single-segment frames are returned without copy.
+    /// </summary>
+    internal static ReadOnlyMemory<byte> Contiguous(ZFrame frame)
+    {
+        var sequence = frame.ToSequence();
+        if (sequence.IsSingleSegment) return sequence.First;
+
+        var length = checked((int)sequence.Length);
+        var buffer = GC.AllocateUninitializedArray<byte>(length);
+        sequence.CopyTo(buffer);
+        return buffer;
+    }
+
+    private static Pooled Build(ZmtpFrameFlags flags, IMemoryOwner<byte> owner, int length)
+    {
+        var more = (flags & ZmtpFrameFlags.More) != 0;
+        return new Pooled(new ZFrame(new ZSegment(owner, 0, length), more), owner);
     }
 }
