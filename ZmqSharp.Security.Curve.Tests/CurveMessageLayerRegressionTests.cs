@@ -1,9 +1,6 @@
 using System.Buffers;
 using System.Threading.Channels;
 using Xunit;
-using ZmqSharp.Security;
-using ZmqSharp.Security.Curve;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -50,18 +47,18 @@ public sealed class CurveMessageLayerRegressionTests
         await server.BindMessageAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
         await client.ConnectMessageAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
 
-        var parts = new byte[][]
-        {
+        byte[][] parts =
+        [
             "alpha-alpha-alpha"u8.ToArray(), "beta-beta-beta-beta"u8.ToArray(), "gamma"u8.ToArray(),
-        };
-        await client.SendAsync(ZMessage.Copy((IEnumerable<byte[]>)parts), token);
+        ];
+        await client.SendAsync(ZMessage.Copy(parts), token);
         using (var received = await server.Messages.ReadAsync(token))
         {
             Assert.Equal(3, received.Count);
             for (var i = 0; i < 3; i++) Assert.Equal(parts[i], received[i].ToSequence().ToArray());
         }
 
-        await server.SendAsync(ZMessage.Copy((IEnumerable<byte[]>)parts), token);
+        await server.SendAsync(ZMessage.Copy(parts), token);
         using (var echoed = await client.Messages.ReadAsync(token))
         {
             Assert.Equal(3, echoed.Count);

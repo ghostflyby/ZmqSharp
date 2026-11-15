@@ -47,7 +47,12 @@ public sealed class ZMechanismContext : IDisposable
     /// </summary>
     public ReadOnlyMemory<byte> LocalReadyBody { get; }
 
-    /// <summary>Command-frame size limit shared with the traffic parser (0008 Slice B).</summary>
+    /// <summary>
+    /// Command-frame size limit shared with the traffic parser (0008 Slice B).
+    /// Public contract: a custom mechanism reads it to size or validate the
+    /// commands it exchanges, so the in-assembly write-only shape is intended.
+    /// </summary>
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
     public long MaxCommandSize { get; }
 
     /// <summary>Writes one command (framing is the channel's) during the exclusive handshake phase.</summary>

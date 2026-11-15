@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using Xunit;
 using ZmqSharp.Security;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -10,7 +9,7 @@ namespace ZmqSharp.Tests.Zmtp;
 /// <summary>
 /// Handshake tests (0016 section 10): greeting validation, mechanism matching,
 /// and the NULL mechanism's command sequence, driven through
-/// <see cref="ZmtpHandshake"/> directly. READY Socket-Type metadata
+/// <see cref="IZWireEstablisher"/> directly. READY Socket-Type metadata
 /// validation moved to the socket layer with the handshake boundary; those
 /// cases live in ZSocketTests as ConnectAsync failures.
 /// </summary>

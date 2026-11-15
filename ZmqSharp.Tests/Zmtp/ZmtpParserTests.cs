@@ -117,7 +117,7 @@ public sealed class ZmtpParserTests
             using var messageSession = ZmtpTestRunner.CreateSession(session);
             while (await messageSession.ReadMessageAsync(token) is { } message)
             {
-                foreach (var frame in message) recorder.OnFrameAsync(frame, token);
+                foreach (var frame in message) await recorder.OnFrameAsync(frame, token);
                 message.Dispose();
                 if (frames.Count == 1) await resume.Task.WaitAsync(token);
             }
@@ -163,6 +163,7 @@ public sealed class ZmtpParserTests
         // loop awaits the sink before reading on.
         var token = TestContext.Current.CancellationToken;
         using var messageSession = ZmtpTestRunner.CreateSession(session);
+        // ReSharper disable once AccessToDisposedClosure
         var parseTask = Task.Run(async () =>
         {
             while (await messageSession.ReadMessageAsync(token) is { } message)

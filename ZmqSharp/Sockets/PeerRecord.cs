@@ -40,14 +40,8 @@ internal sealed class PeerRecord(IZMessageConnection frames, IZConnection? bytes
     public TaskCompletionSource Established { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public IZWireSession? Session { get; set; }
     public ReceiveMaterializer? Materializer { get; set; }
-    public MessageAccumulator Accumulator { get; } = new();
     public Channel<ZMessage>? Queue { get; set; }
     public Lock ReadLock { get; } = new();
     public int ActiveSends { get; set; }
     public TaskCompletionSource? SendsDrained { get; set; }
-}
-
-internal sealed class MessageAccumulator
-{
-    public List<ZFrame> Frames { get; } = [];
 }

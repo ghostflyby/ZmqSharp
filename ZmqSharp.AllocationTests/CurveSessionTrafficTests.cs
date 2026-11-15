@@ -179,6 +179,7 @@ public sealed class CurveSessionTrafficTests
         using var codec = NewCodec();
         using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
         var count = 0;
+        // ReSharper disable once AccessToDisposedClosure
         var parsing = Task.Run(async () =>
         {
             while (await session.ReadMessageAsync(token) is { } message)

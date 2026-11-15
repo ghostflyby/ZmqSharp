@@ -1,7 +1,4 @@
-using System.Threading.Channels;
 using Xunit;
-using ZmqSharp.Sockets;
-using ZmqSharp.Tests.Transports;
 
 namespace ZmqSharp.Tests.Sockets;
 
@@ -56,31 +53,33 @@ public sealed class MessageLayerRegressionTests
         // A peer paused by a false OnFrame return and then torn down must
         // release the retained message; the pause queue drains on teardown.
         using var pool = new CountingMemoryPool();
-        var server = new ZPairSocket(new ZSocketOptions
-        {
-            Pool = pool,
-            ReceiveSurface = ZReceiveSurface.Callback,
-        });
-        await using var client = new ZPairSocket();
         var token = TestContext.Current.CancellationToken;
         var endpoint = TestTransports.GetEndpoint(TransportKind.Tcp);
-        await server.BindAsync(endpoint, token);
-        await client.ConnectAsync(endpoint, token);
 
-        var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        server.OnFrame += (_, _) =>
+        await using (var server = new ZPairSocket(new ZSocketOptions
+                     {
+                         Pool = pool,
+                         ReceiveSurface = ZReceiveSurface.Callback,
+                     }))
+        await using (var client = new ZPairSocket())
         {
-            paused.TrySetResult();
-            return false;
-        };
+            await server.BindAsync(endpoint, token);
+            await client.ConnectAsync(endpoint, token);
 
-        await client.SendAsync(ZMessage.FromOwned([1]), token);
-        await client.SendAsync(ZMessage.FromOwned([2]), token);
-        await paused.Task.WaitAsync(token);
+            var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            server.OnFrame += (_, _) =>
+            {
+                paused.TrySetResult();
+                return false;
+            };
 
-        // Paused with the second message retained; teardown releases it.
-        await server.DisposeAsync();
-        await client.DisposeAsync();
+            await client.SendAsync(ZMessage.FromOwned([1]), token);
+            await client.SendAsync(ZMessage.FromOwned([2]), token);
+            await paused.Task.WaitAsync(token);
+        }
+
+        // Paused with the second message retained; the scope teardown above
+        // released it, so no buffer is still outstanding.
         await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
     }
 }

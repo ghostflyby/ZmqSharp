@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading.Channels;
 using Xunit;
 using ZmqSharp.Security;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 

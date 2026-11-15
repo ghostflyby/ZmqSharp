@@ -125,7 +125,7 @@ public sealed class ReceiveComponentsTests
         using var pool = new CountingMemoryPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
         var messages = ZmtpFraming.Instance.Adapt(new HeaderThenFailure(), materializer.CreateAllocator(), 100);
-        using var session = ZmqProtocol.Instance.CreateSession(messages, null, null);
+        using var session = ZmqProtocol.Instance.CreateSession(messages, null);
         await Assert.ThrowsAsync<IOException>(() => session.ReadMessageAsync(token).AsTask());
         Assert.Equal(0, pool.Outstanding);
     }

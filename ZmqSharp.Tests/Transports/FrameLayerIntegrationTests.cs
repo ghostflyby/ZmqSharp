@@ -111,6 +111,10 @@ public sealed class FrameLayerIntegrationTests
         await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
         await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
 
+        // ConnectMessageAsync waits only for the client's own establishment;
+        // the accept side runs the same protocol concurrently, so wait for
+        // both ends instead of sampling the counter (0033 CI flake).
+        await protocol.BothEstablished.WaitAsync(token);
         Assert.Equal(2, protocol.Establishments); // both endpoints ran the custom establishment
 
         await client.SendAsync(ZMessage.FromOwned([.. "protocol-frame"u8]), token);
@@ -410,7 +414,14 @@ public sealed class FrameLayerIntegrationTests
     /// </summary>
     private sealed class HandshakeFreeProtocol : IZWireProtocol
     {
-        public int Establishments { get; private set; }
+        private readonly TaskCompletionSource _bothEstablished =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _establishments;
+
+        public int Establishments => Volatile.Read(ref _establishments);
+
+        /// <summary>Completes once both endpoints have run their establishment.</summary>
+        public Task BothEstablished => _bothEstablished.Task;
 
         public IZWireEstablisher CreateEstablisher(
             IZMessageConnection connection, IZConnection? byteConnection,
@@ -447,7 +458,11 @@ public sealed class FrameLayerIntegrationTests
                     peerReady = body.Slice(1 + name.Length).ToArray();
                 }
 
-                owner.Establishments++;
+                // Both sides establish concurrently: the increment must be
+                // atomic, and the count reaching two wakes the test.
+                if (Interlocked.Increment(ref owner._establishments) == 2)
+                    owner._bothEstablished.TrySetResult();
+
                 return new ZMechanismResult(null, peerReady);
             }
 

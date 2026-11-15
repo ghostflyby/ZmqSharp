@@ -285,13 +285,13 @@ internal sealed class SocketRuntime : IZSocket
     public async Task ConnectAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await ConnectCoreAsync<EndPoint, SocketTransport>((EndPoint)parsed, null, endpoint, token);
+        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, null, endpoint, token);
     }
 
     public async Task BindAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await BindCoreAsync<EndPoint, SocketTransport>((EndPoint)parsed, null, endpoint, token);
+        await BindCoreAsync<EndPoint, SocketTransport>(parsed, null, endpoint, token);
     }
 
     private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing, string? address,
@@ -341,7 +341,7 @@ internal sealed class SocketRuntime : IZSocket
             return;
         }
 
-        _ = RunListenerAsync(listener.StartAsync, listener.Dispose, registration);
+        _ = RunListenerAsync(listener.StartAsync, registration);
     }
 
     private async Task BindMessageCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
@@ -371,10 +371,10 @@ internal sealed class SocketRuntime : IZSocket
             return;
         }
 
-        _ = RunListenerAsync(listener.StartAsync, listener.Dispose, registration);
+        _ = RunListenerAsync(listener.StartAsync, registration);
     }
 
-    private async Task RunListenerAsync(Func<CancellationToken, ValueTask> startAsync, Action dispose,
+    private async Task RunListenerAsync(Func<CancellationToken, ValueTask> startAsync,
         ZEndpointRegistration registration)
     {
         Exception? failure = null;
@@ -714,7 +714,7 @@ internal sealed class SocketRuntime : IZSocket
     }
 
     private readonly Lock _decodedPoolGate = new();
-    private readonly Stack<IMemoryOwner<byte>> _decodedPool = new();
+    private readonly Stack<DecodedOwner> _decodedPool = new();
 
     private IMemoryOwner<byte> RentDecoded(int length)
     {
@@ -722,13 +722,89 @@ internal sealed class SocketRuntime : IZSocket
         {
             while (_decodedPool.TryPop(out var recycled))
             {
-                if (recycled.Memory.Length >= length) return recycled;
+                if (recycled.TryReuse(length)) return recycled;
 
-                recycled.Dispose();
+                recycled.DisposeInner();
             }
         }
 
-        return Pool.Rent(Math.Max(length, 4096));
+        return new DecodedOwner(this, Pool.Rent(Math.Max(length, 4096)));
+    }
+
+    private void ReturnDecoded(DecodedOwner owner)
+    {
+        lock (_decodedPoolGate)
+        {
+            if (_decodedPool.Count < 8)
+            {
+                _decodedPool.Push(owner);
+                return;
+            }
+        }
+
+        owner.DisposeInner();
+    }
+
+    /// <summary>
+    /// A recycled decoded buffer with the same lifecycle as the framing's
+    /// scratch handles: RENTED while a decoded frame owns it, POOLED while it
+    /// waits in the stack, DEAD once released. Dispose moves RENTED to POOLED
+    /// exactly once, so a double dispose cannot hand one buffer to two frames.
+    /// </summary>
+    private sealed class DecodedOwner(SocketRuntime parent, IMemoryOwner<byte> owner) : IMemoryOwner<byte>
+    {
+        private const int Rented = 0;
+        private const int Pooled = 1;
+        private const int Dead = 2;
+
+        private readonly Lock _gate = new();
+        private IMemoryOwner<byte>? _owner = owner;
+        private int _state = Rented;
+
+        public Memory<byte> Memory
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _owner?.Memory ?? throw new ObjectDisposedException(nameof(DecodedOwner));
+                }
+            }
+        }
+
+        /// <summary>Takes a pooled owner back into service when it is large enough.</summary>
+        public bool TryReuse(int length)
+        {
+            lock (_gate)
+            {
+                if (_state != Pooled || _owner is null) return false;
+                if (_owner.Memory.Length < length) return false;
+
+                _state = Rented;
+                return true;
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                if (_state != Rented) return;
+                _state = Pooled;
+            }
+
+            parent.ReturnDecoded(this);
+        }
+
+        public void DisposeInner()
+        {
+            lock (_gate)
+            {
+                _owner?.Dispose();
+                _owner = null;
+                _state = Dead;
+            }
+        }
     }
 
     private bool RetainsSent(ZPeer peer)
@@ -1126,11 +1202,6 @@ internal sealed class SocketRuntime : IZSocket
 
             Clean(() => PeerRemoved?.Invoke(record.Peer, failure));
             Clean(() => QueueSurface?.Reclaim(record, failure));
-            Clean(() =>
-            {
-                foreach (var frame in record.Accumulator.Frames) frame.Dispose();
-                record.Accumulator.Frames.Clear();
-            });
             try
             {
                 await record.Registration.FinishAsync();

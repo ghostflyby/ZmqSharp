@@ -3,14 +3,13 @@ using System.Net;
 using System.Net.Sockets;
 using Xunit;
 using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Transports;
 
 /// <summary>
 /// End-to-end tests of <see cref="ZSocketConnection"/> (0015 section 4): a
 /// raw-socket pair completing the NULL handshake, with the receiving side
-/// parsed by <see cref="ZmtpParser"/>. Covers the direct
+/// driven by <see cref="ZmtpFraming"/>. Covers the direct
 /// <see cref="Socket.ReceiveAsync(System.ArraySegment{byte})"/> read path and the buffer-list scatter
 /// write path (one system call per frame). The parser pump runs in the
 /// background (on a live socket it only stops when the peer closes) and the
@@ -162,13 +161,14 @@ public sealed class ZSocketConnectionTests
             using var message = MessageFactory.SegmentedFrame(first, second);
             var delivered = 0;
             using var receiveSession = ZmtpTestRunner.CreateSession(reader);
+            // ReSharper disable once AccessToDisposedClosure
             var receiving = Task.Run(async () =>
             {
-                while (await receiveSession.ReadMessageAsync(token) is { } message)
+                while (await receiveSession.ReadMessageAsync(token) is { } incoming)
                 {
-                    using (message)
+                    using (incoming)
                     {
-                        foreach (var frame in message)
+                        foreach (var frame in incoming)
                         {
                             var content = frame.ToSequence().ToArray();
                             Assert.Equal(first.Length + second.Length, content.Length);

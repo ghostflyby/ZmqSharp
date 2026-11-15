@@ -120,7 +120,7 @@ public sealed class ZmtpFraming : IZFraming
                 // an owned segment here (allocator frames are owned already).
                 // The receive policy's allocator enforces the per-frame and
                 // per-message limits itself (0008 D1).
-                if (wire.frame.TryGetValue(out ZSegments segments)) _messageFrames.Add(wire.frame);
+                if (wire.frame.TryGetValue(out ZSegments _)) _messageFrames.Add(wire.frame);
                 else if (wire.frame.TryGetValue(out ZSegment owned) && !owned.IsBorrowed)
                     _messageFrames.Add(wire.frame);
                 else

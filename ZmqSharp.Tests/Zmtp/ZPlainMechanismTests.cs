@@ -3,7 +3,6 @@ using System.Text;
 using System.Threading.Channels;
 using Xunit;
 using ZmqSharp.Security;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -11,7 +10,7 @@ namespace ZmqSharp.Tests.Zmtp;
 
 /// <summary>
 /// PLAIN mechanism tests (0016 milestone 2, RFC 24): wire-fixture handshake
-/// sequences through <see cref="ZmtpHandshake"/>, plus end-to-end handshakes
+/// sequences through <see cref="IZWireEstablisher"/>, plus end-to-end handshakes
 /// over real sockets. The library implementation uses only the public
 /// mechanism surface (0016 section 3.1); an equivalent mechanism was verified
 /// to compile in a separate no-InternalsVisibleTo probe project.

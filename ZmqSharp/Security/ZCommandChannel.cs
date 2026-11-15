@@ -1,5 +1,4 @@
 using ZmqSharp.Transports;
-using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Security;
 
