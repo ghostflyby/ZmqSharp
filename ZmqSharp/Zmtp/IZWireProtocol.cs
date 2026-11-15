@@ -41,14 +41,13 @@ public readonly struct ZWireUnit
 public interface IZWireProtocol
 {
     /// <summary>
-    /// Creates the one-shot establisher for a connection. The message
-    /// connection is always present; <paramref name="byteConnection"/> is
-    /// the byte origin when the connection was adapted from bytes (the ZMTP
-    /// greeting is a raw 64-byte stream construct there), or null for native
-    /// message connections, where the greeting travels as one command.
+    /// Creates the one-shot establisher for a connection. The connection
+    /// exposes its byte origin when it is byte-backed (the ZMTP greeting is a
+    /// raw 64-byte stream construct there); a native message connection
+    /// leaves it null, so the greeting travels as one command (0034).
     /// </summary>
     IZWireEstablisher CreateEstablisher(
-        IZMessageConnection connection, IZConnection? byteConnection,
+        IZMessageConnection connection,
         IZSecurityMechanism mechanism, ReadOnlyMemory<byte> localReadyBody, long maxCommandSize,
         MemoryPool<byte>? pool = null);
 

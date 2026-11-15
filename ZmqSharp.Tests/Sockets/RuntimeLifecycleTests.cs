@@ -120,7 +120,7 @@ public sealed class RuntimeLifecycleTests
     public async Task DisconnectDuringHandshake_WaitsForActualMechanismTaskBeforeReleasingContext()
     {
         using var pool = new CountingMemoryPool();
-        var endpoint = new ByteEndpoint();
+        var endpoint = new ByteEndpoint(pool);
         var entered = Gate();
         var cancelled = Gate();
         var release = Gate();
@@ -185,7 +185,7 @@ public sealed class RuntimeLifecycleTests
     /// sequence write: the mechanism's READY succeeds, and the ERROR command
     /// that follows the local socket-type rejection finds the peer gone.
     /// </summary>
-    private sealed class ClosingBytes : IZConnection
+    private sealed class ClosingBytes : ZByteConnection
     {
         private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int _position;
@@ -193,7 +193,7 @@ public sealed class RuntimeLifecycleTests
         private TaskCompletionSource Aborted { get; } = Gate();
         private int _disposals;
 
-        public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
             if (_position < _handshake.Length)
             {
@@ -207,17 +207,17 @@ public sealed class RuntimeLifecycleTests
             return 0;
         }
 
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
             => ValueTask.CompletedTask;
 
-        public ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        public override ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
             => Interlocked.Increment(ref _sequenceWrites) > 1
                 ? throw new IOException("peer closed before the ERROR write")
                 : ValueTask.CompletedTask;
 
-        public void Abort() => Aborted.TrySetResult();
+        public override void Abort() => Aborted.TrySetResult();
 
-        public void Dispose()
+        protected override void DisposeCore()
         {
             Abort();
             Interlocked.Increment(ref _disposals);
@@ -230,31 +230,44 @@ public sealed class RuntimeLifecycleTests
     // ReSharper disable once ClassNeverInstantiated.Local
     private sealed class ClosingTransport : IZTransport<ClosingTransport, ClosingEndpoint>
     {
-        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+        public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
         {
             add { }
             remove { }
         }
 
-        public static ValueTask<IZConnection> ConnectAsync(ClosingEndpoint endpoint, CancellationToken token = default)
-            => ValueTask.FromResult<IZConnection>(endpoint.Connection);
+        public static ValueTask<IZMessageConnection> ConnectAsync(ClosingEndpoint endpoint,
+            ZTransportContext context, CancellationToken token = default)
+            => ValueTask.FromResult<IZMessageConnection>(endpoint.Connection);
 
-        public static ValueTask<ClosingTransport> BindAsync(ClosingEndpoint endpoint, CancellationToken token = default)
+        public static ValueTask<ClosingTransport> BindAsync(ClosingEndpoint endpoint,
+            ZTransportContext context, CancellationToken token = default)
             => throw new NotSupportedException();
 
         public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();
         public void Dispose() { }
     }
 
-    private sealed class ByteEndpoint
+    private sealed class ByteEndpoint(CountingMemoryPool? pool = null)
     {
-        public ControlledBytes Connection { get; } = new();
+        public ControlledBytes Connection { get; } = pool is null
+            ? new ControlledBytes()
+            : new ControlledBytes(new ZTransportContext(
+                ZmtpFraming.Instance, pool, ZmtpFraming.DefaultMaxCommandSize));
+
         public ZPeer? Peer { get; set; }
     }
 
     // Deliberately implements only the public byte contract.
-    private sealed class ControlledBytes : IZConnection
+    private sealed class ControlledBytes : ZByteConnection
     {
+        public ControlledBytes()
+        {
+        }
+
+        public ControlledBytes(in ZTransportContext context) : base(context)
+        {
+        }
         private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int _position;
         public TaskCompletionSource ReadWaiting { get; } = Gate();
@@ -265,7 +278,7 @@ public sealed class RuntimeLifecycleTests
         public bool BlockWrites;
         public bool FailWrite;
 
-        public async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
             if (_position < _handshake.Length)
             {
@@ -281,9 +294,9 @@ public sealed class RuntimeLifecycleTests
             return 0;
         }
 
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
 
-        public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
         {
             if (!BlockWrites) return;
             WriteStarted.TrySetResult();
@@ -294,9 +307,9 @@ public sealed class RuntimeLifecycleTests
             if (Aborted.Task.IsCompleted) throw new IOException("aborted write");
         }
 
-        public void Abort() => Aborted.TrySetResult();
+        public override void Abort() => Aborted.TrySetResult();
 
-        public void Dispose()
+        protected override void DisposeCore()
         {
             Abort();
             Interlocked.Increment(ref Disposals);
@@ -309,16 +322,18 @@ public sealed class RuntimeLifecycleTests
     // ReSharper disable once ClassNeverInstantiated.Local
     private sealed class ByteTransport : IZTransport<ByteTransport, ByteEndpoint>
     {
-        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+        public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
         {
             add { }
             remove { }
         }
 
-        public static ValueTask<IZConnection> ConnectAsync(ByteEndpoint endpoint, CancellationToken token = default)
-            => ValueTask.FromResult<IZConnection>(endpoint.Connection);
+        public static ValueTask<IZMessageConnection> ConnectAsync(ByteEndpoint endpoint,
+            ZTransportContext context, CancellationToken token = default)
+            => ValueTask.FromResult<IZMessageConnection>(endpoint.Connection);
 
-        public static ValueTask<ByteTransport> BindAsync(ByteEndpoint endpoint, CancellationToken token = default)
+        public static ValueTask<ByteTransport> BindAsync(ByteEndpoint endpoint,
+            ZTransportContext context, CancellationToken token = default)
             => throw new NotSupportedException();
 
         public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();

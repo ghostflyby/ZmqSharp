@@ -67,7 +67,7 @@ public class CurveTrafficAllocationTests
         long before = 0;
         long allocated = 0;
         var thread = Environment.CurrentManagedThreadId;
-        using var readSession = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(input), codec);
+        using var readSession = ZmqProtocol.Instance.CreateSession(input, codec);
         while (await readSession.ReadMessageAsync(TestContext.Current.CancellationToken) is { } message)
         {
             if (++seen == warmup) before = GC.GetAllocatedBytesForCurrentThread();

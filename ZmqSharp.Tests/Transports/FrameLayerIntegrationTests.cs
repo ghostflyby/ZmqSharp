@@ -9,13 +9,14 @@ using ZmqSharp.Zmtp;
 namespace ZmqSharp.Tests.Transports;
 
 /// <summary>
-/// The message-layer integration proofs (0033): each plug point hosts a real
-/// socket end to end through the socket runtime. (a) A native message
-/// transport (an in-proc channel pair passing whole messages, zero-copy) via
-/// the message-transport factory and Bind/ConnectMessageAsync. (b) A custom
-/// framing over a byte transport (a 4-byte big-endian length prefix instead
-/// of ZMTP's flag+size) via the framing overload. (c) A custom wire protocol
-/// (a greeting-less one-command establishment) via ZSocketOptions.WireProtocol.
+/// The message-layer integration proofs (0033, connection model in 0034):
+/// each plug point hosts a real socket end to end through the socket runtime.
+/// (a) A native message transport (an in-proc channel pair passing whole
+/// messages, zero-copy) through the one transport factory and
+/// Bind/ConnectAsync. (b) A custom framing over a byte transport (a 4-byte
+/// big-endian length prefix instead of ZMTP's flag+size) via
+/// ZSocketOptions.Framing. (c) A custom wire protocol (a greeting-less
+/// one-command establishment) via ZSocketOptions.WireProtocol.
 /// </summary>
 public sealed class FrameLayerIntegrationTests
 {
@@ -29,8 +30,8 @@ public sealed class FrameLayerIntegrationTests
         var token = TestContext.Current.CancellationToken;
         var endpoint = new LoopbackEndpoint();
 
-        await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
-        await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await server.BindAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
 
         await client.SendAsync(ZMessage.FromOwned([.. "alpha"u8]), token);
         using (var received = await server.Messages.ReadAsync(token))
@@ -54,8 +55,8 @@ public sealed class FrameLayerIntegrationTests
             Assert.Equal([.. "three"u8], multipart[2].ToSequence().ToArray());
         }
 
-        await client.DisconnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
-        await server.UnbindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.DisconnectAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await server.UnbindAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
     }
 
     [Fact(Timeout = 15_000)]
@@ -64,15 +65,18 @@ public sealed class FrameLayerIntegrationTests
         // A 4-byte length prefix per frame instead of ZMTP's flag+size: the
         // byte transport is the stock SocketTransport over loopback TCP, and
         // only the delimiting dialect changes.
-        await using var server = new ZPairSocket(
-            new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
-        await using var client = new ZPairSocket(
-            new ZSocketOptions { ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true } });
+        var options = new ZSocketOptions
+        {
+            Framing = LengthPrefixFraming.Instance,
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+        };
+        await using var server = new ZPairSocket(options);
+        await using var client = new ZPairSocket(options);
         var token = TestContext.Current.CancellationToken;
         var endpoint = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, GetFreePort());
 
-        await server.BindAsync<System.Net.IPEndPoint, SocketTransport>(endpoint, LengthPrefixFraming.Instance, token);
-        await client.ConnectAsync<System.Net.IPEndPoint, SocketTransport>(endpoint, LengthPrefixFraming.Instance, token);
+        await server.BindAsync<System.Net.IPEndPoint, SocketTransport>(endpoint, token);
+        await client.ConnectAsync<System.Net.IPEndPoint, SocketTransport>(endpoint, token);
 
         await client.SendAsync(ZMessage.FromOwned([.. "over-custom-framing"u8]), token);
         using (var received = await server.Messages.ReadAsync(token))
@@ -108,10 +112,10 @@ public sealed class FrameLayerIntegrationTests
         var token = TestContext.Current.CancellationToken;
         var endpoint = new LoopbackEndpoint();
 
-        await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
-        await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await server.BindAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
 
-        // ConnectMessageAsync waits only for the client's own establishment;
+        // ConnectAsync waits only for the client's own establishment;
         // the accept side runs the same protocol concurrently, so wait for
         // both ends instead of sampling the counter (0033 CI flake).
         await protocol.BothEstablished.WaitAsync(token);
@@ -141,8 +145,8 @@ public sealed class FrameLayerIntegrationTests
         var token = TestContext.Current.CancellationToken;
         var endpoint = new LoopbackEndpoint();
 
-        await server.BindMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
-        await client.ConnectMessageAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await server.BindAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
 
         var payload = new byte[2048];
         for (var i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 251);
@@ -178,7 +182,7 @@ public sealed class FrameLayerIntegrationTests
     /// </summary>
     private sealed class LoopbackEndpoint;
 
-    private sealed class LoopbackMessageTransport : IZMessageTransport<LoopbackMessageTransport, LoopbackEndpoint>
+    private sealed class LoopbackMessageTransport : IZTransport<LoopbackMessageTransport, LoopbackEndpoint>
     {
         private static readonly Dictionary<LoopbackEndpoint, BoundPair> Bound = new();
         private static readonly Lock Gate = new();
@@ -193,7 +197,7 @@ public sealed class FrameLayerIntegrationTests
         }
 
         public static async ValueTask<IZMessageConnection> ConnectAsync(LoopbackEndpoint endpoint,
-            CancellationToken token = default)
+            ZTransportContext context, CancellationToken token = default)
         {
             BoundPair bound;
             lock (Gate)
@@ -208,7 +212,7 @@ public sealed class FrameLayerIntegrationTests
         }
 
         public static ValueTask<LoopbackMessageTransport> BindAsync(LoopbackEndpoint endpoint,
-            CancellationToken token = default)
+            ZTransportContext context, CancellationToken token = default)
         {
             var transport = new LoopbackMessageTransport();
             lock (Gate)
@@ -299,10 +303,12 @@ public sealed class FrameLayerIntegrationTests
     {
         public static LengthPrefixFraming Instance { get; } = new();
 
-        public IZMessageConnection Adapt(IZConnection connection)
-            => new LengthPrefixConnection(connection);
+        public IZMessageConnection Adapt(
+            IZConnection connection, in ZTransportContext context, bool ownsConnection = true)
+            => new LengthPrefixConnection(connection, context.Pool, ownsConnection);
 
-        private sealed class LengthPrefixConnection(IZConnection connection) : IZMessageConnection
+        private sealed class LengthPrefixConnection(
+            IZConnection connection, MemoryPool<byte> pool, bool ownsConnection) : IZMessageConnection
         {
             private readonly byte[] _header = new byte[5];
             private readonly FrameSequence _wire = new();
@@ -320,7 +326,7 @@ public sealed class FrameLayerIntegrationTests
                     if (length < 0) throw new IOException("negative frame length");
 
                     var more = (flags & ZmtpFrameFlags.More) != 0;
-                    var owner = MemoryPool<byte>.Shared.Rent(length == 0 ? 1 : length);
+                    var owner = pool.Rent(length == 0 ? 1 : length);
                     ZFrame frame;
                     try
                     {
@@ -374,9 +380,15 @@ public sealed class FrameLayerIntegrationTests
 
             public bool RetainsMessages => false;
 
-            public void Abort() => connection.Abort();
+            public void Abort()
+            {
+                if (ownsConnection) connection.Abort();
+            }
 
-            public void Dispose() => connection.Dispose();
+            public void Dispose()
+            {
+                if (ownsConnection) connection.Dispose();
+            }
 
             private async ValueTask WriteFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
             {
@@ -424,7 +436,7 @@ public sealed class FrameLayerIntegrationTests
         public Task BothEstablished => _bothEstablished.Task;
 
         public IZWireEstablisher CreateEstablisher(
-            IZMessageConnection connection, IZConnection? byteConnection,
+            IZMessageConnection connection,
             IZSecurityMechanism mechanism, ReadOnlyMemory<byte> localReadyBody, long maxCommandSize,
             MemoryPool<byte>? pool = null)
             => new Establisher(this, connection, localReadyBody);

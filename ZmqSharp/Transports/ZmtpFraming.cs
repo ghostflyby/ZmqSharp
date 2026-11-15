@@ -27,35 +27,46 @@ public sealed class ZmtpFraming : IZFraming
     }
 
     /// <summary>
-    /// Adapts a byte connection into a message connection. The default frame
-    /// bound is unbounded (limits are policy concerns - the receive policy's
-    /// allocator and the command limit); the internal overload caps what the
-    /// reader accepts.
+    /// Adapts a standalone byte connection into a message connection. The
+    /// default frame bound is unbounded (limits are policy concerns - the
+    /// receive policy's allocator and the command limit).
     /// </summary>
     public IZMessageConnection Adapt(IZConnection connection)
         => new ZmtpFramingConnection(connection, initialAllocator: null, long.MaxValue,
-            initialPool: null, onMessageBoundary: null);
+            initialPool: null, onMessageBoundary: null, ownsConnection: true);
 
     /// <summary>
-    /// Runtime composition (0033): the allocator supplies the final segments
-    /// per frame (the receive policy's zero-copy path); the bound caps what a
-    /// single frame header may declare; the message limits bound the
-    /// aggregation; the pool backs the staging scratch. The establishment
-    /// composition passes the command bound and no allocator - establishment
-    /// traffic is greeting and commands, not policy-materialized frames.
+    /// Transport composition (0034): the context supplies the establishment
+    /// bound and the pool; the receive composition arrives after
+    /// establishment through <see cref="IZMessageConnection.ConfigureReceive"/>.
+    /// A byte connection that is its own message view passes
+    /// <paramref name="ownsConnection"/> false so the view never disposes its
+    /// origin.
+    /// </summary>
+    public IZMessageConnection Adapt(
+        IZConnection connection, in ZTransportContext context, bool ownsConnection = true)
+        => new ZmtpFramingConnection(connection, initialAllocator: null, context.MaxCommandSize,
+            initialPool: context.Pool, onMessageBoundary: null, ownsConnection);
+
+    /// <summary>
+    /// Explicit composition: the allocator supplies the final segments per
+    /// frame (the receive policy's zero-copy path); the bound caps what a
+    /// single frame header may declare; the pool backs the staging scratch.
     /// </summary>
     internal IZMessageConnection Adapt(IZConnection connection, ZFrameAllocator? allocator, long bound,
-        MemoryPool<byte>? pool = null, Action? onMessageBoundary = null)
-        => new ZmtpFramingConnection(connection, allocator, bound, pool, onMessageBoundary);
+        MemoryPool<byte>? pool = null, Action? onMessageBoundary = null, bool ownsConnection = true)
+        => new ZmtpFramingConnection(connection, allocator, bound, pool, onMessageBoundary, ownsConnection);
 
     internal sealed class ZmtpFramingConnection(
         IZConnection connection, ZFrameAllocator? initialAllocator, long initialBound,
-        MemoryPool<byte>? initialPool, Action? onMessageBoundary) : IZMessageConnection
+        MemoryPool<byte>? initialPool, Action? onMessageBoundary, bool ownsConnection)
+        : IZMessageConnection, IZStagedFrameWriter
     {
         private readonly MemoryPool<byte> _pool = initialPool ?? MemoryPool<byte>.Shared;
+        private readonly bool _ownsConnection = ownsConnection;
         private ZFrameAllocator? _allocator = initialAllocator;
         private long _bound = initialBound;
-        private readonly Action? _onMessageBoundary = onMessageBoundary;
+        private Action? _onMessageBoundary = onMessageBoundary;
 
         // One reader and one writer may overlap (0030 section 3), so the
         // read and write sides keep separate reusable state.
@@ -163,16 +174,18 @@ public sealed class ZmtpFraming : IZFraming
         }
 
         /// <summary>
-        /// Rebinds the reader's policy in place (0033): the runtime knows the
-        /// codec only after establishment, so the same connection swaps its
-        /// allocator and bound instead of stacking a second adapter - one
-        /// scratch per connection, released exactly once.
+        /// Applies the post-establishment receive policy in place (0034): the
+        /// runtime knows the codec only after establishment, so the same
+        /// connection swaps its allocator, bound, and boundary callback
+        /// instead of stacking a second adapter - one scratch per connection,
+        /// released exactly once.
         /// </summary>
-        internal void Rebind(ZFrameAllocator? reboundAllocator, long reboundBound)
+        public void ConfigureReceive(in ZReceiveComposition composition)
         {
-            _allocator = reboundAllocator;
-            _bound = reboundBound;
-            if (reboundAllocator is not null)
+            _allocator = composition.Allocator;
+            _bound = composition.MaxFrameLength;
+            _onMessageBoundary = composition.OnMessageBoundary;
+            if (composition.Allocator is not null)
             {
                 // A materializing allocator reads frames into its own
                 // segments; the establishment-phase staging scratch is dead
@@ -190,7 +203,7 @@ public sealed class ZmtpFraming : IZFraming
         /// public contract stays message-level, the built-in protocol and
         /// framing co-optimize their shared hot path.
         /// </summary>
-        internal ValueTask WriteStagedFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
+        public ValueTask WriteStagedFrameAsync(ZmtpFrameFlags flags, ZFrame frame, CancellationToken token)
             => WriteFrameAsync(flags, frame, token);
 
         /// <summary>
@@ -199,7 +212,13 @@ public sealed class ZmtpFraming : IZFraming
         /// </summary>
         public bool RetainsMessages => false;
 
-        public void Abort() => connection.Abort();
+        /// <summary>The raw byte origin this framing reads and writes.</summary>
+        public IZConnection? ByteOrigin => connection;
+
+        public void Abort()
+        {
+            if (_ownsConnection) connection.Abort();
+        }
 
         public void Dispose()
         {
@@ -211,7 +230,7 @@ public sealed class ZmtpFraming : IZFraming
                 while (_ownedPool.TryPop(out var recycled)) recycled.DisposeInner();
             }
 
-            connection.Dispose();
+            if (_ownsConnection) connection.Dispose();
         }
 
         private async ValueTask WriteFramesAsync(ZMessage message, CancellationToken token)

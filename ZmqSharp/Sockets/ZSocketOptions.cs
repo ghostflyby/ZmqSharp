@@ -97,6 +97,14 @@ public sealed class ZSocketOptions
     public IZWireProtocol? WireProtocol { get; init; }
 
     /// <summary>
+    /// The wire dialect byte transports adopt (0034): the transport captures
+    /// it at connection construction, so a connection owns exactly one
+    /// message view. Defaults to the built-in ZMTP framing; a native message
+    /// transport already owns its units and ignores it.
+    /// </summary>
+    public IZFraming Framing { get; init; } = ZmtpFraming.Instance;
+
+    /// <summary>
     /// Maximum concurrently incomplete handshakes on the inbound (accepted)
     /// surface (0006 3.2). A slow-connecting flood beyond this is dropped with
     /// cancellation. Default 1024; zero disables the limit. Outbound

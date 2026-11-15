@@ -64,28 +64,8 @@ public abstract class ZSocketBase : IZSocket
     public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint> => Runtime.BindAsync<TEndpoint, TTransport>(endpoint, token);
 
-    public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing,
-        CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint> => Runtime.BindAsync<TEndpoint, TTransport>(endpoint, framing, token);
-
     public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint> => Runtime.ConnectAsync<TEndpoint, TTransport>(endpoint, token);
-
-    public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing,
-        CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint> => Runtime.ConnectAsync<TEndpoint, TTransport>(endpoint, framing, token);
-
-    public Task BindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint> => Runtime.BindMessageAsync<TEndpoint, TTransport>(endpoint, token);
-
-    public Task ConnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint> => Runtime.ConnectMessageAsync<TEndpoint, TTransport>(endpoint, token);
-
-    public ValueTask UnbindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint> => Runtime.UnbindMessageAsync<TEndpoint, TTransport>(endpoint, token);
-
-    public ValueTask DisconnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint> => Runtime.DisconnectMessageAsync<TEndpoint, TTransport>(endpoint, token);
 
     public void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
         where TTransport : IZTransport<TTransport, TEndpoint> => Runtime.Unbind<TEndpoint, TTransport>(endpoint);

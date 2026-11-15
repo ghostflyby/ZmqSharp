@@ -16,23 +16,25 @@ namespace ZmqSharp.AllocationTests;
 /// </summary>
 internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransport, EndPoint>
 {
-    public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
     {
         add { }
         remove { }
     }
 
-    public static ValueTask<IZConnection> ConnectAsync(
+    public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
-        var connection = new AllocationFakeConnection();
+        var connection = new AllocationFakeConnection(context);
         Current = connection;
-        return ValueTask.FromResult<IZConnection>(connection);
+        return ValueTask.FromResult<IZMessageConnection>(connection);
     }
 
     public static ValueTask<AllocationFakeTransport> BindAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new AllocationFakeTransport());
@@ -50,8 +52,16 @@ internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransp
     public static AllocationFakeConnection? Current { get; private set; }
 }
 
-internal sealed class AllocationFakeConnection : IZConnection
+internal sealed class AllocationFakeConnection : ZByteConnection
 {
+    public AllocationFakeConnection()
+    {
+    }
+
+    public AllocationFakeConnection(in ZTransportContext context) : base(context)
+    {
+    }
+
     private static readonly byte[] Handshake = BuildHandshake();
 
     private readonly Channel<byte[]> _inbound =
@@ -109,7 +119,7 @@ internal sealed class AllocationFakeConnection : IZConnection
         lock (_gateLock) _pumpRelease.TrySetResult();
     }
 
-    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         if (_handshakePosition >= Handshake.Length) return ReadInboundAsync(buffer, token);
@@ -163,20 +173,20 @@ internal sealed class AllocationFakeConnection : IZConnection
         return gate;
     }
 
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
 
-    public void Abort() => Dispose();
+    public override void Abort() => DisposeCore();
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         Interlocked.Exchange(ref _disposed, 1);
     }

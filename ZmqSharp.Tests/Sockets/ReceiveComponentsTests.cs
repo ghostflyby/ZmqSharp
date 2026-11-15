@@ -47,7 +47,7 @@ public sealed class ReceiveComponentsTests
         using var pool = new CountingMemoryPool();
         using var connection = new EstablishedFakeConnection();
         var registration = new ZEndpointRegistration(connection, null, null, null, CancellationToken.None, abort: connection.Abort);
-        var record = new PeerRecord(ZmtpFraming.Instance.Adapt(connection), connection, registration, false)
+        var record = new PeerRecord(connection, registration, false)
         {
             Phase = PeerPhase.Established,
             Queue = Channel.CreateUnbounded<ZMessage>(),
@@ -78,7 +78,7 @@ public sealed class ReceiveComponentsTests
         var surface = runtime.QueueSurface ?? throw new InvalidOperationException();
         using var connection = new EstablishedFakeConnection();
         var registration = new ZEndpointRegistration(connection, null, null, null, CancellationToken.None, abort: connection.Abort);
-        var record = new PeerRecord(ZmtpFraming.Instance.Adapt(connection), connection, registration, false) { Phase = PeerPhase.Established };
+        var record = new PeerRecord(connection, registration, false) { Phase = PeerPhase.Established };
         lock (runtime.StateLock) surface.Add(record);
         var owners = Enumerable.Range(0, 8).Select(_ => new OnceOwner()).ToArray();
         foreach (var owner in owners) await surface.DeliverAsync(record, ZMessage.FromPooled(owner), token);
@@ -124,32 +124,31 @@ public sealed class ReceiveComponentsTests
         var token = TestContext.Current.CancellationToken;
         using var pool = new CountingMemoryPool();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 100, 100, 10, () => { });
-        var messages = ZmtpFraming.Instance.Adapt(new HeaderThenFailure(), materializer.CreateAllocator(), 100);
+        using var messages = new HeaderThenFailure();
+        messages.ConfigureReceive(new ZReceiveComposition(materializer.CreateAllocator(), 100, null));
         using var session = ZmqProtocol.Instance.CreateSession(messages, null);
         await Assert.ThrowsAsync<IOException>(() => session.ReadMessageAsync(token).AsTask());
         Assert.Equal(0, pool.Outstanding);
     }
 
-    private sealed class HeaderThenFailure : IZConnection
+    private sealed class HeaderThenFailure : ZByteConnection
     {
         private int _position;
 
-        public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         {
             if (_position >= 2) throw new IOException("read failed in body");
             destination.Span[0] = _position++ == 0 ? (byte)0 : (byte)8;
             return ValueTask.FromResult(1);
         }
 
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
             => throw new NotSupportedException("the read-failure fixture never writes");
 
-        public ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        public override ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
             => throw new NotSupportedException("the read-failure fixture never writes");
 
-        public void Abort() { }
-
-        public void Dispose() { }
+        public override void Abort() { }
     }
 
     [Fact]

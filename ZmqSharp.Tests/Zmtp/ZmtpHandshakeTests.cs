@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using Xunit;
 using ZmqSharp.Security;
@@ -241,13 +242,20 @@ public sealed class ZmtpHandshakeTests
 
     private static ZConnection NewConnection(byte[] peerBytes)
     {
-        return new ZConnection(new ChunkedMemoryStream(peerBytes));
+        var connection = new ZConnection(new ChunkedMemoryStream(peerBytes), Context());
+        // The runtime applies the establishment bound before the handshake;
+        // these fixtures drive the handshake directly.
+        connection.ConfigureReceive(new ZReceiveComposition(
+            allocator: null, MaxCommandSize, onMessageBoundary: null));
+        return connection;
     }
+
+    private static ZTransportContext Context()
+        => new(ZmtpFraming.Instance, MemoryPool<byte>.Shared, MaxCommandSize);
 
     private static IZWireEstablisher NewHandshake(IZConnection connection)
     {
         return ZmqProtocol.Instance.CreateEstablisher(
-            ZmtpFraming.Instance.Adapt(connection, null, MaxCommandSize),
             connection,
             ZNullMechanism.Instance,
             ZmtpCommands.BuildReady("PAIR"),

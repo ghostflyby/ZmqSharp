@@ -44,8 +44,8 @@ public sealed class CurveMessageLayerRegressionTests
         var token = TestContext.Current.CancellationToken;
         var endpoint = new CurveLoopbackEndpoint();
 
-        await server.BindMessageAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
-        await client.ConnectMessageAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
+        await server.BindAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
+        await client.ConnectAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
 
         byte[][] parts =
         [
@@ -75,8 +75,7 @@ public sealed class CurveMessageLayerRegressionTests
         using var recording = new RecordingByteConnection();
         using var codec = NewCodec();
         const int rounds = 200;
-        using (var session = ZmqProtocol.Instance.CreateSession(
-                   ZmtpFraming.Instance.Adapt(recording), codec))
+        using (var session = ZmqProtocol.Instance.CreateSession(recording, codec))
         {
             var message = ZMessage.FromOwned([.. "data"u8]);
             var token = TestContext.Current.CancellationToken;
@@ -89,8 +88,7 @@ public sealed class CurveMessageLayerRegressionTests
 
         using var input = new RecordingByteConnection(recording.Recorded);
         using var readCodec = NewCodec();
-        using var readSession = ZmqProtocol.Instance.CreateSession(
-            ZmtpFraming.Instance.Adapt(input), readCodec);
+        using var readSession = ZmqProtocol.Instance.CreateSession(input, readCodec);
         var seen = 0;
         while (await readSession.ReadMessageAsync(TestContext.Current.CancellationToken) is { } message)
         {
@@ -176,14 +174,14 @@ public sealed class CurveMessageLayerRegressionTests
 
 
 internal sealed class RecordingByteConnection(byte[]? feed = null, int capacity = 0, bool yieldWrites = false)
-    : IZConnection
+    : ZByteConnection
 {
     private readonly byte[] _feed = feed ?? [];
     private readonly List<byte> _written = new(capacity);
     private int _position;
     public byte[] Recorded => [.. _written];
 
-    public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+    public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
         var length = Math.Min(destination.Length, _feed.Length - _position);
@@ -192,20 +190,19 @@ internal sealed class RecordingByteConnection(byte[]? feed = null, int capacity 
         return ValueTask.FromResult(length);
     }
 
-    public async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         if (yieldWrites) await Task.Yield();
         token.ThrowIfCancellationRequested();
         _written.AddRange(bytes.Span);
     }
 
-    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
 
-    public void Abort() { }
-    public void Dispose() { }
+    public override void Abort() { }
 }
 
 
@@ -217,7 +214,7 @@ internal sealed class CurveLoopbackEndpoint;
 /// retention contract covers), mirroring the integration suite's loopback.
 /// </summary>
 internal sealed class CurveLoopbackTransport
-    : IZMessageTransport<CurveLoopbackTransport, CurveLoopbackEndpoint>
+    : IZTransport<CurveLoopbackTransport, CurveLoopbackEndpoint>
 {
     private static readonly Dictionary<CurveLoopbackEndpoint, BoundPair> Bound = new();
     private static readonly Lock Gate = new();
@@ -232,7 +229,7 @@ internal sealed class CurveLoopbackTransport
     }
 
     public static async ValueTask<IZMessageConnection> ConnectAsync(CurveLoopbackEndpoint endpoint,
-        CancellationToken token = default)
+        ZTransportContext context, CancellationToken token = default)
     {
         BoundPair bound;
         lock (Gate)
@@ -247,7 +244,7 @@ internal sealed class CurveLoopbackTransport
     }
 
     public static ValueTask<CurveLoopbackTransport> BindAsync(CurveLoopbackEndpoint endpoint,
-        CancellationToken token = default)
+        ZTransportContext context, CancellationToken token = default)
     {
         var transport = new CurveLoopbackTransport();
         lock (Gate)

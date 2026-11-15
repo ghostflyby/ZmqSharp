@@ -59,50 +59,38 @@ public interface IZMessageConnection : IDisposable
     /// regardless.
     /// </summary>
     bool RetainsMessages { get; }
+
+    /// <summary>
+    /// The raw byte origin when this connection is byte-backed, or null for a
+    /// native message transport. The protocol uses it only for the raw ZMTP
+    /// greeting, a stream construct with no message equivalent (0034).
+    /// </summary>
+    IZConnection? ByteOrigin => null;
+
+    /// <summary>
+    /// Applies the post-establishment receive policy - the zero-copy
+    /// allocator, the encoded frame bound, and the message-boundary callback.
+    /// Native message transports already own their frames, so the default is
+    /// a no-op (0034).
+    /// </summary>
+    void ConfigureReceive(in ZReceiveComposition composition) { }
 }
 
 /// <summary>
-/// A bound message-layer transport: accepts peers and reports each accepted
-/// message connection via OnAccept after StartAsync runs - the
-/// message-currency sibling of <see cref="IZTransport"/> (the listener
-/// contracts cannot merge: their event currencies differ).
-/// </summary>
-public interface IZMessageTransport : IDisposable
-{
-    event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept;
-
-    ValueTask StartAsync(CancellationToken token = default);
-}
-
-/// <summary>
-/// Generic message-transport factory, mirroring
-/// <see cref="IZTransport{TSelf,TEndpoint}"/>: ConnectAsync yields a
-/// connected message connection; BindAsync yields a listening message
-/// transport.
-/// </summary>
-public interface IZMessageTransport<TSelf, in TEndpoint> : IZMessageTransport
-    where TSelf : IZMessageTransport<TSelf, TEndpoint>
-{
-    static abstract ValueTask<IZMessageConnection> ConnectAsync(
-        TEndpoint endpoint,
-        CancellationToken token = default);
-
-    static abstract ValueTask<TSelf> BindAsync(
-        TEndpoint endpoint,
-        CancellationToken token = default);
-}
-
-/// <summary>
-/// A framing (0033): adapts a byte-layer connection into a message-layer
-/// connection by imposing the framing's wire dialect - the framing owns the
-/// frame grammar (the built-in <see cref="ZmtpFraming"/> writes ZMTP's
-/// flag-and-length prefixes and re-aggregates More chains into messages; a
-/// WebSocket framing would map one message to one WS message). The adapter
-/// owns the byte connection's I/O; aborting or disposing the message
-/// connection aborts and disposes the byte connection.
+/// A framing (0033, reshaped in 0034): adapts a byte-layer connection into a
+/// message-layer connection by imposing the framing's wire dialect - the
+/// framing owns the frame grammar (the built-in <see cref="ZmtpFraming"/>
+/// writes ZMTP's flag-and-length prefixes and re-aggregates More chains into
+/// messages; a WebSocket framing would map one message to one WS message).
 /// </summary>
 public interface IZFraming
 {
-    /// <summary>Adapts a byte connection into a message connection.</summary>
-    IZMessageConnection Adapt(IZConnection connection);
+    /// <summary>
+    /// Adapts a byte connection into a message connection. When
+    /// <paramref name="ownsConnection"/> is true the view aborts and disposes
+    /// the byte connection with itself; a byte connection that serves as its
+    /// own message view passes false so its lifecycle stays single-owner.
+    /// </summary>
+    IZMessageConnection Adapt(
+        IZConnection connection, in ZTransportContext context, bool ownsConnection = true);
 }

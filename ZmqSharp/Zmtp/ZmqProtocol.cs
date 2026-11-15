@@ -22,10 +22,10 @@ public sealed class ZmqProtocol : IZWireProtocol
     }
 
     public IZWireEstablisher CreateEstablisher(
-        IZMessageConnection connection, IZConnection? byteConnection,
+        IZMessageConnection connection,
         IZSecurityMechanism mechanism, ReadOnlyMemory<byte> localReadyBody, long maxCommandSize,
         MemoryPool<byte>? pool = null)
-        => new Establisher(connection, byteConnection, mechanism, localReadyBody, maxCommandSize);
+        => new Establisher(connection, mechanism, localReadyBody, maxCommandSize);
 
     public IZWireSession CreateSession(IZMessageConnection connection, IZFrameCodec? codec,
         Action<Exception>? retire = null, ZFrameAllocator? decodedAllocator = null,
@@ -43,7 +43,6 @@ public sealed class ZmqProtocol : IZWireProtocol
 
     private sealed class Establisher(
         IZMessageConnection connection,
-        IZConnection? byteConnection,
         IZSecurityMechanism mechanism,
         ReadOnlyMemory<byte> localReadyBody,
         long maxCommandSize) : IZWireEstablisher
@@ -54,7 +53,7 @@ public sealed class ZmqProtocol : IZWireProtocol
             // origin (wire-identical to every ZMTP peer), one command on
             // native message connections.
             string? peerMechanism;
-            if (byteConnection is { } bytes)
+            if (connection.ByteOrigin is { } bytes)
             {
                 await bytes.WriteAsync(ZmtpGreeting.Build(mechanism.Name, mechanism.Role), token);
 
@@ -134,7 +133,7 @@ public sealed class ZmqProtocol : IZWireProtocol
                     return;
                 }
 
-                if (connection is ZmtpFraming.ZmtpFramingConnection streaming)
+                if (ZStagedWrites.TryGet(connection, out var streaming))
                 {
                     // Built-in fast path: each frame is encoded into the
                     // reused send buffer and streamed as one logical write -

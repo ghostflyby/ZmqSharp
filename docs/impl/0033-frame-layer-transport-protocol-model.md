@@ -1,6 +1,6 @@
 # 0033 - The Message Layer: A Three-Tier Transport/Protocol Model
 
-Status: accepted
+Status: accepted (connection layering superseded by 0034)
 Date: 2026-11-15
 
 ## 1. The existing model and where it broke

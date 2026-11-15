@@ -2075,21 +2075,23 @@ public sealed class ZSocketTests
 /// <summary>Transport whose connection immediately reports EOF so the pump completes synchronously.</summary>
 internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransport, EndPoint>
 {
-    public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
     {
         add { }
         remove { }
     }
 
-    public static ValueTask<IZConnection> ConnectAsync(
+    public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
-        return ValueTask.FromResult<IZConnection>(new SynchronousEofConnection());
+        return ValueTask.FromResult<IZMessageConnection>(new SynchronousEofConnection());
     }
 
     public static ValueTask<SynchronousEofTransport> BindAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new SynchronousEofTransport());
@@ -2103,29 +2105,29 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
     public void Dispose() { }
 }
 
-internal sealed class SynchronousEofConnection : IZConnection
+internal sealed class SynchronousEofConnection : ZByteConnection
 {
     private int _disposed;
 
-    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
         return ValueTask.FromResult(0);
     }
 
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
 
-    public void Abort() => Dispose();
+    public override void Abort() => DisposeCore();
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         Interlocked.Exchange(ref _disposed, 1);
     }

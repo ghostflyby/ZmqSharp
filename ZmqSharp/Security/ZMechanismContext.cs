@@ -20,14 +20,11 @@ public sealed class ZMechanismContext : IDisposable
     internal ZMechanismContext(
         IZConnection connection,
         ReadOnlyMemory<byte> localReadyBody,
-        long maxCommandSize,
-        MemoryPool<byte>? pool = null)
-        : this(new UnitCommandChannel(ZmtpFraming.Instance.Adapt(connection), maxCommandSize),
-            localReadyBody, maxCommandSize)
+        long maxCommandSize)
+        : this(new UnitCommandChannel(connection, maxCommandSize), localReadyBody, maxCommandSize)
     {
-        // The public constructor keeps its byte-connection shape: ZMTP
-        // command framing over the byte origin (0033).
-        _ = pool;
+        // A byte connection is its own message connection (0034): commands
+        // ride the connection's framing view, with no second adapter.
     }
 
     internal ZMechanismContext(

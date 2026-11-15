@@ -165,16 +165,11 @@ ZmqSharp.Transports.IZByteWriter
 ZmqSharp.Transports.IZByteWriter.WriteAsync(System.Buffers.ReadOnlySequence<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.Transports.IZByteWriter.WriteAsync(System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.Transports.IZConnection
-ZmqSharp.Transports.IZConnection.Abort() -> void
 ZmqSharp.Transports.IZTransport
-ZmqSharp.Transports.IZTransport.OnAccept -> System.Func<ZmqSharp.Transports.IZConnection!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
 ZmqSharp.Transports.IZTransport.StartAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.Transports.IZTransport<TSelf, TEndpoint>
-ZmqSharp.Transports.IZTransport<TSelf, TEndpoint>.BindAsync(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<TSelf>
-ZmqSharp.Transports.IZTransport<TSelf, TEndpoint>.ConnectAsync(TEndpoint endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.IZConnection!>
 ZmqSharp.Transports.SocketTransport
 ZmqSharp.Transports.SocketTransport.Dispose() -> void
-ZmqSharp.Transports.SocketTransport.OnAccept -> System.Func<ZmqSharp.Transports.IZConnection!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
 ZmqSharp.Transports.SocketTransport.StartAsync(System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.ZDealerSocket
 ZmqSharp.ZDealerSocket.SendAsync(System.Buffers.ReadOnlySequence<byte> frame, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask

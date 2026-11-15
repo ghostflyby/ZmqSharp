@@ -78,6 +78,7 @@ internal sealed class SocketRuntime : IZSocket
     private readonly ConcurrentQueue<(MessagePauseGate Gate, ZMessage RetainedMessage)> _paused = [];
 
     private readonly long _maxCommandSize;
+    private readonly ZTransportContext _transportContext;
     private readonly IZDispatchPolicy _dispatch;
     private readonly ZSocketType _type;
     private IZInboundPolicy _inbound;
@@ -127,6 +128,7 @@ internal sealed class SocketRuntime : IZSocket
         _type = type;
         _inbound = inbound ?? ZInboundPolicy.PassThrough;
         _maxCommandSize = options.MaxCommandSize;
+        _transportContext = new ZTransportContext(options.Framing, Pool, _maxCommandSize);
         _mechanism = options.Security.Mechanism;
         _protocol = options.WireProtocol ?? ZmqProtocol.Instance;
         _handshakeTimeoutMs = options.HandshakeTimeoutMs;
@@ -258,101 +260,42 @@ internal sealed class SocketRuntime : IZSocket
 
     public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => ConnectCoreAsync<TEndpoint, TTransport>(endpoint, null, null, token);
-
-    public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing,
-        CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-        => ConnectCoreAsync<TEndpoint, TTransport>(endpoint, framing, null, token);
+        => ConnectCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
 
     public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => BindCoreAsync<TEndpoint, TTransport>(endpoint, null, null, token);
-
-    public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing,
-        CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
-        => BindCoreAsync<TEndpoint, TTransport>(endpoint, framing, null, token);
-
-    public Task ConnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint>
-        => ConnectMessageCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
-
-    public Task BindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint>
-        => BindMessageCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
+        => BindCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
 
     public async Task ConnectAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, null, endpoint, token);
+        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
     }
 
     public async Task BindAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await BindCoreAsync<EndPoint, SocketTransport>(parsed, null, endpoint, token);
+        await BindCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
     }
 
-    private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing, string? address,
+    private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
         CancellationToken token) where TTransport : IZTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
         token.ThrowIfCancellationRequested();
-        var connection = await TTransport.ConnectAsync(endpoint, token);
-        var established = AddByteConnection(connection, framing, endpoint, false, token, typeof(TTransport), address);
+        var connection = await TTransport.ConnectAsync(endpoint, _transportContext, token);
+        var established = AddConnection(connection, endpoint, false, token, typeof(TTransport), address);
         await established.Task.WaitAsync(token);
     }
 
-    private async Task ConnectMessageCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
-        CancellationToken token) where TTransport : IZMessageTransport<TTransport, TEndpoint>
-    {
-        ThrowIfClosed();
-        token.ThrowIfCancellationRequested();
-        var frames = await TTransport.ConnectAsync(endpoint, token);
-        var established = AddMessageConnection(frames, endpoint, false, token, typeof(TTransport), address);
-        await established.Task.WaitAsync(token);
-    }
-
-    private async Task BindCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, IZFraming? framing, string? address,
+    private async Task BindCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
         CancellationToken token) where TTransport : IZTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
         token.ThrowIfCancellationRequested();
-        var listener = await TTransport.BindAsync(endpoint, token);
+        var listener = await TTransport.BindAsync(endpoint, _transportContext, token);
         ZEndpointRegistration? registration = null;
-        listener.OnAccept += (connection, acceptToken)
-            => AcceptByteConnection(connection, framing, acceptToken);
-        lock (StateLock)
-        {
-            if (Volatile.Read(ref _closed) == 0 && !token.IsCancellationRequested)
-            {
-                registration = new ZEndpointRegistration(listener, endpoint, typeof(TTransport), address, LifetimeToken);
-                _listeners.Add(registration);
-                TrackBackground(registration.Completion.Task);
-            }
-        }
-
-        if (registration is null)
-        {
-            listener.Dispose();
-            token.ThrowIfCancellationRequested();
-            ThrowIfClosed();
-            return;
-        }
-
-        _ = RunListenerAsync(listener.StartAsync, registration);
-    }
-
-    private async Task BindMessageCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
-        CancellationToken token) where TTransport : IZMessageTransport<TTransport, TEndpoint>
-    {
-        ThrowIfClosed();
-        token.ThrowIfCancellationRequested();
-        var listener = await TTransport.BindAsync(endpoint, token);
-        ZEndpointRegistration? registration = null;
-        listener.OnAccept += (frames, acceptToken)
-            => AcceptMessageConnection(frames, acceptToken);
+        listener.OnAccept += (connection, acceptToken) => AcceptConnection(connection, acceptToken);
         lock (StateLock)
         {
             if (Volatile.Read(ref _closed) == 0 && !token.IsCancellationRequested)
@@ -426,16 +369,6 @@ internal sealed class SocketRuntime : IZSocket
     /// <summary>Stops matching peers and waits for cleanup. Do not await this from a targeted peer's callback.</summary>
     public ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
         where TTransport : IZTransport<TTransport, TEndpoint>
-        => StopEndpointAsync(endpoint, typeof(TTransport), null, false, token);
-
-    /// <summary>Stops matching frame-transport listeners and waits for cleanup.</summary>
-    public ValueTask UnbindMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint>
-        => StopEndpointAsync(endpoint, typeof(TTransport), null, true, token);
-
-    /// <summary>Stops matching frame-transport peers and waits for cleanup.</summary>
-    public ValueTask DisconnectMessageAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZMessageTransport<TTransport, TEndpoint>
         => StopEndpointAsync(endpoint, typeof(TTransport), null, false, token);
 
     public ValueTask UnbindAsync(string endpoint, CancellationToken token = default)
@@ -950,72 +883,50 @@ internal sealed class SocketRuntime : IZSocket
         await SendAsyncCore(message, token);
     }
 
-    private ValueTask AcceptByteConnection(IZConnection connection, IZFraming? framing, CancellationToken token)
+    private ValueTask AcceptConnection(IZMessageConnection connection, CancellationToken token)
     {
         // Accepted peers outlive their listener (StringEndpoints_Unbind...):
         // the listener's accept token must NOT link into the peer's
         // registration - stopping the listener keeps established peers.
         _ = token;
-        AddByteConnection(connection, framing, null, true);
-        return ValueTask.CompletedTask;
-    }
-
-    private ValueTask AcceptMessageConnection(IZMessageConnection frames, CancellationToken token)
-    {
-        _ = token;
-        AddMessageConnection(frames, null, true);
+        AddConnection(connection, null, true);
         return ValueTask.CompletedTask;
     }
 
     /// <summary>
-    /// A byte-transport peer: the framing (the transport's own, or the default
-    /// ZMTP framing) composes the frame channel the protocol drives; the
-    /// materializer's allocator feeds the framing's zero-copy reads.
+    /// One connection path for both transport styles (0034): a byte transport
+    /// already framed its connection with the socket's dialect, and a native
+    /// message transport already owns whole units. The materializer's
+    /// allocator is installed after establishment by
+    /// <see cref="IZMessageConnection.ConfigureReceive"/>.
     /// </summary>
-    private TaskCompletionSource AddByteConnection(IZConnection connection, IZFraming? framing, object? endpoint,
+    private TaskCompletionSource AddConnection(IZMessageConnection connection, object? endpoint,
         bool accepted, CancellationToken token = default, Type? transport = null, string? address = null)
     {
-        ReceiveMaterializer? materializer = null;
-        if (_receivePolicy is not null)
-            materializer = new ReceiveMaterializer(Pool, _receivePolicy, _maxFrameLength, _maxMessageLength,
-                _maxFramesPerMessage, OnMaterializerRejected);
-
-        // The establishment adapter never carries the receive policy's
-        // allocator: establishment traffic is greeting and mechanism commands
-        // only, not policy-materialized frames. The framing bound is the
-        // command limit, so a header declaring more rejects before any body
-        // is staged (the old channel's pre-body check, 0008 Slice B); the
-        // runtime rebinds after establishment with the codec-aware bound and
-        // the zero-copy allocator (RunConnectionAsync, 0033).
-        var bound = _maxCommandSize;
-        IZMessageConnection frames = framing switch
+        if (connection.ByteOrigin is null
+            && !ReferenceEquals(_transportContext.Framing, ZmtpFraming.Instance))
         {
-            null => ZmtpFraming.Instance.Adapt(connection, null, bound, Pool,
-                () => materializer?.Reset()),
-            ZmtpFraming zmtp => zmtp.Adapt(connection, null, bound, Pool,
-                () => materializer?.Reset()),
-            _ => framing.Adapt(connection),
-        };
-        return AddPeer(frames, connection, materializer, endpoint, accepted, token, transport, address);
-    }
+            connection.Dispose();
+            var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            rejected.TrySetException(new InvalidOperationException(
+                "a native message connection already owns its units; a framing cannot be applied"));
+            return rejected;
+        }
 
-    private TaskCompletionSource AddMessageConnection(IZMessageConnection frames, object? endpoint,
-        bool accepted, CancellationToken token = default, Type? transport = null, string? address = null)
-    {
         ReceiveMaterializer? materializer = null;
         if (_receivePolicy is not null)
             materializer = new ReceiveMaterializer(Pool, _receivePolicy, _maxFrameLength, _maxMessageLength,
                 _maxFramesPerMessage, OnMaterializerRejected);
 
-        return AddPeer(frames, null, materializer, endpoint, accepted, token, transport, address);
+        return AddPeer(connection, materializer, endpoint, accepted, token, transport, address);
     }
 
     /// <summary>
-    /// The single record-creation path: the frame channel exists before the
-    /// record, so the registration's resource and abort are the frame
-    /// connection (releasing it releases the byte origin with it).
+    /// The single record-creation path: the connection exists before the
+    /// record, so the registration's resource and abort are the connection
+    /// itself.
     /// </summary>
-    private TaskCompletionSource AddPeer(IZMessageConnection frames, IZConnection? bytes,
+    private TaskCompletionSource AddPeer(IZMessageConnection frames,
         ReceiveMaterializer? materializer, object? endpoint, bool accepted, CancellationToken token,
         Type? transport, string? address)
     {
@@ -1027,7 +938,7 @@ internal sealed class SocketRuntime : IZSocket
             {
                 var registration = new ZEndpointRegistration(frames, endpoint, transport, address, LifetimeToken, token,
                     frames.Abort);
-                record = new PeerRecord(frames, bytes, registration, accepted) { Materializer = materializer };
+                record = new PeerRecord(frames, registration, accepted) { Materializer = materializer };
                 _peers.Add(record.Peer, record);
                 if (accepted) _incompleteHandshakes++;
                 TrackBackground(registration.Completion.Task);
@@ -1042,6 +953,12 @@ internal sealed class SocketRuntime : IZSocket
             rejected.TrySetCanceled();
             return rejected;
         }
+
+        // Establishment bound: a command frame header declaring more than the
+        // socket's limit rejects before any body is staged (0008 Slice B).
+        // The traffic composition replaces it after establishment.
+        frames.ConfigureReceive(new ZReceiveComposition(
+            allocator: null, _maxCommandSize, onMessageBoundary: null));
 
         _ = RunConnectionAsync(record);
         return record.Established;
@@ -1061,31 +978,37 @@ internal sealed class SocketRuntime : IZSocket
             }
 
             // The wire protocol drives establishment and the session over the
-            // frame channel (0033); the byte origin is passed through for the
-            // raw greeting on byte-composed connections.
+            // connection (0034); the protocol reads the byte origin itself for
+            // the raw greeting on byte-composed connections.
             using var establisher = _protocol.CreateEstablisher(
-                record.Frames, record.Bytes, _mechanism, _localReadyBody, _maxCommandSize, Pool);
+                record.Frames, _mechanism, _localReadyBody, _maxCommandSize, Pool);
             var result = await EstablishWithTimeoutAsync(establisher, record);
             if (result is not { } established) throw new IOException("peer closed during handshake");
 
-            // Post-establishment rebind (0033): the codec is known only now.
-            // The ZMTP framing swaps its reader policy in place - one scratch
-            // per connection. NULL keeps the zero-copy traffic path
-            // (allocator); a codec session unbounds the framing to the
-            // encoded maximum (the old parser's _maxEncodedLength) and
-            // materializes decoded frames through the pump's allocator
-            // instead. A custom framing keeps its establishment policy.
-            if (record.Frames is ZmtpFraming.ZmtpFramingConnection zmtp)
+            // Post-establishment receive composition (0034): the codec is
+            // known only now. A byte-backed framing swaps its reader policy in
+            // place - one scratch per connection. NULL keeps the zero-copy
+            // traffic path (allocator); a codec session unbounds the framing
+            // to the encoded maximum and materializes decoded frames through
+            // the session's allocator instead. Native message connections
+            // already own their frames and ignore the composition.
+            if (established.Codec is { } codec)
             {
-                if (established.Codec is { } codec)
-                    zmtp.Rebind(null, codec.GetMaximumEncodedLength(Math.Max(_maxFrameLength, _maxCommandSize)));
-                else
-                    // No codec: the framing bound stays unbounded exactly as
-                    // the old parser's stream - the receive policy's allocator
-                    // owns the semantic limits and rejects before renting.
-                    zmtp.Rebind(record.Materializer?.CreateAllocator(), long.MaxValue);
+                record.Frames.ConfigureReceive(new ZReceiveComposition(
+                    allocator: null,
+                    codec.GetMaximumEncodedLength(Math.Max(_maxFrameLength, _maxCommandSize)),
+                    onMessageBoundary: null));
             }
-
+            else
+            {
+                // No codec: the allocator owns the semantic limits and rejects
+                // before renting; the boundary callback resets its counters at
+                // every complete wire message.
+                record.Frames.ConfigureReceive(new ZReceiveComposition(
+                    record.Materializer?.CreateAllocator(),
+                    long.MaxValue,
+                    record.Materializer is { } materializer ? materializer.Reset : null));
+            }
 
             record.Session = _protocol.CreateSession(
                 record.Frames, established.Codec, fault => RetirePeer(record.Peer, fault),

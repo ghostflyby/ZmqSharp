@@ -237,7 +237,6 @@ public sealed class ZPlainMechanismTests
     private static IZWireEstablisher NewHandshake(IZConnection connection, ZPlainMechanism mechanism)
     {
         return ZmqProtocol.Instance.CreateEstablisher(
-            ZmtpFraming.Instance.Adapt(connection, null, MaxCommandSize),
             connection,
             mechanism,
             ZmtpCommands.BuildReady("PAIR"),

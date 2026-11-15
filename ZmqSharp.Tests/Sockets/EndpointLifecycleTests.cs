@@ -243,21 +243,21 @@ public sealed class EndpointLifecycleTests
     private sealed class ControlledTransport<T>(ControlledEndpoint endpoint)
         : IZTransport<ControlledTransport<T>, ControlledEndpoint>
     {
-        public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+        public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
         {
             add { }
             remove { }
         }
 
-        public static async ValueTask<IZConnection> ConnectAsync(ControlledEndpoint endpoint,
-            CancellationToken token = default)
+        public static async ValueTask<IZMessageConnection> ConnectAsync(ControlledEndpoint endpoint,
+            ZTransportContext context, CancellationToken token = default)
         {
             await endpoint.WaitForFactoryAsync();
-            return new ControlledConnection(endpoint);
+            return new ControlledConnection(endpoint, context);
         }
 
         public static async ValueTask<ControlledTransport<T>> BindAsync(ControlledEndpoint endpoint,
-            CancellationToken token = default)
+            ZTransportContext context, CancellationToken token = default)
         {
             await endpoint.WaitForFactoryAsync();
             return new ControlledTransport<T>(endpoint);
@@ -267,12 +267,13 @@ public sealed class EndpointLifecycleTests
         public void Dispose() => Interlocked.Increment(ref endpoint.Disposals);
     }
 
-    private sealed class ControlledConnection(ControlledEndpoint endpoint) : IZConnection
+    private sealed class ControlledConnection(ControlledEndpoint endpoint, in ZTransportContext context)
+        : ZByteConnection(context)
     {
         private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
         private int _position;
 
-        public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
         {
             if (endpoint.Handshake && _position < _handshake.Length)
             {
@@ -286,15 +287,15 @@ public sealed class EndpointLifecycleTests
             return 0;
         }
 
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default) => ValueTask.CompletedTask;
 
-        public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
         {
             foreach (var segment in bytes) await WriteAsync(segment, token);
         }
 
-        public void Abort() { }
+        public override void Abort() { }
 
-        public void Dispose() => Interlocked.Increment(ref endpoint.Disposals);
+        protected override void DisposeCore() => Interlocked.Increment(ref endpoint.Disposals);
     }
 }

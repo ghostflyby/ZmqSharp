@@ -15,7 +15,7 @@ public sealed class CurveSessionTrafficTests
         encodeServerToClient: false, decodeServerToClient: false, 1, 0);
 
     internal static IZWireSession NewSession(RecordingByteConnection raw, IZFrameCodec? codec = null)
-        => ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
+        => ZmqProtocol.Instance.CreateSession(raw, codec);
 
     [Fact]
     public async Task LargeFrame_RoundTrips_WithLongSizeFlag()
@@ -123,8 +123,8 @@ public sealed class CurveSessionTrafficTests
         using var raw = new RecordingByteConnection(header);
         // The codec-aware bound rides on the framing: a header declaring an
         // encoded size beyond it rejects before any body is read.
-        using var session = ZmqProtocol.Instance.CreateSession(
-            ZmtpFraming.Instance.Adapt(raw, null, 256), null);
+        raw.ConfigureReceive(new ZReceiveComposition(allocator: null, 256, onMessageBoundary: null));
+        using var session = ZmqProtocol.Instance.CreateSession(raw, null);
         // There is no body: ignoring the header bound would silently hit EOF.
         var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(
             () => session.ReadMessageAsync(token).AsTask());
@@ -142,15 +142,15 @@ public sealed class CurveSessionTrafficTests
             await session.SendAsync(message, token);
         }
 
-        using var input = new RecordingByteConnection(recording.Recorded);
-        using var codec = NewCodec();
         using var pool = new CountingRentPool();
+        using var input = new RecordingByteConnection(recording.Recorded,
+            context: new ZTransportContext(ZmtpFraming.Instance, pool, long.MaxValue));
+        using var codec = NewCodec();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 8, 100, 10, () => { });
         // The framing's pooled rent carries the encoded body (the old parser's
         // scratch rent); the decoded frame then materializes through the
         // allocator, whose 8-byte limit rejects before renting.
-        using var readSession = ZmqProtocol.Instance.CreateSession(
-            ZmtpFraming.Instance.Adapt(input, null, long.MaxValue, pool), codec,
+        using var readSession = ZmqProtocol.Instance.CreateSession(input, codec,
             decodedAllocator: materializer.CreateAllocator(), maxCommandSize: 256, maxFrameLength: 8);
         var failure = await Assert.ThrowsAsync<ZReceiveRejectedException>(
             () => readSession.ReadMessageAsync(token).AsTask());
@@ -177,7 +177,7 @@ public sealed class CurveSessionTrafficTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var raw = new RecordingByteConnection(recording.Recorded);
         using var codec = NewCodec();
-        using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
+        using var session = ZmqProtocol.Instance.CreateSession(raw, codec);
         var count = 0;
         // ReSharper disable once AccessToDisposedClosure
         var parsing = Task.Run(async () =>
@@ -225,7 +225,7 @@ public sealed class CurveSessionTrafficTests
         using var raw = new RecordingByteConnection(wire);
         using var codec = NewCodec();
         var frames = new List<(bool, byte[])>();
-        using var session = ZmqProtocol.Instance.CreateSession(ZmtpFraming.Instance.Adapt(raw), codec);
+        using var session = ZmqProtocol.Instance.CreateSession(raw, codec);
         while (await session.ReadMessageAsync() is { } message)
         {
             foreach (var frame in message) frames.Add((frame.More, frame.ToSequence().ToArray()));
