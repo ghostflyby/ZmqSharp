@@ -213,7 +213,7 @@ public sealed class ZmtpFraming : IZFraming
         public bool RetainsMessages => false;
 
         /// <summary>The raw byte origin this framing reads and writes.</summary>
-        public IZConnection? ByteOrigin => connection;
+        public IZConnection ByteOrigin => connection;
 
         public void Abort()
         {

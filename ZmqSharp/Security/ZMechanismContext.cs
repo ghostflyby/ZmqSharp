@@ -1,4 +1,3 @@
-using System.Buffers;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 

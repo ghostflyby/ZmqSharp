@@ -34,7 +34,7 @@ ZmqSharp.Transports.ZByteConnection.ReadUnitAsync(System.Threading.CancellationT
 ZmqSharp.Transports.ZByteConnection.WriteMessageAsync(ZmqSharp.ZMessage message, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.Transports.ZByteConnection.WriteCommandAsync(System.ReadOnlyMemory<byte> body, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 ZmqSharp.Transports.ZByteConnection.RetainsMessages.get -> bool
-ZmqSharp.Transports.ZByteConnection.ByteOrigin.get -> ZmqSharp.Transports.IZConnection?
+ZmqSharp.Transports.ZByteConnection.ByteOrigin.get -> ZmqSharp.Transports.IZConnection!
 ZmqSharp.Transports.ZByteConnection.ConfigureReceive(in ZmqSharp.Transports.ZReceiveComposition composition) -> void
 ZmqSharp.Transports.ZByteConnection.Dispose() -> void
 virtual ZmqSharp.Transports.ZByteConnection.DisposeCore() -> void

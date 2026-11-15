@@ -64,7 +64,7 @@ public abstract class ZByteConnection : IZConnection
     public bool RetainsMessages => false;
 
     /// <summary>The byte side is this connection itself.</summary>
-    public IZConnection? ByteOrigin => this;
+    public IZConnection ByteOrigin => this;
 
     public void ConfigureReceive(in ZReceiveComposition composition)
         => Messages.ConfigureReceive(composition);

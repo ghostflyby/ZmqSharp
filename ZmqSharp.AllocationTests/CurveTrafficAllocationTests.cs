@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using Xunit;
-using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.AllocationTests;
