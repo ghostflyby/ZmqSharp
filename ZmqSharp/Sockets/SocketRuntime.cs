@@ -638,7 +638,8 @@ internal sealed class SocketRuntime : IZSocket
                 {
                     // The original already lives in another retaining
                     // channel; this peer needs its own copy (owned by its
-                    // receiving chain, not the runtime).
+                    // receiving chain, not the runtime) from the socket's
+                    // pool so diagnostic pools observe the rentals.
                     await SendToPeerAsync(target, CopyMessage(message), token,
                         suppressRetirement: true, disposeMessage: true);
                 }
@@ -661,7 +662,7 @@ internal sealed class SocketRuntime : IZSocket
     /// each frame's body rents its own buffer, so the copy's lifetime is
     /// independent of the original (0033).
     /// </summary>
-    private static ZMessage CopyMessage(ZMessage message)
+    private ZMessage CopyMessage(ZMessage message)
     {
         var frames = new ZFrame[message.Count];
         try
@@ -670,7 +671,7 @@ internal sealed class SocketRuntime : IZSocket
             {
                 var sequence = message[i].ToSequence();
                 var length = checked((int)sequence.Length);
-                var owner = MemoryPool<byte>.Shared.Rent(length == 0 ? 1 : length);
+                var owner = Pool.Rent(length == 0 ? 1 : length);
                 try
                 {
                     sequence.CopyTo(owner.Memory.Span);
@@ -703,19 +704,31 @@ internal sealed class SocketRuntime : IZSocket
     /// </summary>
     private ZFrameAllocator PooledDecodedAllocator()
     {
-        return (length, more) =>
+        // Frames handed to a consumer that may retain them arbitrarily need
+        // owned buffers; renting from the socket pool per frame would cost a
+        // wrapper object per rent (a GC allocation the receive budget would
+        // see), so the runtime recycles its decoded owners exactly like the
+        // framing's copy pool: handle objects allocated once, returned by
+        // the message's dispose.
+        return (length, more) => new ZFrame(new ZSegment(RentDecoded(length), 0, length), more);
+    }
+
+    private readonly Lock _decodedPoolGate = new();
+    private readonly Stack<IMemoryOwner<byte>> _decodedPool = new();
+
+    private IMemoryOwner<byte> RentDecoded(int length)
+    {
+        lock (_decodedPoolGate)
         {
-            var owner = Pool.Rent(length == 0 ? 1 : length);
-            try
+            while (_decodedPool.TryPop(out var recycled))
             {
-                return new ZFrame(new ZSegment(owner, 0, length), more);
+                if (recycled.Memory.Length >= length) return recycled;
+
+                recycled.Dispose();
             }
-            catch
-            {
-                owner.Dispose();
-                throw;
-            }
-        };
+        }
+
+        return Pool.Rent(Math.Max(length, 4096));
     }
 
     private bool RetainsSent(ZPeer peer)
@@ -777,20 +790,15 @@ internal sealed class SocketRuntime : IZSocket
     internal ValueTask<bool> SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         => SendToPeerAsync(peer, message, token, disposeMessage: true);
 
-    /// <summary>Borrows a framed request until the write finishes; the request core owns disposal.</summary>
-    internal ValueTask SendRequestToAsync(ZPeer peer, ZMessage message, CancellationToken token)
+    /// <summary>
+    /// Borrows a framed request until the write finishes; the request core
+    /// owns disposal unless a retaining connection took the message (the
+    /// return value is the retention signal).
+    /// </summary>
+    internal ValueTask<bool> SendRequestToAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         ThrowIfClosed();
-        return DiscardRetentionAsync(SendToPeerAsync(peer, message, token, false));
-    }
-
-    /// <summary>
-    /// Drops the retention result for callers with the old ValueTask shape:
-    /// disposal was decided inside SendToPeerAsync either way.
-    /// </summary>
-    private static async ValueTask DiscardRetentionAsync(ValueTask<bool> send)
-    {
-        _ = await send;
+        return SendToPeerAsync(peer, message, token, false);
     }
 
     private async ValueTask<bool> SendToPeerAsync(ZPeer peer, ZMessage message, CancellationToken token,

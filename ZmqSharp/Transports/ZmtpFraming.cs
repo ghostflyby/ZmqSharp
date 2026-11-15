@@ -336,30 +336,45 @@ public sealed class ZmtpFraming : IZFraming
         /// </summary>
         private RecycledOwner RentOwned(int length)
         {
-            lock (_ownedPoolGate)
+            while (true)
             {
-                while (_ownedPool.TryPop(out var recycled))
+                RecycledOwner? popped;
+                lock (_ownedPoolGate)
                 {
-                    if (recycled.Ensure(length)) return recycled;
-
-                    recycled.DisposeInner();
+                    popped = _ownedPool.TryPop(out var candidate) ? candidate : null;
                 }
+
+                if (popped is not { } recycled) break;
+
+                // Ensure runs OUTSIDE the pool lock: Dispose takes the
+                // handle lock then the pool lock, so holding the pool lock
+                // across Ensure would be a lock-order inversion.
+                if (recycled.Ensure(length)) return recycled;
+
+                recycled.DisposeInner();
             }
 
             return new RecycledOwner(this, length);
         }
 
         /// <summary>
-        /// A recycled pool buffer. Dispose is idempotent and thread-safe: the
-        /// first dispose recycles the buffer (consumers may dispose on any
-        /// thread), later disposes are no-ops - a double dispose must never
-        /// re-push one buffer to two live messages.
+        /// A recycled pool buffer with an explicit lifecycle: RENTED while a
+        /// frame owns it, POOLED while it waits in the stack, DEAD once
+        /// released. Dispose moves RENTED to POOLED exactly once - a second
+        /// dispose of the same frame finds POOLED and does nothing, so a
+        /// double dispose can never re-push one buffer to two live frames.
+        /// Consumers may dispose on any thread; both locks are short leaf
+        /// sections and always taken handle-then-pool.
         /// </summary>
         private sealed class RecycledOwner(ZmtpFramingConnection parent, int length) : IMemoryOwner<byte>
         {
+            private const int Rented = 0;
+            private const int Pooled = 1;
+            private const int Dead = 2;
+
             private readonly Lock _gate = new();
             private IMemoryOwner<byte>? _owner = parent._pool.Rent(Math.Max(length, 4096));
-            private bool _resident = true;
+            private int _state = Rented;
 
             public Memory<byte> Memory
             {
@@ -372,16 +387,25 @@ public sealed class ZmtpFraming : IZFraming
                 }
             }
 
-            /// <summary>Grows the underlying buffer when a larger frame arrives.</summary>
+            /// <summary>
+            /// Claims a pooled handle for a new frame (growing the buffer
+            /// when a larger frame arrives); only RentOwned calls this. The
+            /// POOLED to RENTED transition here is what makes the frame's
+            /// eventual Dispose recycle the buffer again.
+            /// </summary>
             public bool Ensure(int length)
             {
                 lock (_gate)
                 {
-                    if (_owner is null || _owner.Memory.Length >= length) return _owner is not null;
+                    if (_owner is null || _state == Dead) return false;
+                    if (_owner.Memory.Length < length)
+                    {
+                        var grown = parent._pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
+                        _owner.Dispose();
+                        _owner = grown;
+                    }
 
-                    var grown = parent._pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
-                    _owner.Dispose();
-                    _owner = grown;
+                    _state = Rented;
                     return true;
                 }
             }
@@ -391,20 +415,18 @@ public sealed class ZmtpFraming : IZFraming
                 IMemoryOwner<byte>? toRelease = null;
                 lock (_gate)
                 {
-                    if (!_resident || _owner is null) return;
+                    if (_state != Rented || _owner is null) return;
 
                     lock (parent._ownedPoolGate)
                     {
                         if (parent._ownedPool.Count < 8)
                         {
-                            // Recycled: the handle stays resident and is
-                            // handed to the next RentOwned; a later dispose
-                            // finds _resident true only after that re-rent.
+                            _state = Pooled;
                             parent._ownedPool.Push(this);
                         }
                         else
                         {
-                            _resident = false;
+                            _state = Dead;
                             toRelease = _owner;
                             _owner = null;
                         }
@@ -420,7 +442,7 @@ public sealed class ZmtpFraming : IZFraming
                 {
                     _owner?.Dispose();
                     _owner = null;
-                    _resident = false;
+                    _state = Dead;
                 }
             }
         }

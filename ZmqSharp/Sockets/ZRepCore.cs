@@ -12,7 +12,7 @@ namespace ZmqSharp.Sockets;
 /// </summary>
 internal sealed class ZRepCore(
     Func<ZRepCore, ZRequestContext, CancellationToken, ValueTask> handle,
-    Func<ZPeer, ZMessage, CancellationToken, ValueTask> send) : IZInboundPolicy
+    Func<ZPeer, ZMessage, CancellationToken, ValueTask<bool>> send) : IZInboundPolicy
 {
     private readonly SemaphoreSlim _slot = new(1, 1);
 
@@ -46,9 +46,12 @@ internal sealed class ZRepCore(
         return ZInboundDecision.Consumed();
     }
 
-    public ValueTask SendReplyAsync(ZRequestContext context, ZMessage reply, CancellationToken token)
+    public async ValueTask SendReplyAsync(ZRequestContext context, ZMessage reply, CancellationToken token)
     {
         var framed = ZDelimiterFraming.Encode(reply);
-        return send(context.Peer, framed, token);
+        // The reply's disposal was decided by the send: released inside for
+        // a copying connection, transferred to the peer's chain for a
+        // retaining one - the retention result just drops here.
+        _ = await send(context.Peer, framed, token);
     }
 }

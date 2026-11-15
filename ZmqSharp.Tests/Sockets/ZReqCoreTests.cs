@@ -22,6 +22,7 @@ public sealed class ZReqCoreTests
         {
             sendStarted.TrySetResult();
             await releaseSend.Task;
+            return true;
             // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
         }, peer =>
         {
@@ -72,7 +73,7 @@ public sealed class ZReqCoreTests
         var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var core = new ZReqCore(() => [peer], async (_, _, _) => { await release.Task; }, _ => { });
+        var core = new ZReqCore(() => [peer], async (_, _, _) => { await release.Task; return true; }, _ => { });
         var request = core.RequestAsync(ZMessage.Copy("first"u8.ToArray()), token);
         await core.DecideAsync(peer, ZDelimiterFraming.Encode(ZMessage.Copy("reply"u8.ToArray())), token);
         Assert.False(request.IsCompleted);
@@ -105,7 +106,7 @@ public sealed class ZReqCoreTests
         var token = TestContext.Current.CancellationToken;
         var peer = new ZPeer();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var core = new ZReqCore(() => [peer], async (_, _, _) => { await release.Task; }, _ => { });
+        var core = new ZReqCore(() => [peer], async (_, _, _) => { await release.Task; return true; }, _ => { });
         var request = core.RequestAsync(ZMessage.Copy("request"u8.ToArray()), token);
         core.OnPeerEnded(peer);
         Assert.False(request.IsCompleted);
@@ -189,5 +190,5 @@ public sealed class ZReqCoreTests
     }
 
     private static ZReqCore CreateCore(ZPeer peer, Action? retired = null)
-        => new(() => [peer], (_, _, _) => ValueTask.CompletedTask, _ => retired?.Invoke());
+        => new(() => [peer], (_, _, _) => ValueTask.FromResult(true), _ => retired?.Invoke());
 }

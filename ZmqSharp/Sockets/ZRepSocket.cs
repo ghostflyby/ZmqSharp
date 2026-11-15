@@ -31,20 +31,9 @@ public sealed class ZRepSocket : ZSocketBase
         var runtime = new SocketRuntime(options, new ZNoDispatch("REP replies through SendReplyAsync"), ZSocketTypes.Rep);
         var handlers = new RequestHandlerSlot();
         var core = new ZRepCore((_, context, token) => handlers.InvokeAsync(context, token),
-            (peer, message, token) => SendReplyAsync(runtime, peer, message, token));
+            runtime.SendToAsync);
         runtime.ConfigureInbound(core);
         return (runtime, core, handlers);
-    }
-
-    /// <summary>
-    /// Reply send: the retention result is discarded deliberately - the reply
-    /// message's disposal was decided inside SendToPeerAsync (retained by the
-    /// connection, or released there).
-    /// </summary>
-    private static async ValueTask SendReplyAsync(SocketRuntime runtime, ZPeer peer, ZMessage message,
-        CancellationToken token)
-    {
-        _ = await runtime.SendToAsync(peer, message, token);
     }
 
     /// <summary>Handles requests serially; the context is valid until the handler completes.</summary>

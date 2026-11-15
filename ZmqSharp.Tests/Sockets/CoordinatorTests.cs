@@ -33,7 +33,7 @@ public sealed class CoordinatorTests
             replies.Add(peer);
             using var reply = ZDelimiterFraming.Decode(message, "reply");
             Assert.Equal("reply"u8.ToArray(), reply[0].ToSequence().ToArray());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromResult(true);
         });
         var one = core.DecideAsync(first, ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), token).AsTask();
         await entered.Task.WaitAsync(token);
@@ -57,7 +57,7 @@ public sealed class CoordinatorTests
         var core = new ZRepCore(async (_, _, _) => await release.Task, (_, message, _) =>
         {
             message.Dispose();
-            return ValueTask.CompletedTask;
+            return ValueTask.FromResult(true);
         });
         var active = core.DecideAsync(new ZPeer(), ZDelimiterFraming.Encode(ZMessage.Copy("active"u8.ToArray())), token).AsTask();
         var waiting = core.DecideAsync(new ZPeer(), ZDelimiterFraming.Encode(ZMessage.FromPooled(pool.Rent(8))), cancellation.Token).AsTask();

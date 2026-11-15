@@ -119,7 +119,6 @@ public sealed class ZmqProtocol : IZWireProtocol
         // allocation (0033).
         private byte[] _sendBuffer = [];
         private readonly List<byte[]> _readStaging = [];
-        private readonly List<byte[]> _assemblyStaging = [];
         private readonly List<ZFrame> _decodedFrames = [];
 
         public bool RetainsSentMessages => connection.RetainsMessages;
@@ -159,17 +158,24 @@ public sealed class ZmqProtocol : IZWireProtocol
                 }
 
                 // Assembled fallback (a custom or native message connection):
-                // each frame stages in its OWN buffer - staging all frames
-                // over one reused buffer would alias them into the last
-                // frame's bytes (0033 review).
+                // each frame stages in its OWN owner-backed buffer - staging
+                // all frames over one reused buffer would alias them into
+                // the last frame's bytes (0033 review). The frames are owned
+                // by the assembled message: a copying connection's write
+                // consumes them and the message's disposal (the sender's or
+                // this session's failure path) returns the buffers; a
+                // retaining connection takes the message and its receiving
+                // chain disposes them - the sender must NOT release the
+                // staging under it.
                 var assembledMessage = EncodeMessage(encoder, message);
                 try
                 {
                     await connection.WriteMessageAsync(assembledMessage, token);
                 }
-                finally
+                catch
                 {
-                    ReleaseStaging(_assemblyStaging);
+                    assembledMessage.Dispose();
+                    throw;
                 }
             }
             catch (Exception failure)
@@ -341,7 +347,6 @@ public sealed class ZmqProtocol : IZWireProtocol
                 }
 
                 ReleaseStaging(_readStaging);
-                ReleaseStaging(_assemblyStaging);
                 _decodedFrames.Clear();
                 _sendGate.Dispose();
             }
@@ -370,24 +375,31 @@ public sealed class ZmqProtocol : IZWireProtocol
             {
                 foreach (var frame in frames) frame.Dispose();
 
-                ReleaseStaging(_assemblyStaging);
                 throw;
             }
         }
 
         /// <summary>
-        /// Stages one encoded frame over its OWN pooled buffer (the assembled
-        /// fallback's frames must all stay alive until the write completes),
-        /// tracked for release once the write finishes.
+        /// Stages one encoded frame over its OWN owner-backed buffer: every
+        /// frame of the assembled message must stay alive until the message
+        /// itself is disposed (by the sender on a copying connection, by
+        /// the receiving chain on a retaining one).
         /// </summary>
         private ZFrame StageAssembly(ZmtpFrameData encoded)
         {
             var length = checked((int)encoded.Body.Length);
-            var buffer = ArrayPool<byte>.Shared.Rent(Math.Max(length, 4096));
-            _assemblyStaging.Add(buffer);
-            encoded.Body.CopyTo(buffer.AsSpan(0, length));
-            var more = (encoded.Flags & ZmtpFrameFlags.More) != 0;
-            return new ZFrame(new ZSegment(buffer, 0, length), more);
+            var owner = MemoryPool<byte>.Shared.Rent(length == 0 ? 1 : length);
+            try
+            {
+                encoded.Body.CopyTo(owner.Memory.Span);
+                var more = (encoded.Flags & ZmtpFrameFlags.More) != 0;
+                return new ZFrame(new ZSegment(owner, 0, length), more);
+            }
+            catch
+            {
+                owner.Dispose();
+                throw;
+            }
         }
 
         private static ZMessage BuildMessage(List<ZFrame> frames)
