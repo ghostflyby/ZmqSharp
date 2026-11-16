@@ -35,7 +35,17 @@ internal sealed class ZRecycledBufferPool(MemoryPool<byte> pool) : IDisposable
             }
 
             if (popped is not { } recycled) break;
-            if (recycled.Ensure(length)) return recycled;
+            try
+            {
+                if (recycled.Ensure(length)) return recycled;
+            }
+            catch
+            {
+                // A failed growth must not strand the popped owner's buffer:
+                // release it before the failure escapes.
+                recycled.DisposeInner();
+                throw;
+            }
 
             recycled.DisposeInner();
         }
@@ -118,7 +128,16 @@ internal sealed class ZRecycledBufferPool(MemoryPool<byte> pool) : IDisposable
                 if (_owner.Memory.Length < length)
                 {
                     var grown = pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
-                    _owner.Dispose();
+                    try
+                    {
+                        _owner.Dispose();
+                    }
+                    catch
+                    {
+                        grown.Dispose();
+                        throw;
+                    }
+
                     _owner = grown;
                 }
 

@@ -275,7 +275,7 @@ internal sealed class SocketRuntime : IZSocket
         long accumulated = 0;
         for (var i = 0; i < message.Count; i++)
         {
-            var length = message[i].ToSequence().Length;
+            var length = message[i].Length;
             if (length > int.MaxValue)
                 RejectReceive(ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, length);
 
@@ -535,8 +535,17 @@ internal sealed class SocketRuntime : IZSocket
         // Peers and sessions are stopped; release the recycled decoded
         // buffers. Owners still held by delivered messages are released when
         // those messages are disposed (a return to a disposed pool releases
-        // the underlying buffer directly).
-        _decodedPool.Dispose();
+        // the underlying buffer directly). A failing owner dispose must still
+        // complete the shutdown task.
+        try
+        {
+            _decodedPool.Dispose();
+        }
+        catch (Exception ex)
+        {
+            failure ??= ex;
+        }
+
         QueueSurface?.Complete();
         if (failure is { } error) completion.TrySetException(error);
         else completion.TrySetResult();

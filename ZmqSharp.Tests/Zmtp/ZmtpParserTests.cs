@@ -217,6 +217,19 @@ public sealed class ZmtpParserTests
     }
 
     [Fact]
+    public void FrameLength_SumsSegmentsWithoutMaterializingASequence()
+    {
+        using var message = MessageFactory.SegmentedFrame([1, 2, 3], [4, 5], [6]);
+        var frame = message[0];
+        Assert.Equal(6, frame.Length);
+
+        _ = frame.Length;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++) _ = frame.Length;
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    [Fact]
     public async Task CommandFrameInTraffic_IsSkipped()
     {
         var source = new ChunkedMemoryStream(ZmtpTestData.Concat(

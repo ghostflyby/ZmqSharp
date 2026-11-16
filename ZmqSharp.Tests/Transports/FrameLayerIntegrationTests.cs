@@ -157,6 +157,32 @@ public sealed class FrameLayerIntegrationTests
     }
 
     [Fact(Timeout = 15_000)]
+    public async Task SocketDispose_PoolOwnerThrows_StillCompletesShutdown()
+    {
+        // A throwing pooled-owner dispose must fault the shutdown task, not
+        // leave it pending forever (the completion is set outside the pool).
+        var delivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new ZPairSocket(new ZSocketOptions
+        {
+            Pool = new ThrowingPool(),
+            Security = new ZSecurityOptions { Mechanism = new CodecMechanism() },
+            MessageSink = new DisposingSink(delivered),
+        });
+        await using var client = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+        var endpoint = new LoopbackEndpoint();
+
+        await server.BindAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.SendAsync(ZMessage.FromOwned([1, 2, 3]), token);
+        await delivered.Task.WaitAsync(token);
+
+        var stopping = server.DisposeAsync().AsTask();
+        await Assert.ThrowsAnyAsync<IOException>(
+            () => stopping.WaitAsync(TimeSpan.FromSeconds(5), token));
+    }
+
+    [Fact(Timeout = 15_000)]
     public async Task RetainingTransport_PooledMessageContentSurvivesSend()
     {
         // The retention contract (0033): a retaining connection takes
@@ -540,6 +566,71 @@ public sealed class FrameLayerIntegrationTests
             public bool RetainsSentMessages => connection.RetainsMessages;
 
             public void Dispose() => _gate.Dispose();
+        }
+    }
+
+    private sealed class DisposingSink(TaskCompletionSource delivered) : IPatternSink
+    {
+        public ValueTask OnMessageAsync(ZPeer peer, ZMessage message, CancellationToken token)
+        {
+            message.Dispose();
+            delivered.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>A NULL-shaped mechanism that hands the established session a pass-through codec.</summary>
+    private sealed class CodecMechanism : IZSecurityMechanism
+    {
+        public string Name => "NULL";
+
+        public ZMechanismRole Role => ZMechanismRole.None;
+
+        public IZMechanismSession CreateSession() => new Session();
+
+        private sealed class Session : IZMechanismSession
+        {
+            public async ValueTask<ZMechanismResult?> RunAsync(
+                ZMechanismContext context, CancellationToken token)
+            {
+                var result = await ZNullMechanism.Instance.CreateSession().RunAsync(context, token);
+                return result is { } ready
+                    ? new ZMechanismResult(new PassThroughCodec(), ready.PeerReadyBody)
+                    : null;
+            }
+        }
+    }
+
+    private sealed class PassThroughCodec : IZFrameCodec
+    {
+        public ZmtpFrameData Encode(ZmtpFrameData logicalFrame) => logicalFrame;
+
+        public ZmtpFrameData Decode(ZmtpFrameData wireFrame) => wireFrame;
+
+        public long GetMaximumEncodedLength(long logicalBodyLimit) => logicalBodyLimit;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>A pool whose owners throw when released, to prove shutdown still completes.</summary>
+    private sealed class ThrowingPool : MemoryPool<byte>
+    {
+        public override int MaxBufferSize => int.MaxValue;
+
+        public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
+            => new ThrowingOwner(new byte[Math.Max(minimumBufferSize, 1)]);
+
+        protected override void Dispose(bool disposing)
+        {
+        }
+
+        private sealed class ThrowingOwner(byte[] buffer) : IMemoryOwner<byte>
+        {
+            public Memory<byte> Memory => buffer;
+
+            public void Dispose() => throw new IOException("pool owner dispose failed");
         }
     }
 }
