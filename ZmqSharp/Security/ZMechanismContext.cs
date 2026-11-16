@@ -1,4 +1,3 @@
-using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Security;
@@ -15,16 +14,6 @@ namespace ZmqSharp.Security;
 public sealed class ZMechanismContext : IDisposable
 {
     private readonly IZCommandChannel _channel;
-
-    internal ZMechanismContext(
-        IZConnection connection,
-        ReadOnlyMemory<byte> localReadyBody,
-        long maxCommandSize)
-        : this(new UnitCommandChannel(connection, maxCommandSize), localReadyBody, maxCommandSize)
-    {
-        // A byte connection is its own message connection (0034): commands
-        // ride the connection's framing view, with no second adapter.
-    }
 
     internal ZMechanismContext(
         IZCommandChannel channel,

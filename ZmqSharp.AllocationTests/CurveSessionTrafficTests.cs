@@ -144,7 +144,7 @@ public sealed class CurveSessionTrafficTests
 
         using var pool = new CountingRentPool();
         using var input = new RecordingByteConnection(recording.Recorded,
-            context: new ZTransportContext(ZmtpFraming.Instance, pool, long.MaxValue));
+            context: new ZTransportContext(ZmtpFraming.Instance, pool));
         using var codec = NewCodec();
         var materializer = new ReceiveMaterializer(pool, new ZReceiveOptions(), 8, 100, 10, () => { });
         // The framing's pooled rent carries the encoded body (the old parser's

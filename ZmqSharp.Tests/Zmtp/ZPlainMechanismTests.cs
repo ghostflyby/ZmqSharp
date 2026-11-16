@@ -10,7 +10,7 @@ namespace ZmqSharp.Tests.Zmtp;
 
 /// <summary>
 /// PLAIN mechanism tests (0016 milestone 2, RFC 24): wire-fixture handshake
-/// sequences through <see cref="IZWireEstablisher"/>, plus end-to-end handshakes
+/// sequences through <see cref="IZWireProtocol.EstablishAsync"/>, plus end-to-end handshakes
 /// over real sockets. The library implementation uses only the public
 /// mechanism surface (0016 section 3.1); an equivalent mechanism was verified
 /// to compile in a separate no-InternalsVisibleTo probe project.
@@ -27,9 +27,8 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), WelcomeFrame(), ZmtpTestData.Ready());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
-        var result = await handshake.EstablishAsync(token);
+        var result = await EstablishAsync(connection, new ZPlainMechanism("alice", "secret"u8), token);
 
         Assert.NotNull(result);
         Assert.Null(result.Value.Codec);
@@ -44,10 +43,9 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", "secret"), InitiateFrame());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) =>
-            user == "alice" && pass.SequenceEqual("secret"u8)));
 
-        var result = await handshake.EstablishAsync(token);
+        var result = await EstablishAsync(connection, new ZPlainMechanism((user, pass) =>
+            user == "alice" && pass.SequenceEqual("secret"u8)), token);
 
         Assert.NotNull(result);
         Assert.Equal("PAIR", ZmtpCommandCodec.ParseReadySocketType(result.Value.PeerReadyBody.Span));
@@ -59,10 +57,10 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", "wrong"));
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((user, pass) =>
-            user == "alice" && pass.SequenceEqual("secret"u8)));
 
-        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => EstablishAsync(connection,
+            new ZPlainMechanism((user, pass) => user == "alice" && pass.SequenceEqual("secret"u8)),
+            TestContext.Current.CancellationToken).AsTask());
         Assert.Contains("Invalid username or password", exception.Message);
     }
 
@@ -72,9 +70,9 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), HelloFrame("alice", null));
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((_, _) => true));
 
-        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => EstablishAsync(connection,
+            new ZPlainMechanism((_, _) => true), TestContext.Current.CancellationToken).AsTask());
         Assert.Contains("missing Username or Password", exception.Message);
     }
 
@@ -84,9 +82,9 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), ZmtpTestData.Ready());
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((_, _) => true));
 
-        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => EstablishAsync(connection,
+            new ZPlainMechanism((_, _) => true), TestContext.Current.CancellationToken).AsTask());
         Assert.Contains("expected HELLO", exception.Message);
     }
 
@@ -98,9 +96,9 @@ public sealed class ZPlainMechanismTests
         var peerBytes = ZmtpTestData.Concat(
             ZmtpTestData.Greeting("PLAIN"), ZmtpTestData.Error("Invalid username or password"));
         using var connection = new ZConnection(new ChunkedMemoryStream(peerBytes));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "wrong"u8));
 
-        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        var exception = await Assert.ThrowsAsync<ZMechanismException>(() => EstablishAsync(connection,
+            new ZPlainMechanism("alice", "wrong"u8), TestContext.Current.CancellationToken).AsTask());
         Assert.Contains("Invalid username or password", exception.Message);
     }
 
@@ -110,9 +108,9 @@ public sealed class ZPlainMechanismTests
         // The peer advertises NULL, the local mechanism is PLAIN: the greeting
         // match fails before any PLAIN command is exchanged.
         using var connection = new ZConnection(new ChunkedMemoryStream(ZmtpTestData.Greeting()));
-        using var handshake = NewHandshake(connection, new ZPlainMechanism("alice", "secret"u8));
 
-        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => handshake.EstablishAsync(TestContext.Current.CancellationToken).AsTask());
+        var exception = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => EstablishAsync(connection,
+            new ZPlainMechanism("alice", "secret"u8), TestContext.Current.CancellationToken).AsTask());
         Assert.Contains("does not match the configured mechanism 'PLAIN'", exception.Message);
     }
 
@@ -213,14 +211,14 @@ public sealed class ZPlainMechanismTests
         using var connection = new ZConnection(new ChunkedMemoryStream(input));
         var authenticated = false;
         // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
-        using var handshake = NewHandshake(connection, new ZPlainMechanism((user, password) =>
+        var mechanism = new ZPlainMechanism((user, password) =>
         {
             Assert.Equal("alice", user);
             Assert.Equal([0, 255, 128], password.ToArray());
             authenticated = true;
             return true;
-        }));
-        Assert.NotNull(await handshake.EstablishAsync(token));
+        });
+        Assert.NotNull(await EstablishAsync(connection, mechanism, token));
         Assert.True(authenticated);
     }
 
@@ -234,13 +232,15 @@ public sealed class ZPlainMechanismTests
 
     // ---- Fixtures ----
 
-    private static IZWireEstablisher NewHandshake(IZConnection connection, ZPlainMechanism mechanism)
+    private static ValueTask<ZMechanismResult?> EstablishAsync(
+        IZMessageConnection connection, ZPlainMechanism mechanism, CancellationToken token = default)
     {
-        return ZmqProtocol.Instance.CreateEstablisher(
+        return ZmqProtocol.Instance.EstablishAsync(
             connection,
             mechanism,
             ZmtpCommands.BuildReady("PAIR"),
-            MaxCommandSize);
+            MaxCommandSize,
+            token);
     }
 
     /// <summary>HELLO uses octet-length credentials; null omits the password length.</summary>

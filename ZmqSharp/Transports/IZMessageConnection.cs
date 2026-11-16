@@ -1,3 +1,4 @@
+using System.Buffers;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Transports;
@@ -86,11 +87,12 @@ public interface IZMessageConnection : IDisposable
 public interface IZFraming
 {
     /// <summary>
-    /// Adapts a byte connection into a message connection. When
+    /// Adapts a byte connection into a message connection, using
+    /// <paramref name="pool"/> for scratch and owned copies. When
     /// <paramref name="ownsConnection"/> is true the view aborts and disposes
     /// the byte connection with itself; a byte connection that serves as its
     /// own message view passes false so its lifecycle stays single-owner.
     /// </summary>
     IZMessageConnection Adapt(
-        IZConnection connection, in ZTransportContext context, bool ownsConnection = true);
+        IZConnection connection, MemoryPool<byte> pool, bool ownsConnection = true);
 }

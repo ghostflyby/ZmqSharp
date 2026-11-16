@@ -252,8 +252,7 @@ public sealed class RuntimeLifecycleTests
     {
         public ControlledBytes Connection { get; } = pool is null
             ? new ControlledBytes()
-            : new ControlledBytes(new ZTransportContext(
-                ZmtpFraming.Instance, pool, ZmtpFraming.DefaultMaxCommandSize));
+            : new ControlledBytes(new ZTransportContext(ZmtpFraming.Instance, pool));
 
         public ZPeer? Peer { get; set; }
     }

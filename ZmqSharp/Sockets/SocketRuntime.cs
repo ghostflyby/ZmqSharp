@@ -128,7 +128,8 @@ internal sealed class SocketRuntime : IZSocket
         _type = type;
         _inbound = inbound ?? ZInboundPolicy.PassThrough;
         _maxCommandSize = options.MaxCommandSize;
-        _transportContext = new ZTransportContext(options.Framing, Pool, _maxCommandSize);
+        _transportContext = new ZTransportContext(options.Framing, Pool);
+        _decodedPool = new ZRecycledBufferPool(Pool);
         _mechanism = options.Security.Mechanism;
         _protocol = options.WireProtocol ?? ZmqProtocol.Instance;
         _handshakeTimeoutMs = options.HandshakeTimeoutMs;
@@ -256,6 +257,47 @@ internal sealed class SocketRuntime : IZSocket
     {
         Interlocked.Increment(ref _receiveRejections);
         MaterializerRejected?.Invoke();
+    }
+
+    /// <summary>
+    /// Enforces the message-level receive limits for every connection style
+    /// (0034): a framing materializer rejects encoded frames before
+    /// allocation, and this catches native or custom connections that hand
+    /// over whole messages. A no-op when every limit is unlimited.
+    /// </summary>
+    private void ValidateReceivedMessage(ZMessage message)
+    {
+        if (_maxFrameLength == long.MaxValue
+            && _maxMessageLength == long.MaxValue
+            && _maxFramesPerMessage == int.MaxValue)
+            return;
+
+        long accumulated = 0;
+        for (var i = 0; i < message.Count; i++)
+        {
+            var length = message[i].ToSequence().Length;
+            if (length > int.MaxValue)
+                RejectReceive(ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, length);
+
+            var frameLength = (int)length;
+            if (!ZReceiveGuard.TryAccumulate(accumulated, frameLength, out accumulated))
+                RejectReceive(ZReceiveRejectionReason.MessageTooLarge, null, null);
+
+            if (ZReceiveGuard.CheckLimits(frameLength, accumulated, i, _maxFrameLength,
+                    _maxMessageLength, _maxFramesPerMessage) is { } rejection)
+                RejectReceive(rejection);
+        }
+    }
+
+    private void RejectReceive(ZReceiveRejection rejection)
+    {
+        OnMaterializerRejected();
+        throw new ZReceiveRejectedException(rejection);
+    }
+
+    private void RejectReceive(ZReceiveRejectionReason reason, long? limit, long? actual)
+    {
+        RejectReceive(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
     }
 
     public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
@@ -490,6 +532,11 @@ internal sealed class SocketRuntime : IZSocket
             failure ??= ex;
         }
 
+        // Peers and sessions are stopped; release the recycled decoded
+        // buffers. Owners still held by delivered messages are released when
+        // those messages are disposed (a return to a disposed pool releases
+        // the underlying buffer directly).
+        _decodedPool.Dispose();
         QueueSurface?.Complete();
         if (failure is { } error) completion.TrySetException(error);
         else completion.TrySetResult();
@@ -646,99 +693,9 @@ internal sealed class SocketRuntime : IZSocket
         return (length, more) => new ZFrame(new ZSegment(RentDecoded(length), 0, length), more);
     }
 
-    private readonly Lock _decodedPoolGate = new();
-    private readonly Stack<DecodedOwner> _decodedPool = new();
+    private readonly ZRecycledBufferPool _decodedPool;
 
-    private IMemoryOwner<byte> RentDecoded(int length)
-    {
-        lock (_decodedPoolGate)
-        {
-            while (_decodedPool.TryPop(out var recycled))
-            {
-                if (recycled.TryReuse(length)) return recycled;
-
-                recycled.DisposeInner();
-            }
-        }
-
-        return new DecodedOwner(this, Pool.Rent(Math.Max(length, 4096)));
-    }
-
-    private void ReturnDecoded(DecodedOwner owner)
-    {
-        lock (_decodedPoolGate)
-        {
-            if (_decodedPool.Count < 8)
-            {
-                _decodedPool.Push(owner);
-                return;
-            }
-        }
-
-        owner.DisposeInner();
-    }
-
-    /// <summary>
-    /// A recycled decoded buffer with the same lifecycle as the framing's
-    /// scratch handles: RENTED while a decoded frame owns it, POOLED while it
-    /// waits in the stack, DEAD once released. Dispose moves RENTED to POOLED
-    /// exactly once, so a double dispose cannot hand one buffer to two frames.
-    /// </summary>
-    private sealed class DecodedOwner(SocketRuntime parent, IMemoryOwner<byte> owner) : IMemoryOwner<byte>
-    {
-        private const int Rented = 0;
-        private const int Pooled = 1;
-        private const int Dead = 2;
-
-        private readonly Lock _gate = new();
-        private IMemoryOwner<byte>? _owner = owner;
-        private int _state = Rented;
-
-        public Memory<byte> Memory
-        {
-            get
-            {
-                lock (_gate)
-                {
-                    return _owner?.Memory ?? throw new ObjectDisposedException(nameof(DecodedOwner));
-                }
-            }
-        }
-
-        /// <summary>Takes a pooled owner back into service when it is large enough.</summary>
-        public bool TryReuse(int length)
-        {
-            lock (_gate)
-            {
-                if (_state != Pooled || _owner is null) return false;
-                if (_owner.Memory.Length < length) return false;
-
-                _state = Rented;
-                return true;
-            }
-        }
-
-        public void Dispose()
-        {
-            lock (_gate)
-            {
-                if (_state != Rented) return;
-                _state = Pooled;
-            }
-
-            parent.ReturnDecoded(this);
-        }
-
-        public void DisposeInner()
-        {
-            lock (_gate)
-            {
-                _owner?.Dispose();
-                _owner = null;
-                _state = Dead;
-            }
-        }
-    }
+    private IMemoryOwner<byte> RentDecoded(int length) => _decodedPool.Rent(length);
 
     private bool RetainsSent(ZPeer peer)
     {
@@ -755,8 +712,7 @@ internal sealed class SocketRuntime : IZSocket
     /// mechanism command sequence, so a peer that stalls mid-handshake faults
     /// exactly as before (0016 section 8).
     /// </summary>
-    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(IZWireEstablisher establisher,
-        PeerRecord record)
+    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(PeerRecord record)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(record.Registration.Token);
         if (_handshakeTimeoutMs > 0) timeout.CancelAfter(_handshakeTimeoutMs);
@@ -766,7 +722,8 @@ internal sealed class SocketRuntime : IZSocket
         }, record.Frames);
         try
         {
-            return await establisher.EstablishAsync(timeout.Token);
+            return await _protocol.EstablishAsync(
+                record.Frames, _mechanism, _localReadyBody, _maxCommandSize, timeout.Token);
         }
         catch (OperationCanceledException) when (!record.Registration.Token.IsCancellationRequested)
         {
@@ -980,9 +937,7 @@ internal sealed class SocketRuntime : IZSocket
             // The wire protocol drives establishment and the session over the
             // connection (0034); the protocol reads the byte origin itself for
             // the raw greeting on byte-composed connections.
-            using var establisher = _protocol.CreateEstablisher(
-                record.Frames, _mechanism, _localReadyBody, _maxCommandSize, Pool);
-            var result = await EstablishWithTimeoutAsync(establisher, record);
+            var result = await EstablishWithTimeoutAsync(record);
             if (result is not { } established) throw new IOException("peer closed during handshake");
 
             // Post-establishment receive composition (0034): the codec is
@@ -1013,7 +968,7 @@ internal sealed class SocketRuntime : IZSocket
             record.Session = _protocol.CreateSession(
                 record.Frames, established.Codec, fault => RetirePeer(record.Peer, fault),
                 established.Codec is null ? null : record.Materializer?.CreateAllocator() ?? PooledDecodedAllocator(),
-                _maxCommandSize, _maxFrameLength);
+                _maxCommandSize, _maxFrameLength, Pool);
             var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
             if (!_type.AcceptsPeer(peerType))
             {
@@ -1043,6 +998,7 @@ internal sealed class SocketRuntime : IZSocket
                 bool keepGoing;
                 try
                 {
+                    ValidateReceivedMessage(message);
                     keepGoing = aggregate
                         ? await DeliverMessageAsync(record, message, token)
                         : DissectMessage(record, message, token);

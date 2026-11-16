@@ -34,8 +34,7 @@ public abstract class ZByteConnection : IZConnection
         // policy. The runtime sets the establishment command bound before the
         // handshake and the traffic composition after it; the dialect and pool
         // come from the transport context.
-        var viewContext = new ZTransportContext(_context.Framing, _context.Pool, long.MaxValue);
-        return viewContext.Framing.Adapt(this, viewContext, ownsConnection: false);
+        return _context.Framing.Adapt(this, _context.Pool, ownsConnection: false);
     }
 
     public abstract ValueTask<int> ReadAsync(

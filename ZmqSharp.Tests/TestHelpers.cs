@@ -465,19 +465,14 @@ internal static class ZmtpTestRunner
     /// </summary>
     public static async Task<IZConnection?> EstablishAsync(IZConnection connection, string socketType = "PAIR")
     {
-        using var establisher = Establisher(connection, ZNullMechanism.Instance, socketType);
-        var result = await establisher.EstablishAsync(TestContext.Current.CancellationToken);
+        var result = await ZmqProtocol.Instance.EstablishAsync(
+            connection,
+            ZNullMechanism.Instance,
+            ZmtpCommands.BuildReady(socketType),
+            ZmtpFraming.DefaultMaxCommandSize,
+            TestContext.Current.CancellationToken);
         return result is not null ? connection : null;
     }
-
-    /// <summary>The protocol establisher over the connection's ZMTP framing.</summary>
-    public static IZWireEstablisher Establisher(
-        IZConnection connection, IZSecurityMechanism mechanism, string socketType = "PAIR")
-        => ZmqProtocol.Instance.CreateEstablisher(
-            connection,
-            mechanism,
-            ZmtpCommands.BuildReady(socketType),
-            ZmtpFraming.DefaultMaxCommandSize);
 
     /// <summary>The established session over the connection's ZMTP framing.</summary>
     public static IZWireSession CreateSession(

@@ -76,17 +76,19 @@ is no static cache and no per-call framing object.
 
 The framing dialect is chosen per socket (`ZSocketOptions.Framing`, default
 `ZmtpFraming`) and travels to the transport factory in `ZTransportContext`
-(framing, pool, command bound). The transport constructs its connection with
-that context, so a connection owns exactly one message view. A custom framing
-over bytes is selected the same way; a native message transport ignores the
-framing, and the runtime rejects a non-default framing on a connection without
-a byte origin.
+(framing and pool). The transport constructs its connection with that context,
+so a connection owns exactly one message view. A custom framing over bytes is
+selected the same way; a native message transport ignores the framing, and the
+runtime rejects a non-default framing on a connection without a byte origin.
+The command bound is not part of the context: the runtime installs it on the
+connection before the handshake and replaces it with the traffic composition
+afterwards.
 
 ```csharp
 public interface IZFraming
 {
     IZMessageConnection Adapt(
-        IZConnection connection, in ZTransportContext context, bool ownsConnection = true);
+        IZConnection connection, MemoryPool<byte> pool, bool ownsConnection = true);
 }
 ```
 
@@ -120,13 +122,23 @@ public interface IZTransport<TSelf, in TEndpoint> : IZTransport
 native connection. The socket has one `BindAsync`/`ConnectAsync` pair, one
 accept path, one connection record, and one unbind/disconnect family. The
 byte origin is read from the connection (`ByteOrigin`) instead of threading a
-second parameter through `IZWireProtocol.CreateEstablisher`.
+second parameter through establishment.
 
 ## 3. Consequences
 
 - The runtime composes the establishment command bound explicitly before the
   handshake and the traffic composition after it; a standalone connection
   stays unbounded.
+- Establishment is a single `IZWireProtocol.EstablishAsync` call; there is no
+  one-shot establisher object.
+- The session owns the codec send path's assembled message: the caller's
+  input is never transferred when a codec encodes a new message, and the
+  assembled message is released unless the connection retains it.
+- Receive limits are validated on every delivered message, so native and
+  custom connections get the same numeric limits as the framing's
+  pre-allocation guard.
+- The framing and the runtime share one recycled-buffer pool implementation
+  (`ZRecycledBufferPool`), released when the connection or socket disposes.
 - The codec send fast path resolves the staged writer through the connection
   or its framing view (`ZStagedWrites`), never through a concrete framing type
   check.

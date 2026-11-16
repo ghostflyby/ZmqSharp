@@ -47,15 +47,17 @@ public readonly struct ZWireUnit
 public interface IZWireProtocol
 {
     /// <summary>
-    /// Creates the one-shot establisher for a connection. The connection
-    /// exposes its byte origin when it is byte-backed (the ZMTP greeting is a
-    /// raw 64-byte stream construct there); a native message connection
-    /// leaves it null, so the greeting travels as one command (0034).
+    /// Runs the one-shot establishment: the greeting plus the whole
+    /// mechanism command exchange. The connection exposes its byte origin
+    /// when it is byte-backed (the ZMTP greeting is a raw 64-byte stream
+    /// construct there); a native message connection leaves it null, so the
+    /// greeting travels as one command (0034). Returns the mechanism result
+    /// (codec plus peer READY metadata) or null when the peer closed.
     /// </summary>
-    IZWireEstablisher CreateEstablisher(
+    ValueTask<ZMechanismResult?> EstablishAsync(
         IZMessageConnection connection,
         IZSecurityMechanism mechanism, ReadOnlyMemory<byte> localReadyBody, long maxCommandSize,
-        MemoryPool<byte>? pool = null);
+        CancellationToken token = default);
 
     /// <summary>
     /// Creates the established session (the codec comes from establishment).
@@ -66,17 +68,8 @@ public interface IZWireProtocol
     /// </summary>
     IZWireSession CreateSession(IZMessageConnection connection, IZFrameCodec? codec,
         Action<Exception>? retire = null, ZFrameAllocator? decodedAllocator = null,
-        long maxCommandSize = ZmtpFraming.DefaultMaxCommandSize, long maxFrameLength = long.MaxValue);
-}
-
-/// <summary>
-/// The cold establishment a connection runs once: greeting plus the whole
-/// mechanism command exchange. Returns the mechanism result (codec plus peer
-/// READY metadata) or null when the peer closed during establishment.
-/// </summary>
-public interface IZWireEstablisher : IDisposable
-{
-    ValueTask<ZMechanismResult?> EstablishAsync(CancellationToken token = default);
+        long maxCommandSize = ZmtpFraming.DefaultMaxCommandSize, long maxFrameLength = long.MaxValue,
+        MemoryPool<byte>? pool = null);
 }
 
 /// <summary>

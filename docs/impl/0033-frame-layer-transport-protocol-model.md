@@ -107,7 +107,7 @@ protocol implementers surface it from their connection.
   frame-currency intermediates from earlier drafts of this change
   (`IZFrameConnection`, `IZFrameTransport<>`, `ZWireFrame`, `IZWirePump`).
 - **Added**: `IZMessageConnection`, `IZMessageTransport<>`, `IZFraming`/
-  `ZmtpFraming`, `ZWireUnit`, `IZWireProtocol`/`IZWireEstablisher`/
+  `ZmtpFraming`, `ZWireUnit`, `IZWireProtocol`/
   `IZWireSession`/`ZmqProtocol`, `ZFrameAllocator` (public), `IZSocket`/
   `ZSocketBase` `BindMessageAsync`/`ConnectMessageAsync`/`UnbindMessageAsync`/
   `DisconnectMessageAsync`, `ZSocketOptions.WireProtocol`, optional-

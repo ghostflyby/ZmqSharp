@@ -129,6 +129,34 @@ public sealed class FrameLayerIntegrationTests
     }
 
     [Fact(Timeout = 15_000)]
+    public async Task NativeMessageTransport_OverLimitMessage_RejectsThePeer()
+    {
+        // Limits apply to every connection style (0034): a native message
+        // transport bypasses the framing materializer, so the runtime
+        // validates the delivered message.
+        await using var server = new ZPairSocket(new ZSocketOptions
+        {
+            MaxFrameLength = 4,
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+        });
+        await using var client = new ZPairSocket(new ZSocketOptions
+        {
+            ReceiveQueueFactory = new BoundedChannelOptions(8) { SingleWriter = true },
+        });
+        var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.MaterializerRejected += () => rejected.TrySetResult();
+        var token = TestContext.Current.CancellationToken;
+        var endpoint = new LoopbackEndpoint();
+
+        await server.BindAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.ConnectAsync<LoopbackEndpoint, LoopbackMessageTransport>(endpoint, token);
+        await client.SendAsync(ZMessage.FromOwned([1, 2, 3, 4, 5]), token);
+
+        await rejected.Task.WaitAsync(token);
+        Assert.Equal(1, server.ReceiveRejectionsCount);
+    }
+
+    [Fact(Timeout = 15_000)]
     public async Task RetainingTransport_PooledMessageContentSurvivesSend()
     {
         // The retention contract (0033): a retaining connection takes
@@ -304,8 +332,8 @@ public sealed class FrameLayerIntegrationTests
         public static LengthPrefixFraming Instance { get; } = new();
 
         public IZMessageConnection Adapt(
-            IZConnection connection, in ZTransportContext context, bool ownsConnection = true)
-            => new LengthPrefixConnection(connection, context.Pool, ownsConnection);
+            IZConnection connection, MemoryPool<byte> pool, bool ownsConnection = true)
+            => new LengthPrefixConnection(connection, pool, ownsConnection);
 
         private sealed class LengthPrefixConnection(
             IZConnection connection, MemoryPool<byte> pool, bool ownsConnection) : IZMessageConnection
@@ -435,51 +463,43 @@ public sealed class FrameLayerIntegrationTests
         /// <summary>Completes once both endpoints have run their establishment.</summary>
         public Task BothEstablished => _bothEstablished.Task;
 
-        public IZWireEstablisher CreateEstablisher(
+        public async ValueTask<ZMechanismResult?> EstablishAsync(
             IZMessageConnection connection,
             IZSecurityMechanism mechanism, ReadOnlyMemory<byte> localReadyBody, long maxCommandSize,
-            MemoryPool<byte>? pool = null)
-            => new Establisher(this, connection, localReadyBody);
+            CancellationToken token = default)
+        {
+            await connection.WriteCommandAsync(localReadyBody, token);
+            if (await connection.ReadUnitAsync(token) is not { } peer) return null;
+
+            byte[] peerReady;
+            using (peer.Message)
+            {
+                if (!peer.IsCommand)
+                    throw new ZeroMqProtocolException("expected the peer's READY command");
+
+                // ZMechanismResult.PeerReadyBody is the metadata section
+                // after the command name - the same convention the
+                // mechanism context hands to protocol sessions.
+                var body = ZWireFrameLogic.Contiguous(peer.Message[0]);
+                if (!ZmtpCommandCodec.TryReadCommandName(body.Span, out var name))
+                    throw new ZeroMqProtocolException("malformed READY command name");
+
+                peerReady = body.Slice(1 + name.Length).ToArray();
+            }
+
+            // Both sides establish concurrently: the increment must be
+            // atomic, and the count reaching two wakes the test.
+            if (Interlocked.Increment(ref _establishments) == 2)
+                _bothEstablished.TrySetResult();
+
+            return new ZMechanismResult(null, peerReady);
+        }
 
         public IZWireSession CreateSession(IZMessageConnection connection, IZFrameCodec? codec = null,
             Action<Exception>? retire = null, ZFrameAllocator? decodedAllocator = null,
-            long maxCommandSize = ZmtpFraming.DefaultMaxCommandSize, long maxFrameLength = long.MaxValue)
+            long maxCommandSize = ZmtpFraming.DefaultMaxCommandSize, long maxFrameLength = long.MaxValue,
+            MemoryPool<byte>? pool = null)
             => new Session(connection);
-
-        private sealed class Establisher(HandshakeFreeProtocol owner, IZMessageConnection connection,
-            ReadOnlyMemory<byte> localReadyBody) : IZWireEstablisher
-        {
-            public async ValueTask<ZMechanismResult?> EstablishAsync(CancellationToken token = default)
-            {
-                await connection.WriteCommandAsync(localReadyBody, token);
-                if (await connection.ReadUnitAsync(token) is not { } peer) return null;
-
-                byte[] peerReady;
-                using (peer.Message)
-                {
-                    if (!peer.IsCommand || peer.Message.Count != 1)
-                        throw new ZeroMqProtocolException("expected the peer's READY command");
-
-                    // ZMechanismResult.PeerReadyBody is the metadata section
-                    // after the command name - the same convention the
-                    // mechanism context hands to protocol sessions.
-                    var body = ZWireFrameLogic.Contiguous(peer.Message[0]);
-                    if (!ZmtpCommandCodec.TryReadCommandName(body.Span, out var name))
-                        throw new ZeroMqProtocolException("malformed READY command name");
-
-                    peerReady = body.Slice(1 + name.Length).ToArray();
-                }
-
-                // Both sides establish concurrently: the increment must be
-                // atomic, and the count reaching two wakes the test.
-                if (Interlocked.Increment(ref owner._establishments) == 2)
-                    owner._bothEstablished.TrySetResult();
-
-                return new ZMechanismResult(null, peerReady);
-            }
-
-            public void Dispose() { }
-        }
 
         private sealed class Session(IZMessageConnection connection) : IZWireSession
         {

@@ -27,35 +27,18 @@ public sealed class ZmtpFraming : IZFraming
     }
 
     /// <summary>
-    /// Adapts a standalone byte connection into a message connection. The
-    /// default frame bound is unbounded (limits are policy concerns - the
-    /// receive policy's allocator and the command limit).
-    /// </summary>
-    public IZMessageConnection Adapt(IZConnection connection)
-        => new ZmtpFramingConnection(connection, initialAllocator: null, long.MaxValue,
-            initialPool: null, onMessageBoundary: null, ownsConnection: true);
-
-    /// <summary>
-    /// Transport composition (0034): the context supplies the establishment
-    /// bound and the pool; the receive composition arrives after
-    /// establishment through <see cref="IZMessageConnection.ConfigureReceive"/>.
+    /// Adapts a byte connection into a message connection (0034). The frame
+    /// bound starts unbounded - limits are composition policy - and the
+    /// runtime installs the establishment command bound and then the traffic
+    /// composition through <see cref="IZMessageConnection.ConfigureReceive"/>.
     /// A byte connection that is its own message view passes
     /// <paramref name="ownsConnection"/> false so the view never disposes its
     /// origin.
     /// </summary>
     public IZMessageConnection Adapt(
-        IZConnection connection, in ZTransportContext context, bool ownsConnection = true)
-        => new ZmtpFramingConnection(connection, initialAllocator: null, context.MaxCommandSize,
-            initialPool: context.Pool, onMessageBoundary: null, ownsConnection);
-
-    /// <summary>
-    /// Explicit composition: the allocator supplies the final segments per
-    /// frame (the receive policy's zero-copy path); the bound caps what a
-    /// single frame header may declare; the pool backs the staging scratch.
-    /// </summary>
-    internal IZMessageConnection Adapt(IZConnection connection, ZFrameAllocator? allocator, long bound,
-        MemoryPool<byte>? pool = null, Action? onMessageBoundary = null, bool ownsConnection = true)
-        => new ZmtpFramingConnection(connection, allocator, bound, pool, onMessageBoundary, ownsConnection);
+        IZConnection connection, MemoryPool<byte> pool, bool ownsConnection = true)
+        => new ZmtpFramingConnection(connection, initialAllocator: null, long.MaxValue,
+            initialPool: pool, onMessageBoundary: null, ownsConnection);
 
     internal sealed class ZmtpFramingConnection(
         IZConnection connection, ZFrameAllocator? initialAllocator, long initialBound,
@@ -76,8 +59,7 @@ public sealed class ZmtpFraming : IZFraming
         private readonly List<ZFrame> _messageFrames = [];
         private IMemoryOwner<byte>? _scratchOwner;
         private Memory<byte> _scratch;
-        private readonly Lock _ownedPoolGate = new();
-        private readonly Stack<RecycledOwner> _ownedPool = new();
+        private ZRecycledBufferPool? _ownedPool;
 
         public async ValueTask<ZWireUnit?> ReadUnitAsync(CancellationToken token = default)
         {
@@ -225,10 +207,7 @@ public sealed class ZmtpFraming : IZFraming
             _scratchOwner?.Dispose();
             _scratchOwner = null;
             _scratch = Memory<byte>.Empty;
-            lock (_ownedPoolGate)
-            {
-                while (_ownedPool.TryPop(out var recycled)) recycled.DisposeInner();
-            }
+            _ownedPool?.Dispose();
 
             if (_ownsConnection) connection.Dispose();
         }
@@ -347,124 +326,12 @@ public sealed class ZmtpFraming : IZFraming
         }
 
         /// <summary>
-        /// Rent from the connection's recycled owner pool: a message's
-        /// dispose flows through <c>ZSegment</c> to the handle, which returns
-        /// the underlying buffer here instead of the shared pool - one handle
-        /// object per buffer, allocated once, reused for the connection's
-        /// lifetime (the steady-state receive budget stays GC-free).
+        /// Rents from the connection's recycled owner pool: a message's
+        /// dispose returns the buffer to the connection instead of the shared
+        /// pool, so the steady-state receive budget stays GC-free.
         /// </summary>
-        private RecycledOwner RentOwned(int length)
-        {
-            while (true)
-            {
-                RecycledOwner? popped;
-                lock (_ownedPoolGate)
-                {
-                    popped = _ownedPool.TryPop(out var candidate) ? candidate : null;
-                }
-
-                if (popped is not { } recycled) break;
-
-                // Ensure runs OUTSIDE the pool lock: Dispose takes the
-                // handle lock then the pool lock, so holding the pool lock
-                // across Ensure would be a lock-order inversion.
-                if (recycled.Ensure(length)) return recycled;
-
-                recycled.DisposeInner();
-            }
-
-            return new RecycledOwner(this, length);
-        }
-
-        /// <summary>
-        /// A recycled pool buffer with an explicit lifecycle: RENTED while a
-        /// frame owns it, POOLED while it waits in the stack, DEAD once
-        /// released. Dispose moves RENTED to POOLED exactly once - a second
-        /// dispose of the same frame finds POOLED and does nothing, so a
-        /// double dispose can never re-push one buffer to two live frames.
-        /// Consumers may dispose on any thread; both locks are short leaf
-        /// sections and always taken handle-then-pool.
-        /// </summary>
-        private sealed class RecycledOwner(ZmtpFramingConnection parent, int length) : IMemoryOwner<byte>
-        {
-            private const int Rented = 0;
-            private const int Pooled = 1;
-            private const int Dead = 2;
-
-            private readonly Lock _gate = new();
-            private IMemoryOwner<byte>? _owner = parent._pool.Rent(Math.Max(length, 4096));
-            private int _state = Rented;
-
-            public Memory<byte> Memory
-            {
-                get
-                {
-                    lock (_gate)
-                    {
-                        return _owner?.Memory ?? throw new ObjectDisposedException(nameof(RecycledOwner));
-                    }
-                }
-            }
-
-            /// <summary>
-            /// Claims a pooled handle for a new frame (growing the buffer
-            /// when a larger frame arrives); only RentOwned calls this. The
-            /// POOLED to RENTED transition here is what makes the frame's
-            /// eventual Dispose recycle the buffer again.
-            /// </summary>
-            public bool Ensure(int length)
-            {
-                lock (_gate)
-                {
-                    if (_owner is null || _state == Dead) return false;
-                    if (_owner.Memory.Length < length)
-                    {
-                        var grown = parent._pool.Rent(Math.Max(length, _owner.Memory.Length * 2));
-                        _owner.Dispose();
-                        _owner = grown;
-                    }
-
-                    _state = Rented;
-                    return true;
-                }
-            }
-
-            public void Dispose()
-            {
-                IMemoryOwner<byte>? toRelease = null;
-                lock (_gate)
-                {
-                    if (_state != Rented || _owner is null) return;
-
-                    lock (parent._ownedPoolGate)
-                    {
-                        if (parent._ownedPool.Count < 8)
-                        {
-                            _state = Pooled;
-                            parent._ownedPool.Push(this);
-                        }
-                        else
-                        {
-                            _state = Dead;
-                            toRelease = _owner;
-                            _owner = null;
-                        }
-                    }
-                }
-
-                toRelease?.Dispose();
-            }
-
-            internal void DisposeInner()
-            {
-                lock (_gate)
-                {
-                    _owner?.Dispose();
-                    _owner = null;
-                    _state = Dead;
-                }
-            }
-        }
+        private IMemoryOwner<byte> RentOwned(int length)
+            => (_ownedPool ??= new ZRecycledBufferPool(_pool)).Rent(length);
 
         private void EnsureScratchCapacity(int required)
         {
