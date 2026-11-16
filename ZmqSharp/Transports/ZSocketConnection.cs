@@ -5,15 +5,20 @@ using System.Runtime.InteropServices;
 namespace ZmqSharp.Transports;
 
 /// <summary>Raw socket byte I/O, including complete scatter/gather writes.</summary>
-internal sealed class ZSocketConnection(Socket socket) : IZConnection
+internal sealed class ZSocketConnection(Socket socket, in ZTransportContext context)
+    : ZByteConnection(context)
 {
     private readonly List<ArraySegment<byte>> _segments = [];
     private int _aborted;
 
-    public ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+    public ZSocketConnection(Socket socket) : this(socket, ZTransportContext.Default)
+    {
+    }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
         => socket.ReceiveAsync(destination, SocketFlags.None, token);
 
-    public async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         while (!bytes.IsEmpty)
         {
@@ -23,7 +28,7 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
         }
     }
 
-    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
         if (bytes.IsSingleSegment)
@@ -84,10 +89,10 @@ internal sealed class ZSocketConnection(Socket socket) : IZConnection
         }
     }
 
-    public void Abort()
+    public override void Abort()
     {
         if (Interlocked.Exchange(ref _aborted, 1) == 0) socket.Dispose();
     }
 
-    public void Dispose() => Abort();
+    protected override void DisposeCore() => Abort();
 }

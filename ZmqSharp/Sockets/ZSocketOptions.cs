@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Threading.Channels;
+using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
 namespace ZmqSharp;
@@ -59,7 +60,7 @@ public sealed class ZSocketOptions
             ArgumentOutOfRangeException.ThrowIfLessThan(value, MinMaxCommandSize);
             field = value;
         }
-    } = ZmtpParser.DefaultMaxCommandSize;
+    } = ZmtpFraming.DefaultMaxCommandSize;
 
     /// <summary>
     /// ZMTP handshake timeout in milliseconds (0006 3.2); a peer that does not
@@ -84,6 +85,24 @@ public sealed class ZSocketOptions
     /// under Native AOT.
     /// </summary>
     public ZSecurityOptions Security { get; init; } = ZSecurityOptions.Null;
+
+    /// <summary>
+    /// The wire protocol driven over frame connections (0033): owns the
+    /// greeting/mechanism establishment and the established session's send
+    /// surface and receive pump. Defaults to the built-in ZMTP 3.0 protocol
+    /// (<see cref="Zmtp.ZmqProtocol.Instance"/>); a custom protocol plugs at
+    /// this seam over any frame connection - byte transports through their
+    /// framing, native frame transports directly.
+    /// </summary>
+    public IZWireProtocol? WireProtocol { get; init; }
+
+    /// <summary>
+    /// The wire dialect byte transports adopt (0034): the transport captures
+    /// it at connection construction, so a connection owns exactly one
+    /// message view. Defaults to the built-in ZMTP framing; a native message
+    /// transport already owns its units and ignores it.
+    /// </summary>
+    public IZFraming Framing { get; init; } = ZmtpFraming.Instance;
 
     /// <summary>
     /// Maximum concurrently incomplete handshakes on the inbound (accepted)

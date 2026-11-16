@@ -75,13 +75,15 @@ internal sealed class SocketRuntime : IZSocket
     private readonly Dictionary<ZPeer, PeerRecord> _peers = [];
 
     private readonly List<ZEndpointRegistration> _listeners = [];
-    private readonly ConcurrentQueue<ZmtpParser> _paused = [];
+    private readonly ConcurrentQueue<(MessagePauseGate Gate, ZMessage RetainedMessage)> _paused = [];
 
     private readonly long _maxCommandSize;
+    private readonly ZTransportContext _transportContext;
     private readonly IZDispatchPolicy _dispatch;
     private readonly ZSocketType _type;
     private IZInboundPolicy _inbound;
     private readonly IZSecurityMechanism _mechanism;
+    private readonly IZWireProtocol _protocol;
     private readonly ReadOnlyMemory<byte> _localReadyBody;
     private readonly int _handshakeTimeoutMs;
     private readonly int _maxIncompleteHandshakes;
@@ -126,7 +128,10 @@ internal sealed class SocketRuntime : IZSocket
         _type = type;
         _inbound = inbound ?? ZInboundPolicy.PassThrough;
         _maxCommandSize = options.MaxCommandSize;
+        _transportContext = new ZTransportContext(options.Framing, Pool);
+        _decodedPool = new ZRecycledBufferPool(Pool);
         _mechanism = options.Security.Mechanism;
+        _protocol = options.WireProtocol ?? ZmqProtocol.Instance;
         _handshakeTimeoutMs = options.HandshakeTimeoutMs;
         _maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
         _messageSink = options.MessageSink;
@@ -216,10 +221,19 @@ internal sealed class SocketRuntime : IZSocket
         }
     }
 
-    /// <summary>Resumes every peer receive pump paused by a false <see cref="OnFrame"/> return.</summary>
+    /// <summary>
+    /// Resumes every peer receive loop paused by a false <see cref="OnFrame"/>
+    /// return. Pause granularity is the message (0033): the retained message
+    /// stays valid until this resume (the copy-to-retain contract) and is
+    /// released just before the loop reads on.
+    /// </summary>
     public void ResumePaused()
     {
-        while (_paused.TryDequeue(out var parser)) parser.Resume();
+        while (_paused.TryDequeue(out var paused))
+        {
+            paused.RetainedMessage.Dispose();
+            paused.Gate.Release();
+        }
     }
 
     /// <summary>Registers subscription replay before connections are created.</summary>
@@ -243,6 +257,47 @@ internal sealed class SocketRuntime : IZSocket
     {
         Interlocked.Increment(ref _receiveRejections);
         MaterializerRejected?.Invoke();
+    }
+
+    /// <summary>
+    /// Enforces the message-level receive limits for every connection style
+    /// (0034): a framing materializer rejects encoded frames before
+    /// allocation, and this catches native or custom connections that hand
+    /// over whole messages. A no-op when every limit is unlimited.
+    /// </summary>
+    private void ValidateReceivedMessage(ZMessage message)
+    {
+        if (_maxFrameLength == long.MaxValue
+            && _maxMessageLength == long.MaxValue
+            && _maxFramesPerMessage == int.MaxValue)
+            return;
+
+        long accumulated = 0;
+        for (var i = 0; i < message.Count; i++)
+        {
+            var length = ZWireFrameLogic.ByteLength(message[i]);
+            if (length > int.MaxValue)
+                RejectReceive(ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, length);
+
+            var frameLength = (int)length;
+            if (!ZReceiveGuard.TryAccumulate(accumulated, frameLength, out accumulated))
+                RejectReceive(ZReceiveRejectionReason.MessageTooLarge, null, null);
+
+            if (ZReceiveGuard.CheckLimits(frameLength, accumulated, i, _maxFrameLength,
+                    _maxMessageLength, _maxFramesPerMessage) is { } rejection)
+                RejectReceive(rejection);
+        }
+    }
+
+    private void RejectReceive(ZReceiveRejection rejection)
+    {
+        OnMaterializerRejected();
+        throw new ZReceiveRejectedException(rejection);
+    }
+
+    private void RejectReceive(ZReceiveRejectionReason reason, long? limit, long? actual)
+    {
+        RejectReceive(new ZReceiveRejection { Reason = reason, Limit = limit, Actual = actual });
     }
 
     public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
@@ -270,7 +325,7 @@ internal sealed class SocketRuntime : IZSocket
     {
         ThrowIfClosed();
         token.ThrowIfCancellationRequested();
-        var connection = await TTransport.ConnectAsync(endpoint, token);
+        var connection = await TTransport.ConnectAsync(endpoint, _transportContext, token);
         var established = AddConnection(connection, endpoint, false, token, typeof(TTransport), address);
         await established.Task.WaitAsync(token);
     }
@@ -280,9 +335,9 @@ internal sealed class SocketRuntime : IZSocket
     {
         ThrowIfClosed();
         token.ThrowIfCancellationRequested();
-        var listener = await TTransport.BindAsync(endpoint, token);
+        var listener = await TTransport.BindAsync(endpoint, _transportContext, token);
         ZEndpointRegistration? registration = null;
-        listener.OnAccept += AcceptConnection;
+        listener.OnAccept += (connection, acceptToken) => AcceptConnection(connection, acceptToken);
         lock (StateLock)
         {
             if (Volatile.Read(ref _closed) == 0 && !token.IsCancellationRequested)
@@ -301,15 +356,16 @@ internal sealed class SocketRuntime : IZSocket
             return;
         }
 
-        _ = RunListenerAsync(listener, registration);
+        _ = RunListenerAsync(listener.StartAsync, registration);
     }
 
-    private async Task RunListenerAsync(IZTransport listener, ZEndpointRegistration registration)
+    private async Task RunListenerAsync(Func<CancellationToken, ValueTask> startAsync,
+        ZEndpointRegistration registration)
     {
         Exception? failure = null;
         try
         {
-            await listener.StartAsync(registration.Token);
+            await startAsync(registration.Token);
         }
         catch (OperationCanceledException) when (registration.Token.IsCancellationRequested) { }
         catch (ObjectDisposedException) when (registration.Token.IsCancellationRequested) { }
@@ -476,6 +532,20 @@ internal sealed class SocketRuntime : IZSocket
             failure ??= ex;
         }
 
+        // Peers and sessions are stopped; release the recycled decoded
+        // buffers. Owners still held by delivered messages are released when
+        // those messages are disposed (a return to a disposed pool releases
+        // the underlying buffer directly). A failing owner dispose must still
+        // complete the shutdown task.
+        try
+        {
+            _decodedPool.Dispose();
+        }
+        catch (Exception ex)
+        {
+            failure ??= ex;
+        }
+
         QueueSurface?.Complete();
         if (failure is { } error) completion.TrySetException(error);
         else completion.TrySetResult();
@@ -516,55 +586,153 @@ internal sealed class SocketRuntime : IZSocket
     {
         // The closed check is inside the try so a send on a closed socket
         // still disposes the message (a byte-input overload that constructed
-        // it just before the call must not leak its rented buffers).
+        // it just before the call must not leak its rented buffers); a
+        // retaining connection took the original, and its receiving chain
+        // releases it instead (0033).
+        var transferred = false;
         try
         {
             ThrowIfClosed();
-            await SendToTargetsAsync(message, token);
+            transferred = await SendToTargetsAsync(message, token);
         }
         finally
         {
-            message.Dispose();
+            if (!transferred) message.Dispose();
         }
     }
 
-    private async ValueTask SendToTargetsAsync(ZMessage message, CancellationToken token)
+    /// <summary>
+    /// Broadcast send (0033 retention contract): copying connections consume
+    /// the frames during their write; the FIRST retaining connection takes
+    /// the original (and with it the disposal obligation), every further
+    /// retaining connection gets its own copy - each channel holds a unit
+    /// only it will release. Returns true when the original was handed off
+    /// and the caller must NOT dispose it.
+    /// </summary>
+    private async ValueTask<bool> SendToTargetsAsync(ZMessage message, CancellationToken token)
     {
         var snapshot = _peerSnapshot;
         // The policy may select up to every peer; the target buffer is rented
         // so the steady-state path stays GC-allocation-free (ArrayPool reuses
         // the array, 0006 3.6).
         var targets = ArrayPool<ZPeer>.Shared.Rent(snapshot.Length);
+        var transferred = false;
         try
         {
             var count = _dispatch.SelectTargets(message, snapshot, targets.AsSpan(0, snapshot.Length));
-            for (var i = 0; i < count; i++) await SendToPeerAsync(targets[i], message, token);
+            for (var i = 0; i < count; i++)
+            {
+                var target = targets[i];
+                if (transferred && RetainsSent(target))
+                {
+                    // The original already lives in another retaining
+                    // channel; this peer needs its own copy (owned by its
+                    // receiving chain, not the runtime) from the socket's
+                    // pool so diagnostic pools observe the rentals.
+                    await SendToPeerAsync(target, CopyMessage(message), token,
+                        suppressRetirement: true, disposeMessage: true);
+                }
+                else if (await SendToPeerAsync(target, message, token))
+                {
+                    transferred = true;
+                }
+            }
         }
         finally
         {
             ArrayPool<ZPeer>.Shared.Return(targets);
         }
+
+        return transferred;
     }
 
     /// <summary>
-    /// Establishes the ZMTP handshake within <c>HandshakeTimeoutMs</c> (0006
-    /// 3.2); a timed-out handshake faults the establishment with a
-    /// <see cref="TimeoutException"/>. The handshake covers the greeting and
-    /// the whole mechanism command sequence, so a peer that stalls mid-handshake
-    /// faults exactly as before (0016 section 8).
+    /// A pooled deep copy for fan-out to a further retaining connection:
+    /// each frame's body rents its own buffer, so the copy's lifetime is
+    /// independent of the original (0033).
     /// </summary>
-    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(ZmtpHandshake handshake,
-        PeerRecord record)
+    private ZMessage CopyMessage(ZMessage message)
+    {
+        var frames = new ZFrame[message.Count];
+        try
+        {
+            for (var i = 0; i < message.Count; i++)
+            {
+                var sequence = message[i].ToSequence();
+                var length = checked((int)sequence.Length);
+                var owner = Pool.Rent(length == 0 ? 1 : length);
+                try
+                {
+                    sequence.CopyTo(owner.Memory.Span);
+                    frames[i] = new ZFrame(new ZSegment(owner, 0, length), message[i].More);
+                }
+                catch
+                {
+                    owner.Dispose();
+                    throw;
+                }
+            }
+
+            return frames.Length == 1
+                ? new ZMessage(new ZSingleMessage(frames[0]))
+                : new ZMessage(new ZMultiMessage(frames));
+        }
+        catch
+        {
+            foreach (var frame in frames) frame.Dispose();
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Codec sessions on sink/callback sockets (no receive materializer)
+    /// still need owned decoded frames: their consumers may retain messages
+    /// arbitrarily long, which the session's staged window forbids (0033
+    /// review). One pooled segment per frame; disposal returns it.
+    /// </summary>
+    private ZFrameAllocator PooledDecodedAllocator()
+    {
+        // Frames handed to a consumer that may retain them arbitrarily need
+        // owned buffers; renting from the socket pool per frame would cost a
+        // wrapper object per rent (a GC allocation the receive budget would
+        // see), so the runtime recycles its decoded owners exactly like the
+        // framing's copy pool: handle objects allocated once, returned by
+        // the message's dispose.
+        return (length, more) => new ZFrame(new ZSegment(RentDecoded(length), 0, length), more);
+    }
+
+    private readonly ZRecycledBufferPool _decodedPool;
+
+    private IMemoryOwner<byte> RentDecoded(int length) => _decodedPool.Rent(length);
+
+    private bool RetainsSent(ZPeer peer)
+    {
+        lock (StateLock)
+        {
+            return _peers.TryGetValue(peer, out var record) && record.Session is { RetainsSentMessages: true };
+        }
+    }
+
+    /// <summary>
+    /// Establishes the wire protocol within <c>HandshakeTimeoutMs</c> (0006
+    /// 3.2); a timed-out establishment faults with a
+    /// <see cref="TimeoutException"/>. It covers the greeting and the whole
+    /// mechanism command sequence, so a peer that stalls mid-handshake faults
+    /// exactly as before (0016 section 8).
+    /// </summary>
+    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(PeerRecord record)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(record.Registration.Token);
         if (_handshakeTimeoutMs > 0) timeout.CancelAfter(_handshakeTimeoutMs);
         await using var abort = timeout.Token.UnsafeRegister(static state =>
         {
-            if (state is IZConnection connection) connection.Abort();
-        }, record.Connection);
+            if (state is IZMessageConnection frames) frames.Abort();
+        }, record.Frames);
         try
         {
-            return await handshake.EstablishAsync(timeout.Token);
+            return await _protocol.EstablishAsync(
+                record.Frames, _mechanism, _localReadyBody, _maxCommandSize, timeout.Token);
         }
         catch (OperationCanceledException) when (!record.Registration.Token.IsCancellationRequested)
         {
@@ -594,21 +762,26 @@ internal sealed class SocketRuntime : IZSocket
         }
     }
 
-    internal ValueTask SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
+    internal ValueTask<bool> SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         => SendToPeerAsync(peer, message, token, disposeMessage: true);
 
-    /// <summary>Borrows a framed request until the write finishes; the request core owns disposal.</summary>
-    internal ValueTask SendRequestToAsync(ZPeer peer, ZMessage message, CancellationToken token)
+    /// <summary>
+    /// Borrows a framed request until the write finishes; the request core
+    /// owns disposal unless a retaining connection took the message (the
+    /// return value is the retention signal).
+    /// </summary>
+    internal ValueTask<bool> SendRequestToAsync(ZPeer peer, ZMessage message, CancellationToken token)
     {
         ThrowIfClosed();
         return SendToPeerAsync(peer, message, token, false);
     }
 
-    private async ValueTask SendToPeerAsync(ZPeer peer, ZMessage message, CancellationToken token,
+    private async ValueTask<bool> SendToPeerAsync(ZPeer peer, ZMessage message, CancellationToken token,
         bool suppressRetirement = true, bool disposeMessage = false)
     {
         PeerRecord? record = null;
         var leased = false;
+        var retained = false;
         try
         {
             token.ThrowIfCancellationRequested();
@@ -617,7 +790,7 @@ internal sealed class SocketRuntime : IZSocket
             {
                 if (!_peers.TryGetValue(peer, out record) || record.Phase >= PeerPhase.Stopping)
                 {
-                    if (suppressRetirement) return;
+                    if (suppressRetirement) return false;
                     throw new IOException("peer retired before send");
                 }
 
@@ -629,15 +802,23 @@ internal sealed class SocketRuntime : IZSocket
                 await record.Established.Task.WaitAsync(token);
             if (record.Session is not { } session) throw new IOException("peer has no established session");
             await session.SendAsync(message, token);
+            // A completed send on a retaining connection transferred
+            // ownership: the receiving chain releases it (0033). The signal
+            // is independent of disposeMessage - broadcast callers decide
+            // disposal from the return value, directed callers from the skip
+            // below.
+            retained = session.RetainsSentMessages;
         }
         catch (Exception ex) when (suppressRetirement && ex is ObjectDisposedException or IOException or SocketException) { }
         catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
         {
-            // Owned background sends release their message before teardown can dispose the session.
+            // Owned background sends release their message before teardown can
+            // dispose the session - unless the connection retained it (a
+            // thrown send never transferred ownership, so failures dispose).
             try
             {
-                if (disposeMessage) message.Dispose();
+                if (disposeMessage && !retained) message.Dispose();
             }
             finally
             {
@@ -649,6 +830,8 @@ internal sealed class SocketRuntime : IZSocket
                     }
             }
         }
+
+        return retained;
     }
 
     /// <summary>
@@ -666,14 +849,52 @@ internal sealed class SocketRuntime : IZSocket
         await SendAsyncCore(message, token);
     }
 
-    private ValueTask AcceptConnection(IZConnection connection, CancellationToken token)
+    private ValueTask AcceptConnection(IZMessageConnection connection, CancellationToken token)
     {
+        // Accepted peers outlive their listener (StringEndpoints_Unbind...):
+        // the listener's accept token must NOT link into the peer's
+        // registration - stopping the listener keeps established peers.
+        _ = token;
         AddConnection(connection, null, true);
         return ValueTask.CompletedTask;
     }
 
-    private TaskCompletionSource AddConnection(IZConnection connection, object? endpoint,
-        bool accepted = false, CancellationToken token = default, Type? transport = null, string? address = null)
+    /// <summary>
+    /// One connection path for both transport styles (0034): a byte transport
+    /// already framed its connection with the socket's dialect, and a native
+    /// message transport already owns whole units. The materializer's
+    /// allocator is installed after establishment by
+    /// <see cref="IZMessageConnection.ConfigureReceive"/>.
+    /// </summary>
+    private TaskCompletionSource AddConnection(IZMessageConnection connection, object? endpoint,
+        bool accepted, CancellationToken token = default, Type? transport = null, string? address = null)
+    {
+        if (connection.ByteOrigin is null
+            && !ReferenceEquals(_transportContext.Framing, ZmtpFraming.Instance))
+        {
+            connection.Dispose();
+            var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            rejected.TrySetException(new InvalidOperationException(
+                "a native message connection already owns its units; a framing cannot be applied"));
+            return rejected;
+        }
+
+        ReceiveMaterializer? materializer = null;
+        if (_receivePolicy is not null)
+            materializer = new ReceiveMaterializer(Pool, _receivePolicy, _maxFrameLength, _maxMessageLength,
+                _maxFramesPerMessage, OnMaterializerRejected);
+
+        return AddPeer(connection, materializer, endpoint, accepted, token, transport, address);
+    }
+
+    /// <summary>
+    /// The single record-creation path: the connection exists before the
+    /// record, so the registration's resource and abort are the connection
+    /// itself.
+    /// </summary>
+    private TaskCompletionSource AddPeer(IZMessageConnection frames,
+        ReceiveMaterializer? materializer, object? endpoint, bool accepted, CancellationToken token,
+        Type? transport, string? address)
     {
         PeerRecord? record = null;
         lock (StateLock)
@@ -681,12 +902,9 @@ internal sealed class SocketRuntime : IZSocket
             if (Volatile.Read(ref _closed) == 0 &&
                 (!accepted || _maxIncompleteHandshakes <= 0 || _incompleteHandshakes < _maxIncompleteHandshakes))
             {
-                var registration = new ZEndpointRegistration(connection, endpoint, transport, address, LifetimeToken, token,
-                    connection.Abort);
-                record = new PeerRecord(connection, registration, accepted);
-                if (_receivePolicy is not null)
-                    record.Materializer = new ReceiveMaterializer(Pool, _receivePolicy, _maxFrameLength, _maxMessageLength,
-                        _maxFramesPerMessage, OnMaterializerRejected);
+                var registration = new ZEndpointRegistration(frames, endpoint, transport, address, LifetimeToken, token,
+                    frames.Abort);
+                record = new PeerRecord(frames, registration, accepted) { Materializer = materializer };
                 _peers.Add(record.Peer, record);
                 if (accepted) _incompleteHandshakes++;
                 TrackBackground(registration.Completion.Task);
@@ -696,11 +914,17 @@ internal sealed class SocketRuntime : IZSocket
 
         if (record is null)
         {
-            connection.Dispose();
+            frames.Dispose();
             var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             rejected.TrySetCanceled();
             return rejected;
         }
+
+        // Establishment bound: a command frame header declaring more than the
+        // socket's limit rejects before any body is staged (0008 Slice B).
+        // The traffic composition replaces it after establishment.
+        frames.ConfigureReceive(new ZReceiveComposition(
+            allocator: null, _maxCommandSize, onMessageBoundary: null));
 
         _ = RunConnectionAsync(record);
         return record.Established;
@@ -719,10 +943,41 @@ internal sealed class SocketRuntime : IZSocket
                 record.Phase = PeerPhase.Handshaking;
             }
 
-            using var handshake = new ZmtpHandshake(record.Connection, _mechanism, _localReadyBody, _maxCommandSize, Pool);
-            var result = await EstablishWithTimeoutAsync(handshake, record);
-            if (result is not { } established) throw new IOException("peer closed during ZMTP handshake");
-            record.Session = new ZmtpSession(record.Connection, established.Codec, fault => RetirePeer(record.Peer, fault));
+            // The wire protocol drives establishment and the session over the
+            // connection (0034); the protocol reads the byte origin itself for
+            // the raw greeting on byte-composed connections.
+            var result = await EstablishWithTimeoutAsync(record);
+            if (result is not { } established) throw new IOException("peer closed during handshake");
+
+            // Post-establishment receive composition (0034): the codec is
+            // known only now. A byte-backed framing swaps its reader policy in
+            // place - one scratch per connection. NULL keeps the zero-copy
+            // traffic path (allocator); a codec session unbounds the framing
+            // to the encoded maximum and materializes decoded frames through
+            // the session's allocator instead. Native message connections
+            // already own their frames and ignore the composition.
+            if (established.Codec is { } codec)
+            {
+                record.Frames.ConfigureReceive(new ZReceiveComposition(
+                    allocator: null,
+                    codec.GetMaximumEncodedLength(Math.Max(_maxFrameLength, _maxCommandSize)),
+                    onMessageBoundary: null));
+            }
+            else
+            {
+                // No codec: the allocator owns the semantic limits and rejects
+                // before renting; the boundary callback resets its counters at
+                // every complete wire message.
+                record.Frames.ConfigureReceive(new ZReceiveComposition(
+                    record.Materializer?.CreateAllocator(),
+                    long.MaxValue,
+                    record.Materializer is { } materializer ? materializer.Reset : null));
+            }
+
+            record.Session = _protocol.CreateSession(
+                record.Frames, established.Codec, fault => RetirePeer(record.Peer, fault),
+                established.Codec is null ? null : record.Materializer?.CreateAllocator() ?? PooledDecodedAllocator(),
+                _maxCommandSize, _maxFrameLength, Pool);
             var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
             if (!_type.AcceptsPeer(peerType))
             {
@@ -732,11 +987,6 @@ internal sealed class SocketRuntime : IZSocket
 
             PeerEstablished?.Invoke(record.Peer, ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span));
             var aggregate = NeedsAggregation;
-            var parser = record.Session.CreateParser(
-                (self, frame, ct) => aggregate
-                    ? OnMessageSinkFrameAsync(record, frame, ct)
-                    : OnBorrowedFrameAsync(self, frame, ct),
-                record.Materializer?.CreateAllocator(), Pool, _maxCommandSize, _maxFrameLength);
             lock (StateLock)
             {
                 if (record.Phase >= PeerPhase.Stopping) throw new OperationCanceledException(token);
@@ -747,8 +997,58 @@ internal sealed class SocketRuntime : IZSocket
                 record.Established.TrySetResult();
             }
 
+            // The receive loop (0033): the session yields complete messages -
+            // the framing aggregated the frames, the session applied any
+            // codec - and the runtime routes each whole message. The
+            // frame-level pump no longer exists.
             _peerConnected?.Invoke(record.Peer);
-            await parser.ParseAsync(token);
+            while (await record.Session.ReadMessageAsync(token) is { } message)
+            {
+                bool keepGoing;
+                try
+                {
+                    ValidateReceivedMessage(message);
+                    keepGoing = aggregate
+                        ? await DeliverMessageAsync(record, message, token)
+                        : DissectMessage(record, message, token);
+                }
+                catch
+                {
+                    // A throwing consumer must not leak the delivered message;
+                    // the peer faults with the original exception either way.
+                    message.Dispose();
+                    throw;
+                }
+
+                if (!aggregate)
+                {
+                    // The dissected frames were handed to the raw callbacks
+                    // synchronously; the message is consumed (the old borrowed
+                    // tier's valid-until-the-pump-continues semantics).
+                    if (keepGoing)
+                    {
+                        message.Dispose();
+                        continue;
+                    }
+                }
+                else if (keepGoing) continue;
+
+                // Pause: the retained message stays valid until ResumePaused
+                // releases it (0033); a peer that tears down while paused
+                // releases it here - the stale queue entry drained later is
+                // a harmless second dispose.
+                var gate = new MessagePauseGate();
+                _paused.Enqueue((gate, message));
+                try
+                {
+                    await gate.WaitAsync(token);
+                }
+                catch (OperationCanceledException)
+                {
+                    message.Dispose();
+                    throw;
+                }
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested || record.Phase >= PeerPhase.Stopping)
         {
@@ -790,11 +1090,6 @@ internal sealed class SocketRuntime : IZSocket
 
             Clean(() => PeerRemoved?.Invoke(record.Peer, failure));
             Clean(() => QueueSurface?.Reclaim(record, failure));
-            Clean(() =>
-            {
-                foreach (var frame in record.Accumulator.Frames) frame.Dispose();
-                record.Accumulator.Frames.Clear();
-            });
             try
             {
                 await record.Registration.FinishAsync();
@@ -805,7 +1100,7 @@ internal sealed class SocketRuntime : IZSocket
             }
 
             Clean(() => record.Session?.Dispose());
-            Clean(record.Connection.Dispose);
+            Clean(record.Frames.Dispose);
             try
             {
                 RaisePeerEnded(record.Peer, failure);
@@ -827,79 +1122,49 @@ internal sealed class SocketRuntime : IZSocket
     }
 
     /// <summary>
-    /// Default per-peer sink for the borrowed tier: invokes the raw OnFrame
-    /// callback; a false return pauses this peer's pump until ResumePaused.
+    /// The raw OnFrame tier (0033): a complete message is dissected into its
+    /// (already materialized) frames and each is handed to the raw callback
+    /// synchronously; a false return pauses the loop until ResumePaused,
+    /// retaining the message. Frames of a completed message are stable -
+    /// steadier than the old mid-stream borrowed views.
     /// </summary>
-    /// <summary>
-    /// Default per-peer sink for the borrowed tier: invokes the raw OnFrame
-    /// callback; a false return pauses this peer's pump until ResumePaused.
-    /// </summary>
-    private ValueTask<bool> OnBorrowedFrameAsync(
-        ZmtpParser parser, ZFrame frame, CancellationToken token)
+    private bool DissectMessage(PeerRecord record, ZMessage message, CancellationToken token)
     {
-        var keepGoing = RaiseOnFrame(frame, token);
-        if (!keepGoing) _paused.Enqueue(parser);
-
-        return ValueTask.FromResult(keepGoing);
-    }
-
-    private bool RaiseOnFrame(ZFrame frame, CancellationToken token)
-    {
+        _ = record;
+        var keepGoing = true;
         ZFrameHandler? handler;
         lock (StateLock)
         {
             handler = _onFrame;
         }
 
-        if (handler is null) return true;
-
-        var keepGoing = true;
-        foreach (var item in Delegate.EnumerateInvocationList(handler)) keepGoing &= item(frame, token);
+        if (handler is not null)
+            foreach (var item in Delegate.EnumerateInvocationList(handler))
+            {
+                for (var i = 0; i < message.Count; i++)
+                {
+                    keepGoing &= item(message[i], token);
+                    if (!keepGoing) return false;
+                }
+            }
 
         return keepGoing;
     }
 
     /// <summary>
-    /// Aggregates a peer's frames into complete messages for the message sink
-    /// (0007 section 2.3). A borrowed frame is copied into a pooled buffer
-    /// before it is retained, mirroring the queue surface's previous
-    /// accumulation path. The receive materializer's guard counters reset at
-    /// each message boundary.
+    /// Routes one complete message through the inbound policy to the queue
+    /// surface or the bound message sink (0007 section 2.3, 0019 section 3):
+    /// the aggregation dissolved into the framing, so the message arrives
+    /// whole.
     /// </summary>
-    private async ValueTask<bool> OnMessageSinkFrameAsync(
-        PeerRecord record,
-        ZFrame frame,
+    private async ValueTask<bool> DeliverMessageAsync(PeerRecord record, ZMessage message,
         CancellationToken token)
     {
-        var accumulator = record.Accumulator;
         var connection = record.Peer;
-        if (frame.TryGetValue(out ZSegments segments))
-        {
-            accumulator.Frames.Add(new ZFrame(segments, frame.More));
-        }
-        else if (frame.TryGetValue(out ZSegment segment) && !segment.IsBorrowed)
-        {
-            accumulator.Frames.Add(new ZFrame(segment, frame.More));
-        }
-        else
-        {
-            frame.TryGetValue(out ZSegment borrowed);
-            var poolOwner = Pool.Rent(borrowed.Memory.Length);
-            borrowed.Memory.CopyTo(poolOwner.Memory);
-            accumulator.Frames.Add(new ZFrame(
-                new ZSegment(poolOwner, 0, borrowed.Memory.Length),
-                frame.More));
-        }
-
-        if (frame.More) return true;
-
-        var message = BuildMessage(accumulator.Frames);
-        accumulator.Frames.Clear();
-        record.Materializer?.Reset();
         var decision = await _inbound.DecideAsync(connection, message, token);
         if (decision.Action != ZInboundAction.Deliver)
-            // Drop and Consumed own the message (0019 section 3); the pump
-            // continues. The peer's pump stays alive.
+            // Drop and Consumed own the message (0019 section 3); the loop
+            // reads on.
             return true;
 
         var toDeliver = decision.Message ?? message;
@@ -921,10 +1186,15 @@ internal sealed class SocketRuntime : IZSocket
         return true;
     }
 
-    private static ZMessage BuildMessage(List<ZFrame> frames)
-        => frames.Count == 1
-            ? new ZMessage(new ZSingleMessage(frames[0]))
-            : new ZMessage(new ZMultiMessage([.. frames]));
+    /// <summary>A resumable pause of one peer's receive loop (message-granular, 0033).</summary>
+    internal sealed class MessagePauseGate
+    {
+        private readonly TaskCompletionSource _resumed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Release() => _resumed.TrySetResult();
+
+        public Task WaitAsync(CancellationToken token) => _resumed.Task.WaitAsync(token);
+    }
 
     /// <summary>Publishes termination after internal cleanup; never participates in cleanup.</summary>
     private void RaisePeerEnded(ZPeer connection, Exception? failure)

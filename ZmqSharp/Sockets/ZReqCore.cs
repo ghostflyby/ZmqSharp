@@ -5,7 +5,7 @@ namespace ZmqSharp.Sockets;
 /// <summary>Coordinates one request at a time without depending on a socket implementation.</summary>
 internal sealed class ZReqCore(
     Func<ZPeer[]> peers,
-    Func<ZPeer, ZMessage, CancellationToken, ValueTask> send,
+    Func<ZPeer, ZMessage, CancellationToken, ValueTask<bool>> send,
     Action<ZPeer> retire) : IZInboundPolicy
 {
     private sealed class Request(ZPeer peer, CancellationToken token)

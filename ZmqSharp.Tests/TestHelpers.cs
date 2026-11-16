@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading.Channels;
 using Xunit;
 using ZmqSharp.Security;
-using ZmqSharp.Sockets;
 using ZmqSharp.Transports;
 using ZmqSharp.Zmtp;
 
@@ -415,7 +414,7 @@ internal sealed class FrameRecorder(Func<ZFrame, CancellationToken, bool>? onFra
 }
 
 /// <summary>
-/// Captures every logical write the encoder hands to a sink, preserving the
+/// Captures every logical write the framing hands to a sink, preserving the
 /// per-write segment structure (0015 section 6.1). Used to assert that a frame
 /// is written as one logical write of header + all segments.
 /// </summary>
@@ -438,42 +437,74 @@ internal sealed class CaptureSink : IZByteWriter
     }
 }
 
+/// <summary>
+/// A write-only byte connection over a <see cref="CaptureSink"/>: EOF on
+/// read, every write captured. The framing/session send paths exercise their
+/// one-logical-write contract through it.
+/// </summary>
+internal sealed class SinkConnection(CaptureSink sink) : ZByteConnection
+{
+    public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        => ValueTask.FromResult(0);
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+        => sink.WriteAsync(bytes, token);
+
+    public override ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+        => sink.WriteAsync(bytes, token);
+
+    public override void Abort() { }
+}
+
 internal static class ZmtpTestRunner
 {
     /// <summary>
-    /// Completes the NULL handshake (greeting + READY) on the connection and
-    /// returns the session connection to run the traffic parser on.
+    /// Completes the NULL handshake (greeting + READY) on the connection via
+    /// the message-layer seams (ZMTP framing + the built-in protocol) and
+    /// returns the connection to run message reads on.
     /// </summary>
     public static async Task<IZConnection?> EstablishAsync(IZConnection connection, string socketType = "PAIR")
     {
-        using var handshake = new ZmtpHandshake(
+        var result = await ZmqProtocol.Instance.EstablishAsync(
             connection,
             ZNullMechanism.Instance,
             ZmtpCommands.BuildReady(socketType),
-            ZmtpParser.DefaultMaxCommandSize);
-        var result = await handshake.EstablishAsync(TestContext.Current.CancellationToken);
+            ZmtpFraming.DefaultMaxCommandSize,
+            TestContext.Current.CancellationToken);
         return result is not null ? connection : null;
     }
 
-    public static ZmtpParser CreateParser(IZConnection connection, ITestFrameSink sink)
-    {
-        return new ZmtpParser(connection, sink.OnFrameAsync);
-    }
+    /// <summary>The established session over the connection's ZMTP framing.</summary>
+    public static IZWireSession CreateSession(
+        IZConnection connection, IZFrameCodec? codec = null, Action<Exception>? retire = null)
+        => ZmqProtocol.Instance.CreateSession(connection, codec, retire);
 
-    /// <summary>Completes the NULL handshake on the connection, then streams its traffic frames to the sink.</summary>
+    /// <summary>
+    /// Streams traffic messages to the sink's frames: each complete message
+    /// is dissected into its (stable, materialized) frames and the sink sees
+    /// them in order; the message is released after its frames are consumed
+    /// (0033).
+    /// </summary>
     public static async Task RunParserAsync(IZConnection connection, ITestFrameSink sink)
     {
-        var session = await EstablishAsync(connection);
-        if (session is null) return;
+        var established = await EstablishAsync(connection);
+        if (established is null) return;
 
-        using var parser = CreateParser(session, sink);
-        await parser.ParseAsync(TestContext.Current.CancellationToken);
-    }
-
-    /// <summary>Runs an already-configured parser to completion.</summary>
-    public static async Task RunParserAsync(ZmtpParser parser)
-    {
-        await parser.ParseAsync(TestContext.Current.CancellationToken);
+        using var session = CreateSession(established);
+        var token = TestContext.Current.CancellationToken;
+        while (await session.ReadMessageAsync(token) is { } message)
+        {
+            try
+            {
+                foreach (var frame in message)
+                    if (!await sink.OnFrameAsync(frame, token))
+                        break;
+            }
+            finally
+            {
+                message.Dispose();
+            }
+        }
     }
 }
 
@@ -599,21 +630,23 @@ internal static class ZmtpTestData
 /// </summary>
 internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTransport, EndPoint>
 {
-    public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
     {
         add { }
         remove { }
     }
 
-    public static ValueTask<IZConnection> ConnectAsync(
+    public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
-        return ValueTask.FromResult<IZConnection>(new EstablishedFakeConnection());
+        return ValueTask.FromResult<IZMessageConnection>(new EstablishedFakeConnection(context));
     }
 
     public static ValueTask<EstablishedFakeTransport> BindAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new EstablishedFakeTransport());
@@ -627,13 +660,21 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
     public void Dispose() { }
 }
 
-internal sealed class EstablishedFakeConnection : IZConnection
+internal sealed class EstablishedFakeConnection : ZByteConnection
 {
+    public EstablishedFakeConnection()
+    {
+    }
+
+    public EstablishedFakeConnection(in ZTransportContext context) : base(context)
+    {
+    }
+
     private readonly byte[] _handshake = ZmtpTestData.Concat(ZmtpTestData.Greeting(), ZmtpTestData.Ready());
     private int _position;
     private int _disposed;
 
-    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         if (_position < _handshake.Length)
@@ -653,20 +694,20 @@ internal sealed class EstablishedFakeConnection : IZConnection
         return new ValueTask<int>(tcs.Task.WaitAsync(TestContext.Current.CancellationToken));
     }
 
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
 
-    public void Abort() => Dispose();
+    public override void Abort() => DisposeCore();
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         Interlocked.Exchange(ref _disposed, 1);
     }

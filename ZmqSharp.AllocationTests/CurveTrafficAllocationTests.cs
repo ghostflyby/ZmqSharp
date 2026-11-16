@@ -14,7 +14,7 @@ public class CurveTrafficAllocationTests
         const int count = 1000;
         const int warmup = 16;
         using var raw = new RecordingByteConnection(capacity: (count + warmup) * 64);
-        using var session = new ZmtpSession(raw, CurveSessionTrafficTests.NewCodec());
+        using var session = CurveSessionTrafficTests.NewSession(raw, CurveSessionTrafficTests.NewCodec());
         using var message = new ZMessage(new ZSingleMessage(new ZFrame(ZSegment.Borrowed("hello-curve"u8.ToArray()))));
         for (var i = 0; i < warmup; i++) await session.SendAsync(message, TestContext.Current.CancellationToken);
         var thread = Environment.CurrentManagedThreadId;
@@ -54,7 +54,7 @@ public class CurveTrafficAllocationTests
         const int warmup = 16;
         const int count = 1000;
         using var recording = new RecordingByteConnection(capacity: (count + warmup) * 64);
-        using (var session = new ZmtpSession(recording, CurveSessionTrafficTests.NewCodec()))
+        using (var session = CurveSessionTrafficTests.NewSession(recording, CurveSessionTrafficTests.NewCodec()))
         {
             using var message = ZMessage.FromOwned([.. "parser-curve"u8]);
             for (var i = 0; i < count + warmup; i++) await session.SendAsync(message, TestContext.Current.CancellationToken);
@@ -66,13 +66,13 @@ public class CurveTrafficAllocationTests
         long before = 0;
         long allocated = 0;
         var thread = Environment.CurrentManagedThreadId;
-        using var parser = new ZmtpParser(input, (_, _) =>
+        using var readSession = ZmqProtocol.Instance.CreateSession(input, codec);
+        while (await readSession.ReadMessageAsync(TestContext.Current.CancellationToken) is { } message)
         {
             if (++seen == warmup) before = GC.GetAllocatedBytesForCurrentThread();
             if (seen == count + warmup) allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-            return ValueTask.FromResult(true);
-        }, codec);
-        await parser.ParseAsync(TestContext.Current.CancellationToken);
+            message.Dispose();
+        }
         Assert.Equal(count + warmup, seen);
         Assert.Equal(thread, Environment.CurrentManagedThreadId);
 #if !DEBUG

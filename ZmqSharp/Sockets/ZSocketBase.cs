@@ -30,7 +30,7 @@ public abstract class ZSocketBase : IZSocket
     internal ZPeer[] PeerSnapshot => Runtime.PeerSnapshot;
     internal void SetPeerConnectedHandler(Action<ZPeer> handler) => Runtime.SetPeerConnectedHandler(handler);
 
-    internal ValueTask SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
+    internal ValueTask<bool> SendToAsync(ZPeer peer, ZMessage message, CancellationToken token = default)
         => Runtime.SendToAsync(peer, message, token);
 
     protected ValueTask SendAsyncCore(ZMessage message, CancellationToken token = default)

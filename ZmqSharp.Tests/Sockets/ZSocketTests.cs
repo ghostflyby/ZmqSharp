@@ -609,10 +609,12 @@ public sealed class ZSocketTests
         Assert.Equal([.. "ping"u8], message[0].ToSequence().ToArray());
         Assert.Equal([.. "pong"u8], message[1].ToSequence().ToArray());
 
-        // The surface owns the message and disposes it; the only remaining
-        // rental is the server parser's greeting scratch, released on dispose.
+        // The surface owns the message and disposes it; the lasting rentals
+        // are the framing scratch and the two recycled copy owners (one per
+        // aggregated frame, reused across messages), all released with the
+        // connection (0033).
         message.Dispose();
-        Assert.Equal(1, pool.Outstanding);
+        Assert.Equal(3, pool.Outstanding);
 
         await server.DisposeAsync();
         Assert.Equal(0, pool.Outstanding);
@@ -1311,8 +1313,10 @@ public sealed class ZSocketTests
         Assert.Equal([0, 1], received);
 
         // The eight dropped messages were disposed by the library, never seen
-        // by the consumer (0006 section 2.2).
-        Assert.Equal(0, pool.Outstanding);
+        // by the consumer (0006 section 2.2); the server connection's one
+        // lasting rental is its establishment READY's recycled owner, held
+        // until the connection disposes (0033).
+        Assert.Equal(1, pool.Outstanding);
 
         await server.DisposeAsync();
         Assert.Equal(0, pool.Outstanding);
@@ -1418,8 +1422,10 @@ public sealed class ZSocketTests
         for (var i = 0; i < 4; i++) await client.SendAsync(ZMessage.FromOwned([(byte)i]), token);
 
         // The two buffered items are rented (the materializer allocates each
-        // frame's buffer directly; there is no persistent parser scratch).
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        // frame's buffer directly), plus the establishment READY command's
+        // recycled copy owner, which stays outstanding until the connection
+        // disposes (0033).
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
 
         await client.DisposeAsync();
         await peerEnded.Task.WaitAsync(token);
@@ -1451,7 +1457,9 @@ public sealed class ZSocketTests
 
         await client.SendAsync(ZMessage.FromOwned([.. "a"u8]), token);
         await client.SendAsync(ZMessage.FromOwned([.. "b"u8]), token);
-        await WaitUntilSettledAsync(() => pool.Outstanding, 2, TimeSpan.FromMilliseconds(300));
+        // Two buffered frames plus the establishment READY's recycled owner
+        // (0033).
+        await WaitUntilSettledAsync(() => pool.Outstanding, 3, TimeSpan.FromMilliseconds(300));
 
         // Disposing with unread buffered messages reclaims them; PeerEnded is
         // unsubscribed during disposal, so this is the only reclaim path.
@@ -1696,10 +1704,20 @@ public sealed class ZSocketTests
         GC.Collect();
         var before = GC.GetAllocatedBytesForCurrentThread();
         var received = 0;
-        while (server.Messages.TryRead(out var message))
+        var drained = false;
+        while (!drained)
         {
-            message.Dispose();
-            received++;
+            while (server.Messages.TryRead(out var message))
+            {
+                message.Dispose();
+                received++;
+            }
+
+            // All count frames are rented, but the last delivery may still be
+            // riding a pump continuation (0033's frame layer adds async hops);
+            // yield until it lands, without allocating on this thread.
+            if (received < count) await Task.Yield();
+            else drained = true;
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -2057,21 +2075,23 @@ public sealed class ZSocketTests
 /// <summary>Transport whose connection immediately reports EOF so the pump completes synchronously.</summary>
 internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransport, EndPoint>
 {
-    public event Func<IZConnection, CancellationToken, ValueTask>? OnAccept
+    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
     {
         add { }
         remove { }
     }
 
-    public static ValueTask<IZConnection> ConnectAsync(
+    public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
-        return ValueTask.FromResult<IZConnection>(new SynchronousEofConnection());
+        return ValueTask.FromResult<IZMessageConnection>(new SynchronousEofConnection());
     }
 
     public static ValueTask<SynchronousEofTransport> BindAsync(
         EndPoint endpoint,
+        ZTransportContext context,
         CancellationToken token = default)
     {
         return ValueTask.FromResult(new SynchronousEofTransport());
@@ -2085,29 +2105,29 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
     public void Dispose() { }
 }
 
-internal sealed class SynchronousEofConnection : IZConnection
+internal sealed class SynchronousEofConnection : ZByteConnection
 {
     private int _disposed;
 
-    public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
     {
         return ValueTask.FromResult(0);
     }
 
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+    public override async ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
     {
         foreach (var segment in bytes) await WriteAsync(segment, token);
     }
 
-    public void Abort() => Dispose();
+    public override void Abort() => DisposeCore();
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         Interlocked.Exchange(ref _disposed, 1);
     }

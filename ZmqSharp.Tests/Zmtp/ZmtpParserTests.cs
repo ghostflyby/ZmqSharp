@@ -1,5 +1,6 @@
 using Xunit;
 using ZmqSharp.Transports;
+using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Zmtp;
 
@@ -105,18 +106,28 @@ public sealed class ZmtpParserTests
             firstDelivered.TrySetResult();
             return false;
         });
-        var session = await ZmtpTestRunner.EstablishAsync(connection);
-        using var parser =
-            ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
-                recorder);
+        var session = await ZmtpTestRunner.EstablishAsync(connection)
+                      ?? throw new InvalidOperationException("handshake failed");
 
+        // The message-currency reader (0033): a consumer that stops reading
+        // parks the stream - the pause the old pump's Resume() performed.
         var token = TestContext.Current.CancellationToken;
-        var parseTask = parser.ParseAsync(token).AsTask();
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var parseTask = Task.Run(async () =>
+        {
+            using var messageSession = ZmtpTestRunner.CreateSession(session);
+            while (await messageSession.ReadMessageAsync(token) is { } message)
+            {
+                foreach (var frame in message) await recorder.OnFrameAsync(frame, token);
+                message.Dispose();
+                if (frames.Count == 1) await resume.Task.WaitAsync(token);
+            }
+        }, token);
         await firstDelivered.Task.WaitAsync(token);
         Assert.Single(frames);
         Assert.False(parseTask.IsCompleted);
 
-        parser.Resume();
+        resume.SetResult();
         await parseTask.WaitAsync(token);
         Assert.Equal(2, frames.Count);
         Assert.Equal([.. "two"u8], frames[1]);
@@ -146,13 +157,22 @@ public sealed class ZmtpParserTests
             await release.Task; // pending ValueTask = backpressure
             return true;
         });
-        var session = await ZmtpTestRunner.EstablishAsync(connection);
-        var parser =
-            ZmtpTestRunner.CreateParser(session ?? throw new InvalidOperationException("handshake failed"),
-                sink);
+        var session = await ZmtpTestRunner.EstablishAsync(connection)
+                      ?? throw new InvalidOperationException("handshake failed");
 
+        // A pending sink task is backpressure by itself (0033): the read
+        // loop awaits the sink before reading on.
         var token = TestContext.Current.CancellationToken;
-        var parseTask = parser.ParseAsync(token).AsTask();
+        using var messageSession = ZmtpTestRunner.CreateSession(session);
+        // ReSharper disable once AccessToDisposedClosure
+        var parseTask = Task.Run(async () =>
+        {
+            while (await messageSession.ReadMessageAsync(token) is { } message)
+            {
+                foreach (var frame in message) await sink.OnFrameAsync(frame, token);
+                message.Dispose();
+            }
+        }, token);
         await firstSeen.Task.WaitAsync(token);
         Assert.Single(frames);
         Assert.False(parseTask.IsCompleted);
@@ -179,6 +199,34 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], true, true)));
         using var connection = new ZConnection(source);
         await Assert.ThrowsAsync<ZeroMqProtocolException>(() => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder()));
+    }
+
+    [Fact]
+    public void WireUnit_CommandRequiresSingleFrameWithoutMore()
+    {
+        using var multipart = MessageFactory.Multipart([1], [2]);
+        Assert.Throws<ZeroMqProtocolException>(() => ZWireUnit.Command(multipart));
+
+        using var more = new ZMessage(new ZSingleMessage(
+            new ZFrame(new ZSegment(new byte[1], 0, 1), more: true)));
+        Assert.Throws<ZeroMqProtocolException>(() => ZWireUnit.Command(more));
+
+        using var single = ZMessage.FromOwned([1]);
+        Assert.True(ZWireUnit.Command(single).IsCommand);
+        Assert.False(ZWireUnit.Data(single).IsCommand);
+    }
+
+    [Fact]
+    public void ByteLength_SumsSegmentsWithoutMaterializingASequence()
+    {
+        using var message = MessageFactory.SegmentedFrame([1, 2, 3], [4, 5], [6]);
+        var frame = message[0];
+        Assert.Equal(6, ZWireFrameLogic.ByteLength(frame));
+
+        _ = ZWireFrameLogic.ByteLength(frame);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++) _ = ZWireFrameLogic.ByteLength(frame);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
     [Fact]
