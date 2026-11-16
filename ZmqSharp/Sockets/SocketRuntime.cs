@@ -275,7 +275,7 @@ internal sealed class SocketRuntime : IZSocket
         long accumulated = 0;
         for (var i = 0; i < message.Count; i++)
         {
-            var length = message[i].Length;
+            var length = ZWireFrameLogic.ByteLength(message[i]);
             if (length > int.MaxValue)
                 RejectReceive(ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, length);
 

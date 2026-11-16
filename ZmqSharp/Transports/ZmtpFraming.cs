@@ -397,6 +397,18 @@ internal static class ZWireFrameLogic
     }
 
     /// <summary>
+    /// A frame's body length in bytes, summed over its segments without
+    /// materializing a <see cref="ReadOnlySequence{T}"/> (the receive-limit
+    /// and command-size checks must not allocate for segmented frames).
+    /// </summary>
+    internal static long ByteLength(ZFrame frame)
+    {
+        long length = 0;
+        foreach (var segment in frame) length += segment.Memory.Length;
+        return length;
+    }
+
+    /// <summary>
     /// A frame's body as one contiguous memory, copying multi-segment frames
     /// (cold path); single-segment frames are returned without copy.
     /// </summary>

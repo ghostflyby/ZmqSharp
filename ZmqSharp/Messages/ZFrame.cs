@@ -99,24 +99,6 @@ public readonly struct ZFrame : IReadOnlyList<ZSegment>, IDisposable
         return GetEnumerator();
     }
 
-    /// <summary>
-    /// The total content length in bytes. Unlike <see cref="ToSequence"/>,
-    /// this never materializes a sequence, so the receive-limit hot path does
-    /// not allocate for segmented frames.
-    /// </summary>
-    public long Length
-    {
-        get
-        {
-            if (_contiguous is { } single) return single.Memory.Length;
-            if (_nonContiguous is not { } many) return 0;
-
-            long length = 0;
-            foreach (var segment in many) length += segment.Memory.Length;
-            return length;
-        }
-    }
-
     /// <summary>Materializes the frame content as a sequence.</summary>
     public ReadOnlySequence<byte> ToSequence()
     {

@@ -7,7 +7,6 @@ ZmqSharp.Zmtp.IZWireProtocol
 ZmqSharp.Zmtp.IZWireSession
 ZmqSharp.Zmtp.ZFrameAllocator
 virtual ZmqSharp.Zmtp.ZFrameAllocator.Invoke(int frameLength, bool more) -> ZmqSharp.ZFrame
-ZmqSharp.ZFrame.Length.get -> long
 ZmqSharp.Zmtp.ZmqProtocol
 static ZmqSharp.Zmtp.ZmqProtocol.Instance.get -> ZmqSharp.Zmtp.ZmqProtocol!
 ZmqSharp.ZSocketOptions.WireProtocol.get -> ZmqSharp.Zmtp.IZWireProtocol?

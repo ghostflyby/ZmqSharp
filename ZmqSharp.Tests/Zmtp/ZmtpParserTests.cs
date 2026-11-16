@@ -217,15 +217,15 @@ public sealed class ZmtpParserTests
     }
 
     [Fact]
-    public void FrameLength_SumsSegmentsWithoutMaterializingASequence()
+    public void ByteLength_SumsSegmentsWithoutMaterializingASequence()
     {
         using var message = MessageFactory.SegmentedFrame([1, 2, 3], [4, 5], [6]);
         var frame = message[0];
-        Assert.Equal(6, frame.Length);
+        Assert.Equal(6, ZWireFrameLogic.ByteLength(frame));
 
-        _ = frame.Length;
+        _ = ZWireFrameLogic.ByteLength(frame);
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) _ = frame.Length;
+        for (var i = 0; i < 100; i++) _ = ZWireFrameLogic.ByteLength(frame);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
