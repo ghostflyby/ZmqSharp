@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.ExceptionServices;
 
 namespace ZmqSharp.Transports;
 
@@ -55,20 +56,35 @@ internal sealed class ZRecycledBufferPool(MemoryPool<byte> pool) : IDisposable
 
     public void Dispose()
     {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            // Late returns must release their buffers even when another
+            // owner's disposal fails while the recycle stack is drained.
+            _disposed = true;
+        }
+
+        List<Exception>? failures = null;
         while (true)
         {
             ZPooledOwner? owner;
             lock (_gate)
             {
-                if (!_owners.TryPop(out owner))
-                {
-                    _disposed = true;
-                    return;
-                }
+                if (!_owners.TryPop(out owner)) break;
             }
 
-            owner.DisposeInner();
+            try
+            {
+                owner.DisposeInner();
+            }
+            catch (Exception ex)
+            {
+                (failures ??= []).Add(ex);
+            }
         }
+
+        if (failures is { Count: 1 }) ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures is { Count: > 1 }) throw new AggregateException(failures);
     }
 
     internal void Return(ZPooledOwner owner)
@@ -159,12 +175,15 @@ internal sealed class ZRecycledBufferPool(MemoryPool<byte> pool) : IDisposable
 
         internal void DisposeInner()
         {
+            IMemoryOwner<byte>? owner;
             lock (_gate)
             {
-                _owner?.Dispose();
+                owner = _owner;
                 _owner = null;
                 _state = Dead;
             }
+
+            owner?.Dispose();
         }
     }
 }
