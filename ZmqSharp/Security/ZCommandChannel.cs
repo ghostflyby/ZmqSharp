@@ -37,7 +37,7 @@ internal sealed class UnitCommandChannel(IZMessageConnection connection, long ma
 
         ReleaseCurrent();
         _current = unit.Message;
-        if (!unit.IsCommand || unit.Message.Count != 1)
+        if (!unit.IsCommand)
             throw new ZeroMqProtocolException("expected a command frame during handshake");
 
         var body = ZWireFrameLogic.Contiguous(unit.Message[0]);

@@ -5,28 +5,34 @@ using ZmqSharp.Transports;
 namespace ZmqSharp.Zmtp;
 
 /// <summary>
-/// A wire unit (0033): one complete message plus the protocol flag bits that
-/// ride it on the wire - the command bit distinguishes establishment control
-/// traffic from data. The unit of transport is the message; a command is a
-/// single-frame control message.
+/// A wire unit (0033, narrowed in 0034): one complete message plus the kind
+/// that distinguishes establishment control traffic from data. The unit of
+/// transport is the message; a command is exactly one frame without MORE.
+/// The value carries no frame-grammar flags (MORE is per frame, LONG_SIZE is
+/// byte encoding), so the invalid combinations cannot be represented.
 /// </summary>
 public readonly struct ZWireUnit
 {
-    public ZWireUnit(ZmtpFrameFlags flags, ZMessage message)
+    public ZWireUnit(ZMessage message, bool isCommand = false)
     {
-        ZWireFrameLogic.Validate(flags & ~ZmtpFrameFlags.Command);
-        Flags = flags;
-        Message = message;
-    }
+        if (isCommand && (message.Count != 1 || message[0].More))
+            throw new ZeroMqProtocolException("a command is a single-frame message without MORE");
 
-    /// <summary>The wire flags: command (establishment) or none/more (data).</summary>
-    public ZmtpFrameFlags Flags { get; }
+        Message = message;
+        IsCommand = isCommand;
+    }
 
     /// <summary>The complete message; ownership follows the connection contract.</summary>
     public ZMessage Message { get; }
 
-    /// <summary>True when this is a single-frame control message.</summary>
-    public bool IsCommand => (Flags & ZmtpFrameFlags.Command) != 0;
+    /// <summary>True when this unit is a single-frame control message.</summary>
+    public bool IsCommand { get; }
+
+    /// <summary>A data message unit.</summary>
+    public static ZWireUnit Data(ZMessage message) => new(message);
+
+    /// <summary>A command unit; the message must be exactly one frame without MORE.</summary>
+    public static ZWireUnit Command(ZMessage message) => new(message, isCommand: true);
 }
 
 /// <summary>

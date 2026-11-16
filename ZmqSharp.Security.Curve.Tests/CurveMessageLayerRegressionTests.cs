@@ -300,11 +300,11 @@ internal sealed class CurveLoopbackConnection(
     }
 
     public ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
-        => outbound.Writer.WriteAsync(new ZWireUnit(ZmtpFrameFlags.None, message), token);
+        => outbound.Writer.WriteAsync(ZWireUnit.Data(message), token);
 
     public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
         => outbound.Writer.WriteAsync(
-            new ZWireUnit(ZmtpFrameFlags.Command, ZMessage.FromOwned(body.ToArray())), token);
+            ZWireUnit.Command(ZMessage.FromOwned(body.ToArray())), token);
 
     public bool RetainsMessages => true;
 

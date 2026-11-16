@@ -121,7 +121,7 @@ public sealed class ZmtpFraming : IZFraming
                     // belongs to the protocol above - the framing is
                     // codec-blind and must not inspect possibly-encoded
                     // bodies.
-                    return new ZWireUnit(ZmtpFrameFlags.Command,
+                    return ZWireUnit.Command(
                         new ZMessage(new ZSingleMessage(CopyToOwned(wire.frame))));
                 }
 
@@ -147,7 +147,7 @@ public sealed class ZmtpFraming : IZFraming
                     ? new ZMessage(new ZSingleMessage(_messageFrames[0]))
                     : new ZMessage(new ZMultiMessage([.. _messageFrames]));
                 _messageFrames.Clear();
-                return new ZWireUnit(ZmtpFrameFlags.None, message);
+                return ZWireUnit.Data(message);
             }
         }
 

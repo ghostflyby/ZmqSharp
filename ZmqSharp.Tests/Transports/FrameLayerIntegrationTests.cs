@@ -275,11 +275,11 @@ public sealed class FrameLayerIntegrationTests
         }
 
         public ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
-            => outbound.Writer.WriteAsync(new ZWireUnit(ZmtpFrameFlags.None, message), token);
+            => outbound.Writer.WriteAsync(ZWireUnit.Data(message), token);
 
         public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
             => outbound.Writer.WriteAsync(
-                new ZWireUnit(ZmtpFrameFlags.Command, ZMessage.FromOwned(body.ToArray())), token);
+                ZWireUnit.Command(ZMessage.FromOwned(body.ToArray())), token);
 
         /// <summary>
         /// Zero-copy channel handoff: the unit stays referenced until the
@@ -345,7 +345,7 @@ public sealed class FrameLayerIntegrationTests
                     }
 
                     if ((flags & ZmtpFrameFlags.Command) != 0)
-                        return new ZWireUnit(ZmtpFrameFlags.Command, new ZMessage(new ZSingleMessage(frame)));
+                        return ZWireUnit.Command(new ZMessage(new ZSingleMessage(frame)));
 
                     _frames.Add(frame);
                     if (more) continue;
@@ -354,7 +354,7 @@ public sealed class FrameLayerIntegrationTests
                         ? new ZMessage(new ZSingleMessage(_frames[0]))
                         : new ZMessage(new ZMultiMessage([.. _frames]));
                     _frames.Clear();
-                    return new ZWireUnit(ZmtpFrameFlags.None, message);
+                    return ZWireUnit.Data(message);
                 }
             }
 

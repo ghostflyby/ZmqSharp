@@ -48,8 +48,9 @@ L3  IZWireProtocol            establishment (greeting + mechanism, on the
                               connection's command primitives) + session
                               (send gate, message reads). Built-in:
                               ZmqProtocol. Plug: ZSocketOptions.WireProtocol.
-    ZWireUnit                 one message + its wire flags (command = a
-                              single-frame control message)
+    ZWireUnit                 one message + its kind (data, or command = a
+                              single-frame control message; narrowed to
+                              message + IsCommand in 0034)
 L2  IZMessageConnection       ReadUnitAsync / WriteMessageAsync /
     IZMessageTransport<>      WriteCommandAsync. Native message sources plug
     IZFraming                 here; bytes-to-messages dialects plug here

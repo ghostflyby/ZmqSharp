@@ -77,8 +77,7 @@ public sealed class ZmqProtocol : IZWireProtocol
 
                 using (reply.Message)
                 {
-                    if (!reply.IsCommand || reply.Message.Count != 1
-                        || reply.Message[0].ToSequence().Length != 64)
+                    if (!reply.IsCommand || reply.Message[0].ToSequence().Length != 64)
                         throw new ZeroMqProtocolException("expected the greeting as the first command");
 
                     peerMechanism = ZmtpGreeting.ParseMechanism(
@@ -239,9 +238,6 @@ public sealed class ZmqProtocol : IZWireProtocol
                 {
                     using (unit.Message)
                     {
-                        if (unit.Message.Count != 1)
-                            throw new ZeroMqProtocolException("a command is a single-frame message");
-
                         if (unit.Message[0].ToSequence().Length > maxCommandSize)
                             throw new ZeroMqProtocolException(
                                 $"command frame exceeds maximum size of {maxCommandSize} bytes");

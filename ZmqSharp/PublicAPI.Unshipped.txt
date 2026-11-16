@@ -67,10 +67,11 @@ ZmqSharp.Zmtp.IZWireSession.ReadMessageAsync(System.Threading.CancellationToken 
 ZmqSharp.Zmtp.ZmqProtocol.CreateEstablisher(ZmqSharp.Transports.IZMessageConnection! connection, ZmqSharp.Security.IZSecurityMechanism! mechanism, System.ReadOnlyMemory<byte> localReadyBody, long maxCommandSize, System.Buffers.MemoryPool<byte>? pool = null) -> ZmqSharp.Zmtp.IZWireEstablisher!
 ZmqSharp.Zmtp.ZmqProtocol.CreateSession(ZmqSharp.Transports.IZMessageConnection! connection, ZmqSharp.Zmtp.IZFrameCodec? codec, System.Action<System.Exception!>? retire = null, ZmqSharp.Zmtp.ZFrameAllocator? decodedAllocator = null, long maxCommandSize = 1048576, long maxFrameLength = 9223372036854775807) -> ZmqSharp.Zmtp.IZWireSession!
 ZmqSharp.Zmtp.ZWireUnit
-ZmqSharp.Zmtp.ZWireUnit.Flags.get -> ZmqSharp.Zmtp.ZmtpFrameFlags
 ZmqSharp.Zmtp.ZWireUnit.IsCommand.get -> bool
 ZmqSharp.Zmtp.ZWireUnit.Message.get -> ZmqSharp.ZMessage
 ZmqSharp.Zmtp.ZWireUnit.ZWireUnit() -> void
-ZmqSharp.Zmtp.ZWireUnit.ZWireUnit(ZmqSharp.Zmtp.ZmtpFrameFlags flags, ZmqSharp.ZMessage message) -> void
+ZmqSharp.Zmtp.ZWireUnit.ZWireUnit(ZmqSharp.ZMessage message, bool isCommand = false) -> void
+static ZmqSharp.Zmtp.ZWireUnit.Command(ZmqSharp.ZMessage message) -> ZmqSharp.Zmtp.ZWireUnit
+static ZmqSharp.Zmtp.ZWireUnit.Data(ZmqSharp.ZMessage message) -> ZmqSharp.Zmtp.ZWireUnit
 ZmqSharp.Transports.IZMessageConnection.RetainsMessages.get -> bool
 ZmqSharp.Zmtp.IZWireSession.RetainsSentMessages.get -> bool

@@ -1,5 +1,6 @@
 using Xunit;
 using ZmqSharp.Transports;
+using ZmqSharp.Zmtp;
 
 namespace ZmqSharp.Tests.Zmtp;
 
@@ -198,6 +199,21 @@ public sealed class ZmtpParserTests
             ZmtpTestData.Greeting(), ZmtpTestData.Ready(), ZmtpTestData.Frame([1], true, true)));
         using var connection = new ZConnection(source);
         await Assert.ThrowsAsync<ZeroMqProtocolException>(() => ZmtpTestRunner.RunParserAsync(connection, new FrameRecorder()));
+    }
+
+    [Fact]
+    public void WireUnit_CommandRequiresSingleFrameWithoutMore()
+    {
+        using var multipart = MessageFactory.Multipart([1], [2]);
+        Assert.Throws<ZeroMqProtocolException>(() => ZWireUnit.Command(multipart));
+
+        using var more = new ZMessage(new ZSingleMessage(
+            new ZFrame(new ZSegment(new byte[1], 0, 1), more: true)));
+        Assert.Throws<ZeroMqProtocolException>(() => ZWireUnit.Command(more));
+
+        using var single = ZMessage.FromOwned([1]);
+        Assert.True(ZWireUnit.Command(single).IsCommand);
+        Assert.False(ZWireUnit.Data(single).IsCommand);
     }
 
     [Fact]
