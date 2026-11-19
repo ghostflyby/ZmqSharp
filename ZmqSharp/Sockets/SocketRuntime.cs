@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using ZmqSharp.Patterns;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
@@ -313,13 +314,35 @@ internal sealed class SocketRuntime : IZSocket
     public async Task ConnectAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+        switch (parsed)
+        {
+            case WebSocketEndpoint webSocket:
+                await ConnectCoreAsync<WebSocketEndpoint, WebSocketTransport>(webSocket, endpoint, token);
+                break;
+            case EndPoint socketEndpoint:
+                await ConnectCoreAsync<EndPoint, SocketTransport>(socketEndpoint, endpoint, token);
+                break;
+            default:
+                throw new NotSupportedException($"unsupported endpoint in '{endpoint}'");
+        }
     }
 
     public async Task BindAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await BindCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+        switch (parsed)
+        {
+            case WebSocketEndpoint:
+                // The ZWS transport is client-only (0035): there is no
+                // hand-rolled WebSocket server to accept with.
+                throw new NotSupportedException(
+                    $"the ZWS transport is client-only; ws/wss endpoint '{endpoint}' cannot be bound");
+            case EndPoint socketEndpoint:
+                await BindCoreAsync<EndPoint, SocketTransport>(socketEndpoint, endpoint, token);
+                break;
+            default:
+                throw new NotSupportedException($"unsupported endpoint in '{endpoint}'");
+        }
     }
 
     private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
@@ -418,13 +441,13 @@ internal sealed class SocketRuntime : IZSocket
     public ValueTask UnbindAsync(string endpoint, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, true, token);
+        return StopEndpointAsync(null, ZEndpointParser.TransportTypeOf(endpoint), endpoint, true, token);
     }
 
     public ValueTask DisconnectAsync(string endpoint, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, false, token);
+        return StopEndpointAsync(null, ZEndpointParser.TransportTypeOf(endpoint), endpoint, false, token);
     }
 
     private ZEndpointRegistration[] RequestEndpointStop(object? endpoint, Type transport, string? address, bool listening)
@@ -813,7 +836,8 @@ internal sealed class SocketRuntime : IZSocket
             retained = session.RetainsSentMessages;
         }
         catch (Exception ex) when (suppressRetirement &&
-                                   ex is ObjectDisposedException or IOException or SocketException)
+                                   ex is ObjectDisposedException or IOException or SocketException
+                                       or WebSocketException)
         { }
         catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
@@ -950,8 +974,8 @@ internal sealed class SocketRuntime : IZSocket
 
             // The wire protocol drives establishment and the session over the
             // connection (0034). A connection that negotiates its own protocol
-            // in the transport supplies it here; an explicit socket-level
-            // WireProtocol still wins.
+            // in the transport (ZWS, 0035) supplies it here; an explicit
+            // socket-level WireProtocol still wins.
             var protocol = _configuredProtocol
                            ?? (record.Frames is IZProtocolCarrier carrier ? carrier.Protocol : _protocol);
             var result = await EstablishWithTimeoutAsync(record, protocol);

@@ -96,3 +96,18 @@ static ZmqSharp.Zmtp.ZWireUnit.Command(ZmqSharp.ZMessage message) -> ZmqSharp.Zm
 static ZmqSharp.Zmtp.ZWireUnit.Data(ZmqSharp.ZMessage message) -> ZmqSharp.Zmtp.ZWireUnit
 ZmqSharp.Transports.IZMessageConnection.RetainsMessages.get -> bool
 ZmqSharp.Zmtp.IZWireSession.RetainsSentMessages.get -> bool
+ZmqSharp.Transports.WebSocketEndpoint
+ZmqSharp.Transports.WebSocketEndpoint.WebSocketEndpoint(string! host, int port, string! path, bool secure) -> void
+ZmqSharp.Transports.WebSocketEndpoint.Host.get -> string!
+ZmqSharp.Transports.WebSocketEndpoint.Port.get -> int
+ZmqSharp.Transports.WebSocketEndpoint.Path.get -> string!
+ZmqSharp.Transports.WebSocketEndpoint.Secure.get -> bool
+override ZmqSharp.Transports.WebSocketEndpoint.ToString() -> string!
+ZmqSharp.Transports.WebSocketEndpoint.Equals(ZmqSharp.Transports.WebSocketEndpoint? other) -> bool
+override ZmqSharp.Transports.WebSocketEndpoint.Equals(object? obj) -> bool
+override ZmqSharp.Transports.WebSocketEndpoint.GetHashCode() -> int
+static ZmqSharp.Transports.WebSocketEndpoint.operator ==(ZmqSharp.Transports.WebSocketEndpoint? left, ZmqSharp.Transports.WebSocketEndpoint? right) -> bool
+static ZmqSharp.Transports.WebSocketEndpoint.operator !=(ZmqSharp.Transports.WebSocketEndpoint? left, ZmqSharp.Transports.WebSocketEndpoint? right) -> bool
+ZmqSharp.Transports.WebSocketTransport
+static ZmqSharp.Transports.WebSocketTransport.ConnectAsync(ZmqSharp.Transports.WebSocketEndpoint! endpoint, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.IZMessageConnection!>
+static ZmqSharp.Transports.WebSocketTransport.ConnectAsync(ZmqSharp.Transports.WebSocketEndpoint! endpoint, ZmqSharp.Transports.ZTransportContext context, System.Threading.CancellationToken token = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ZmqSharp.Transports.IZMessageConnection!>
