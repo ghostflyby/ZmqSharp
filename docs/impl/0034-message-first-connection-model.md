@@ -100,22 +100,33 @@ ignore it.
 
 ### One transport family
 
+0036 refines this section: connect and listen are separate seams, and the
+combined generic interface is gone.
+
 ```csharp
-public interface IZTransport : IDisposable
+public interface IZServerTransport : IDisposable
 {
     event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept;
     ValueTask StartAsync(CancellationToken token = default);
 }
 
-public interface IZTransport<TSelf, in TEndpoint> : IZTransport
-    where TSelf : IZTransport<TSelf, TEndpoint>
+public interface IZServerTransport<TSelf, in TEndpoint> : IZServerTransport
+    where TSelf : IZServerTransport<TSelf, TEndpoint>
 {
-    static abstract ValueTask<IZMessageConnection> ConnectAsync(
-        TEndpoint endpoint, ZTransportContext context, CancellationToken token = default);
     static abstract ValueTask<TSelf> BindAsync(
         TEndpoint endpoint, ZTransportContext context, CancellationToken token = default);
 }
+
+public interface IZClientTransport<TSelf, in TEndpoint>
+    where TSelf : IZClientTransport<TSelf, TEndpoint>
+{
+    static abstract ValueTask<IZMessageConnection> ConnectAsync(
+        TEndpoint endpoint, ZTransportContext context, CancellationToken token = default);
+}
 ```
+
+A full-duplex transport implements both interfaces (`SocketTransport` is
+the in-box example); one-direction transports implement one.
 
 `IZMessageTransport` is gone. A byte transport returns its `IZConnection`
 (the cast is safe: it is a message connection); a native transport returns its
@@ -146,9 +157,9 @@ second parameter through establishment.
   cannot derive can still implement `IZMessageConnection` directly and return
   it from the transport.
 - Framing is per socket, not per bind call: one socket speaks one dialect.
-- `IZConnection` gains the message members and `IZTransport` changes currency,
-  both breaking changes accepted for 0.9.0; the message/framing/protocol
-  surface was still unshipped.
+- `IZConnection` gains the message members and the transport factory changes
+  currency, both breaking changes accepted for 0.9.0; the
+  message/framing/protocol surface was still unshipped.
 
 ## 4. Invariants preserved
 

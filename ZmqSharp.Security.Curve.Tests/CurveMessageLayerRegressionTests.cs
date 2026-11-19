@@ -214,7 +214,8 @@ internal sealed class CurveLoopbackEndpoint;
 /// retention contract covers), mirroring the integration suite's loopback.
 /// </summary>
 internal sealed class CurveLoopbackTransport
-    : IZTransport<CurveLoopbackTransport, CurveLoopbackEndpoint>
+    : IZClientTransport<CurveLoopbackTransport, CurveLoopbackEndpoint>,
+      IZServerTransport<CurveLoopbackTransport, CurveLoopbackEndpoint>
 {
     private static readonly Dictionary<CurveLoopbackEndpoint, BoundPair> Bound = new();
     private static readonly Lock Gate = new();

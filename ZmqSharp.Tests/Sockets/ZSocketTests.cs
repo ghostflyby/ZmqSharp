@@ -1237,7 +1237,10 @@ public sealed class ZSocketTests
         Assert.Equal(Enumerable.Range(0, count).Select(i => (byte)i), received);
     }
 
-    [Theory(Timeout = 10_000)]
+    // The retry loop below can legitimately spend 100 x 200 ms in bounded
+    // reads alone, so the old 10 s budget killed the test before its own
+    // loop could finish on a loaded runner.
+    [Theory(Timeout = 30_000)]
     [MemberData(nameof(TestTransports.TransportKinds), MemberType = typeof(TestTransports))]
     public async Task WaitMode_SlowPeer_DoesNotBlockOtherPeer(TransportKind kind)
     {
@@ -2073,14 +2076,8 @@ public sealed class ZSocketTests
 }
 
 /// <summary>Transport whose connection immediately reports EOF so the pump completes synchronously.</summary>
-internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransport, EndPoint>
+internal sealed class SynchronousEofTransport : IZClientTransport<SynchronousEofTransport, EndPoint>
 {
-    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
-    {
-        add { }
-        remove { }
-    }
-
     public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
         ZTransportContext context,
@@ -2088,21 +2085,6 @@ internal sealed class SynchronousEofTransport : IZTransport<SynchronousEofTransp
     {
         return ValueTask.FromResult<IZMessageConnection>(new SynchronousEofConnection());
     }
-
-    public static ValueTask<SynchronousEofTransport> BindAsync(
-        EndPoint endpoint,
-        ZTransportContext context,
-        CancellationToken token = default)
-    {
-        return ValueTask.FromResult(new SynchronousEofTransport());
-    }
-
-    public ValueTask StartAsync(CancellationToken token = default)
-    {
-        return ValueTask.CompletedTask;
-    }
-
-    public void Dispose() { }
 }
 
 internal sealed class SynchronousEofConnection : ZByteConnection

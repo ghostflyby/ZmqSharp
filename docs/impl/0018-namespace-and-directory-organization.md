@@ -68,7 +68,7 @@ A single `using ZmqSharp;` covers all basic usage:
 
 ### Sub-namespaces - domain-specific feature areas
 
-- `ZmqSharp.Transports` (unchanged): `IZTransport`, `IZTransport<TSelf,TE>`,
+- `ZmqSharp.Transports` (unchanged): `IZClientTransport`, `IZServerTransport`,
   `IZConnection`, `IZByteReader`, `IZByteWriter`, `SocketTransport`.
 - `ZmqSharp.Zmtp` (wire codec only): `ZmtpParser`, `ZmtpFrameEncoder`,
   `ZmtpCommands`, `ZmtpCommandCodec`, `IZFrameCodec`, `ZmtpFrameData`, `ZFrameHandler`,
@@ -115,7 +115,7 @@ ZmqSharp/
 ├── Messages/       (ZMessage, ZFrame, ZSegment, ...)
 ├── Patterns/       (dispatch/inbound/type seams for custom sockets)
 ├── Sockets/        (public socket types, options, pattern assembly)
-├── Transports/     (IZTransport, SocketTransport, ZConnection)
+├── Transports/     (IZClientTransport, IZServerTransport, SocketTransport, ZConnection)
 ├── Zmtp/           (ZmtpParser, ZmtpFrameEncoder, handshake internals)
 └── Security/       (mechanism seam: IZSecurityMechanism, PLAIN, NULL)
 ```

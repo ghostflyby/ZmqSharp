@@ -12,7 +12,7 @@ namespace ZmqSharp.Tests.Transports;
 /// The message-layer integration proofs (0033, connection model in 0034):
 /// each plug point hosts a real socket end to end through the socket runtime.
 /// (a) A native message transport (an in-proc channel pair passing whole
-/// messages, zero-copy) through the one transport factory and
+/// messages, zero-copy) through the transport factory seam and
 /// Bind/ConnectAsync. (b) A custom framing over a byte transport (a 4-byte
 /// big-endian length prefix instead of ZMTP's flag+size) via
 /// ZSocketOptions.Framing. (c) A custom wire protocol (a greeting-less
@@ -236,7 +236,9 @@ public sealed class FrameLayerIntegrationTests
     /// </summary>
     private sealed class LoopbackEndpoint;
 
-    private sealed class LoopbackMessageTransport : IZTransport<LoopbackMessageTransport, LoopbackEndpoint>
+    private sealed class LoopbackMessageTransport
+        : IZClientTransport<LoopbackMessageTransport, LoopbackEndpoint>,
+          IZServerTransport<LoopbackMessageTransport, LoopbackEndpoint>
     {
         private static readonly Dictionary<LoopbackEndpoint, BoundPair> Bound = new();
         private static readonly Lock Gate = new();

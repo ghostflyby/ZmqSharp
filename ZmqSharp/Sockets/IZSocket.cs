@@ -12,22 +12,22 @@ namespace ZmqSharp;
 public interface IZSocket : IAsyncDisposable
 {
     Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>;
+        where TTransport : IZServerTransport<TTransport, TEndpoint>;
 
     Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>;
+        where TTransport : IZClientTransport<TTransport, TEndpoint>;
 
     void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>;
+        where TTransport : IZServerTransport<TTransport, TEndpoint>;
 
     void Disconnect<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>;
+        where TTransport : IZClientTransport<TTransport, TEndpoint>;
 
     ValueTask UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>;
+        where TTransport : IZServerTransport<TTransport, TEndpoint>;
 
     ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>;
+        where TTransport : IZClientTransport<TTransport, TEndpoint>;
 
     Task BindAsync(string endpoint, CancellationToken token = default);
     Task ConnectAsync(string endpoint, CancellationToken token = default);

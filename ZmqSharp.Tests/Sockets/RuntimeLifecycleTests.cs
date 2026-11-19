@@ -225,27 +225,14 @@ public sealed class RuntimeLifecycleTests
     }
 
     // Connect-only phantom: the type carries its static ConnectAsync factory
-    // and satisfies the IZTransport CRTP constraint; BindAsync throws, so no
-    // instance can ever exist.
+    // and satisfies the IZClientTransport CRTP constraint; no listener side
+    // exists.
     // ReSharper disable once ClassNeverInstantiated.Local
-    private sealed class ClosingTransport : IZTransport<ClosingTransport, ClosingEndpoint>
+    private sealed class ClosingTransport : IZClientTransport<ClosingTransport, ClosingEndpoint>
     {
-        public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
-        {
-            add { }
-            remove { }
-        }
-
         public static ValueTask<IZMessageConnection> ConnectAsync(ClosingEndpoint endpoint,
             ZTransportContext context, CancellationToken token = default)
             => ValueTask.FromResult<IZMessageConnection>(endpoint.Connection);
-
-        public static ValueTask<ClosingTransport> BindAsync(ClosingEndpoint endpoint,
-            ZTransportContext context, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();
-        public void Dispose() { }
     }
 
     private sealed class ByteEndpoint(CountingMemoryPool? pool = null)
@@ -316,27 +303,14 @@ public sealed class RuntimeLifecycleTests
     }
 
     // Connect-only phantom: the type carries its static ConnectAsync factory
-    // and satisfies the IZTransport CRTP constraint; BindAsync throws, so no
-    // instance can ever exist.
+    // and satisfies the IZClientTransport CRTP constraint; no listener side
+    // exists.
     // ReSharper disable once ClassNeverInstantiated.Local
-    private sealed class ByteTransport : IZTransport<ByteTransport, ByteEndpoint>
+    private sealed class ByteTransport : IZClientTransport<ByteTransport, ByteEndpoint>
     {
-        public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
-        {
-            add { }
-            remove { }
-        }
-
         public static ValueTask<IZMessageConnection> ConnectAsync(ByteEndpoint endpoint,
             ZTransportContext context, CancellationToken token = default)
             => ValueTask.FromResult<IZMessageConnection>(endpoint.Connection);
-
-        public static ValueTask<ByteTransport> BindAsync(ByteEndpoint endpoint,
-            ZTransportContext context, CancellationToken token = default)
-            => throw new NotSupportedException();
-
-        public ValueTask StartAsync(CancellationToken token = default) => throw new NotSupportedException();
-        public void Dispose() { }
     }
 
     private sealed class TestMechanism(

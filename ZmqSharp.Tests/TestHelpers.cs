@@ -628,14 +628,8 @@ internal static class ZmtpTestData
 /// PAIR READY) and then parks on the read, so the pump stays alive with the
 /// peer established - used for allocation measurements of the send path.
 /// </summary>
-internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTransport, EndPoint>
+internal sealed class EstablishedFakeTransport : IZClientTransport<EstablishedFakeTransport, EndPoint>
 {
-    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
-    {
-        add { }
-        remove { }
-    }
-
     public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
         ZTransportContext context,
@@ -643,21 +637,6 @@ internal sealed class EstablishedFakeTransport : IZTransport<EstablishedFakeTran
     {
         return ValueTask.FromResult<IZMessageConnection>(new EstablishedFakeConnection(context));
     }
-
-    public static ValueTask<EstablishedFakeTransport> BindAsync(
-        EndPoint endpoint,
-        ZTransportContext context,
-        CancellationToken token = default)
-    {
-        return ValueTask.FromResult(new EstablishedFakeTransport());
-    }
-
-    public ValueTask StartAsync(CancellationToken token = default)
-    {
-        return ValueTask.CompletedTask;
-    }
-
-    public void Dispose() { }
 }
 
 internal sealed class EstablishedFakeConnection : ZByteConnection
