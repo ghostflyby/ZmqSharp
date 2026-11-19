@@ -52,7 +52,7 @@ public interface IZConnection : IZMessageConnection, IZByteReader, IZByteWriter
 A byte connection *is* a message connection. `IZConnection` is the byte
 specialization: it adds the raw I/O plus the inherited message surface. A
 native message transport implements `IZMessageConnection` directly and leaves
-`ByteOrigin` null.
+`ByteOrigin` null; ZWS is the in-box example (0035).
 
 ### Shared implementation
 

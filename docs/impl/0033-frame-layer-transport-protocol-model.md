@@ -60,11 +60,10 @@ L1  IZConnection (unchanged)  IZTransport (tcp/ipc, unchanged)
 ```
 
 Compositions: tcp/ipc = L1 + ZmtpFraming + ZmqProtocol (the decomposed
-original stack); an in-proc transport = L2-native + ZmqProtocol; a future
-WebSocket transport = L1 + a WS framing (one message per WS message,
-RFC 6455 sender-side fragmentation for streaming) + a ZWS protocol
-variant. `IZMessageConnection` is a *sibling* of `IZConnection` - no
-unimplementable inherited members.
+original stack); an in-proc transport = L2-native + ZmqProtocol; ZWS is a
+native L2 connection (one ZWS frame per WS message) plus a ZWS protocol
+variant (0035), not a byte framing. `IZMessageConnection` is a *sibling* of
+`IZConnection` - no unimplementable inherited members.
 
 The runtime composes: a byte peer adapts its framing (command-bounded
 during establishment, no policy allocator), runs the protocol's
