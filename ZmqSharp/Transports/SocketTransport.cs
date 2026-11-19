@@ -12,7 +12,8 @@ namespace ZmqSharp.Transports;
 /// through the same transport. Connections are <see cref="ZSocketConnection"/>
 /// instances reading directly from the socket (0015 section 4).
 /// </summary>
-public sealed class SocketTransport : IZTransport<SocketTransport, EndPoint>
+public sealed class SocketTransport
+    : IZClientTransport<SocketTransport, EndPoint>, IZServerTransport<SocketTransport, EndPoint>
 {
     private readonly Socket _socket;
     private readonly string? _boundPath;

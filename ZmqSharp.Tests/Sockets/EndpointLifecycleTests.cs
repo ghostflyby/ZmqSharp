@@ -241,7 +241,8 @@ public sealed class EndpointLifecycleTests
     }
 
     private sealed class ControlledTransport<T>(ControlledEndpoint endpoint)
-        : IZTransport<ControlledTransport<T>, ControlledEndpoint>
+        : IZClientTransport<ControlledTransport<T>, ControlledEndpoint>,
+          IZServerTransport<ControlledTransport<T>, ControlledEndpoint>
     {
         public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
         {

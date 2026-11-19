@@ -236,7 +236,9 @@ public sealed class FrameLayerIntegrationTests
     /// </summary>
     private sealed class LoopbackEndpoint;
 
-    private sealed class LoopbackMessageTransport : IZTransport<LoopbackMessageTransport, LoopbackEndpoint>
+    private sealed class LoopbackMessageTransport
+        : IZClientTransport<LoopbackMessageTransport, LoopbackEndpoint>,
+          IZServerTransport<LoopbackMessageTransport, LoopbackEndpoint>
     {
         private static readonly Dictionary<LoopbackEndpoint, BoundPair> Bound = new();
         private static readonly Lock Gate = new();

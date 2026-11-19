@@ -83,6 +83,7 @@ internal sealed class SocketRuntime : IZSocket
     private readonly ZSocketType _type;
     private IZInboundPolicy _inbound;
     private readonly IZSecurityMechanism _mechanism;
+    private readonly IZWireProtocol? _configuredProtocol;
     private readonly IZWireProtocol _protocol;
     private readonly ReadOnlyMemory<byte> _localReadyBody;
     private readonly int _handshakeTimeoutMs;
@@ -131,6 +132,7 @@ internal sealed class SocketRuntime : IZSocket
         _transportContext = new ZTransportContext(options.Framing, Pool);
         _decodedPool = new ZRecycledBufferPool(Pool);
         _mechanism = options.Security.Mechanism;
+        _configuredProtocol = options.WireProtocol;
         _protocol = options.WireProtocol ?? ZmqProtocol.Instance;
         _handshakeTimeoutMs = options.HandshakeTimeoutMs;
         _maxIncompleteHandshakes = options.MaxIncompleteHandshakes;
@@ -301,11 +303,11 @@ internal sealed class SocketRuntime : IZSocket
     }
 
     public Task ConnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+        where TTransport : IZClientTransport<TTransport, TEndpoint>
         => ConnectCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
 
     public Task BindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+        where TTransport : IZServerTransport<TTransport, TEndpoint>
         => BindCoreAsync<TEndpoint, TTransport>(endpoint, null, token);
 
     public async Task ConnectAsync(string endpoint, CancellationToken token = default)
@@ -321,7 +323,7 @@ internal sealed class SocketRuntime : IZSocket
     }
 
     private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
-        CancellationToken token) where TTransport : IZTransport<TTransport, TEndpoint>
+        CancellationToken token) where TTransport : IZClientTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
         token.ThrowIfCancellationRequested();
@@ -331,7 +333,7 @@ internal sealed class SocketRuntime : IZSocket
     }
 
     private async Task BindCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
-        CancellationToken token) where TTransport : IZTransport<TTransport, TEndpoint>
+        CancellationToken token) where TTransport : IZServerTransport<TTransport, TEndpoint>
     {
         ThrowIfClosed();
         token.ThrowIfCancellationRequested();
@@ -395,22 +397,22 @@ internal sealed class SocketRuntime : IZSocket
 
     /// <summary>Requests listener shutdown without waiting for the accept loop.</summary>
     public void Unbind<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+        where TTransport : IZServerTransport<TTransport, TEndpoint>
         => RequestEndpointStop(endpoint, typeof(TTransport), null, true);
 
     /// <summary>Requests peer shutdown without waiting for receive callbacks or cleanup.</summary>
     public void Disconnect<TEndpoint, TTransport>(TEndpoint endpoint)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+        where TTransport : IZClientTransport<TTransport, TEndpoint>
         => RequestEndpointStop(endpoint, typeof(TTransport), null, false);
 
     /// <summary>Stops matching listeners and waits for cleanup. Existing accepted peers remain connected.</summary>
     public ValueTask UnbindAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+        where TTransport : IZServerTransport<TTransport, TEndpoint>
         => StopEndpointAsync(endpoint, typeof(TTransport), null, true, token);
 
     /// <summary>Stops matching peers and waits for cleanup. Do not await this from a targeted peer's callback.</summary>
     public ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint, CancellationToken token = default)
-        where TTransport : IZTransport<TTransport, TEndpoint>
+        where TTransport : IZClientTransport<TTransport, TEndpoint>
         => StopEndpointAsync(endpoint, typeof(TTransport), null, false, token);
 
     public ValueTask UnbindAsync(string endpoint, CancellationToken token = default)
@@ -721,7 +723,8 @@ internal sealed class SocketRuntime : IZSocket
     /// mechanism command sequence, so a peer that stalls mid-handshake faults
     /// exactly as before (0016 section 8).
     /// </summary>
-    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(PeerRecord record)
+    private async Task<ZMechanismResult?> EstablishWithTimeoutAsync(
+        PeerRecord record, IZWireProtocol protocol)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(record.Registration.Token);
         if (_handshakeTimeoutMs > 0) timeout.CancelAfter(_handshakeTimeoutMs);
@@ -731,7 +734,7 @@ internal sealed class SocketRuntime : IZSocket
         }, record.Frames);
         try
         {
-            return await _protocol.EstablishAsync(
+            return await protocol.EstablishAsync(
                 record.Frames, _mechanism, _localReadyBody, _maxCommandSize, timeout.Token);
         }
         catch (OperationCanceledException) when (!record.Registration.Token.IsCancellationRequested)
@@ -809,7 +812,9 @@ internal sealed class SocketRuntime : IZSocket
             // below.
             retained = session.RetainsSentMessages;
         }
-        catch (Exception ex) when (suppressRetirement && ex is ObjectDisposedException or IOException or SocketException) { }
+        catch (Exception ex) when (suppressRetirement &&
+                                   ex is ObjectDisposedException or IOException or SocketException)
+        { }
         catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
         {
@@ -944,9 +949,12 @@ internal sealed class SocketRuntime : IZSocket
             }
 
             // The wire protocol drives establishment and the session over the
-            // connection (0034); the protocol reads the byte origin itself for
-            // the raw greeting on byte-composed connections.
-            var result = await EstablishWithTimeoutAsync(record);
+            // connection (0034). A connection that negotiates its own protocol
+            // in the transport supplies it here; an explicit socket-level
+            // WireProtocol still wins.
+            var protocol = _configuredProtocol
+                           ?? (record.Frames is IZProtocolCarrier carrier ? carrier.Protocol : _protocol);
+            var result = await EstablishWithTimeoutAsync(record, protocol);
             if (result is not { } established) throw new IOException("peer closed during handshake");
 
             // Post-establishment receive composition (0034): the codec is
@@ -974,7 +982,7 @@ internal sealed class SocketRuntime : IZSocket
                     record.Materializer is { } materializer ? materializer.Reset : null));
             }
 
-            record.Session = _protocol.CreateSession(
+            record.Session = protocol.CreateSession(
                 record.Frames, established.Codec, fault => RetirePeer(record.Peer, fault),
                 established.Codec is null ? null : record.Materializer?.CreateAllocator() ?? PooledDecodedAllocator(),
                 _maxCommandSize, _maxFrameLength, Pool);

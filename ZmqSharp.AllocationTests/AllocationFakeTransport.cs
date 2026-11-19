@@ -14,14 +14,8 @@ namespace ZmqSharp.AllocationTests;
 /// thread. Tests push frames through <see cref="AllocationFakeConnection.Enqueue"/>
 /// (reachable via <see cref="Current"/>).
 /// </summary>
-internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransport, EndPoint>
+internal sealed class AllocationFakeTransport : IZClientTransport<AllocationFakeTransport, EndPoint>
 {
-    public event Func<IZMessageConnection, CancellationToken, ValueTask>? OnAccept
-    {
-        add { }
-        remove { }
-    }
-
     public static ValueTask<IZMessageConnection> ConnectAsync(
         EndPoint endpoint,
         ZTransportContext context,
@@ -31,21 +25,6 @@ internal sealed class AllocationFakeTransport : IZTransport<AllocationFakeTransp
         Current = connection;
         return ValueTask.FromResult<IZMessageConnection>(connection);
     }
-
-    public static ValueTask<AllocationFakeTransport> BindAsync(
-        EndPoint endpoint,
-        ZTransportContext context,
-        CancellationToken token = default)
-    {
-        return ValueTask.FromResult(new AllocationFakeTransport());
-    }
-
-    public ValueTask StartAsync(CancellationToken token = default)
-    {
-        return ValueTask.CompletedTask;
-    }
-
-    public void Dispose() { }
 
     /// <summary>The connection created by the most recent ConnectAsync. Tests in
     /// this non-parallel project use it to script the peer's inbound frames.</summary>
