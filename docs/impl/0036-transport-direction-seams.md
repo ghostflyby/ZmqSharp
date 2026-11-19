@@ -3,7 +3,7 @@
 Status: accepted
 Date: 2026-11-19
 
-Refines the transport family in 0034 and the client-only seam in 0035.
+Refines the transport family in 0034.
 
 ## 1. Why the combined factory was wrong
 
@@ -20,9 +20,10 @@ The inventory at the time of this change:
 - In-box transports: `SocketTransport` connects and listens; this is the
   only in-box transport today. A client-only transport arrives in the
   stacked ZWS change.
-- Test transports: eight implement the combined interface, of which four
-  are connect-only and carried a throwing `BindAsync` placeholder; three
-  loopback/controlled fakes need both directions.
+- Test transports: eight implement the combined interface: five are
+  connect-only and three loopback/controlled fakes need both directions.
+  Two of the connect-only fakes carried a throwing `BindAsync` placeholder;
+  the rest returned a no-op listener.
 
 "Both directions" is therefore the exception, not the default, and the
 interface should let an implementation declare the direction it supports.
@@ -74,10 +75,14 @@ Both `IZTransport` and `IZTransport<TSelf, TEndpoint>` are shipped (0.8.0),
 so the rename and removal are breaking changes accepted for 0.9.0.
 `PublicAPI.Unshipped.txt` records the removed entries with the
 `*REMOVED*` prefix; the release housekeeping strips that prefix and deletes
-the corresponding lines from `Shipped` when the tag ships. `OnAccept` was
-unshipped and moves to `IZServerTransport` directly. An existing
-implementation of the combined interface now lists both narrow interfaces
-(a source change, not a behavioral one); `SocketTransport` already does.
+the corresponding lines from `Shipped` when the tag ships. The 0.8.x
+`OnAccept` signature stays in `Shipped` and is removed by the same
+mechanism; the new `IZServerTransport.OnAccept` is an Unshipped addition.
+The ledger also now records the earlier 0.9.0 removals (`IZConnection.Abort`,
+`ZmtpParser`, `ZmtpFrameEncoder`) that had been dropped from `Shipped`
+without removal entries. An existing implementation of the combined
+interface now lists both narrow interfaces (a source change, not a
+behavioral one); `SocketTransport` already does.
 
 ## 4. Consequences
 
@@ -94,3 +99,13 @@ implementation of the combined interface now lists both narrow interfaces
 - The string endpoint facade in this change still accepts only the
   tcp/ipc schemes; a stacked transport change can add a scheme without
   touching the direction seams.
+
+## 5. Related infrastructure
+
+The same change extracts `ZMessageSession` from `ZmqProtocol` unchanged, so
+a native message transport reuses the established session logic without a
+second implementation. It also adds the internal `IZProtocolCarrier` seam:
+a connection that negotiated its protocol in the transport supplies it to
+the runtime, while an explicit `ZSocketOptions.WireProtocol` still wins.
+The carrier is internal to the built-in transports; external transports
+select a protocol through `ZSocketOptions.WireProtocol`.

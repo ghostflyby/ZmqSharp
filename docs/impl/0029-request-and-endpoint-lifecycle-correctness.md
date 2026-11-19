@@ -21,7 +21,9 @@ ValueTask DisconnectAsync<TEndpoint, TTransport>(TEndpoint endpoint,
     CancellationToken token = default);
 ```
 
-The generic constraint remains `TTransport : IZTransport<TTransport, TEndpoint>`.
+The generic constraints are direction-specific: connect/disconnect use
+`IZClientTransport<TTransport, TEndpoint>`, bind/unbind use
+`IZServerTransport<TTransport, TEndpoint>`.
 String Bind/Connect return `Task`; string Unbind/Disconnect return `ValueTask`
 and accept optional cancellation. The string methods are available on the common
 interface and socket base. Endpoint parsing is an internal socket helper; the

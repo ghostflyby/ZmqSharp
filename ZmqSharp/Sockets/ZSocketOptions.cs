@@ -92,9 +92,9 @@ public sealed class ZSocketOptions
     /// surface and receive pump. Defaults to the built-in ZMTP 3.0 protocol
     /// (<see cref="Zmtp.ZmqProtocol.Instance"/>); a custom protocol plugs at
     /// this seam over any frame connection - byte transports through their
-    /// framing, native frame transports directly. A transport that carries its
-    /// own protocol in the connection supplies it per connection unless this
-    /// option is set, in which case the configured protocol wins.
+    /// framing, native frame transports directly. An in-box transport that
+    /// carries its own protocol in the connection supplies it per connection
+    /// unless this option is set, in which case the configured protocol wins.
     /// </summary>
     public IZWireProtocol? WireProtocol { get; init; }
 
