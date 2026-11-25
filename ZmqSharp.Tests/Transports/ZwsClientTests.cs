@@ -149,6 +149,9 @@ public sealed class ZwsClientTests
 
         var error = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => connect);
         Assert.Contains("identity must be a single frame", error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -187,6 +190,9 @@ public sealed class ZwsClientTests
 
         var error = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => connect);
         Assert.Contains("identity message, not a command", error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -260,8 +266,9 @@ public sealed class ZwsClientTests
         var ended = PeerEndedAsync(pair);
         await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, new byte[64 * 1024], token);
         var failure = await ended.WaitAsync(token);
-        var error = Assert.IsAssignableFrom<ZeroMqProtocolException>(failure);
-        Assert.Contains("maximum length of 64", error.Message);
+        var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejection.Rejection.Reason);
+        Assert.Equal(64, rejection.Rejection.Limit);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -293,8 +300,9 @@ public sealed class ZwsClientTests
         Assert.Equal(0x02, readyFlag);
         await ZwsTestWire.SendCommandAsync(session.Socket, new byte[64 * 1024], token);
 
-        var error = await Assert.ThrowsAnyAsync<ZeroMqProtocolException>(() => connect);
-        Assert.Contains("maximum length of 256", error.Message);
+        var rejection = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => connect);
+        Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejection.Rejection.Reason);
+        Assert.Equal(256, rejection.Rejection.Limit);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -315,8 +323,9 @@ public sealed class ZwsClientTests
         await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, new byte[100], token);
 
         var failure = await ended.WaitAsync(token);
-        var error = Assert.IsAssignableFrom<ZeroMqProtocolException>(failure);
-        Assert.Contains("maximum length of 150", error.Message);
+        var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.MessageTooLarge, rejection.Rejection.Reason);
+        Assert.Equal(150, rejection.Rejection.Limit);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -339,8 +348,9 @@ public sealed class ZwsClientTests
         var ended = PeerEndedAsync(pair);
         await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, new byte[64 * 1024], token);
         var failure = await ended.WaitAsync(token);
-        var error = Assert.IsAssignableFrom<ZeroMqProtocolException>(failure);
-        Assert.Contains("maximum length of 150", error.Message);
+        var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.MessageTooLarge, rejection.Rejection.Reason);
+        Assert.Equal(150, rejection.Rejection.Limit);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -361,8 +371,9 @@ public sealed class ZwsClientTests
         await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "b"u8.ToArray(), token);
 
         var failure = await ended.WaitAsync(token);
-        var error = Assert.IsType<ZeroMqProtocolException>(failure);
-        Assert.Contains("maximum of 1 frames", error.Message);
+        var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.TooManyFrames, rejection.Rejection.Reason);
+        Assert.Equal(1, rejection.Rejection.Limit);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.ProtocolError,
@@ -385,6 +396,9 @@ public sealed class ZwsClientTests
         var failure = await ended.WaitAsync(token);
         var error = Assert.IsType<ZeroMqProtocolException>(failure);
         Assert.Contains(expected, error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -420,6 +434,9 @@ public sealed class ZwsClientTests
         var failure = await ended.WaitAsync(token);
         var error = Assert.IsType<ZeroMqProtocolException>(failure);
         Assert.Contains("empty", error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -435,6 +452,9 @@ public sealed class ZwsClientTests
         var failure = await ended.WaitAsync(token);
         var error = Assert.IsType<ZeroMqProtocolException>(failure);
         Assert.Contains("peer sent ERROR", error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -507,6 +527,9 @@ public sealed class ZwsClientTests
         var failure = await ended.WaitAsync(token);
         var error = Assert.IsType<ZeroMqProtocolException>(failure);
         Assert.Contains("command frame interrupts a More chain", error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -657,6 +680,8 @@ public sealed class ZwsClientTests
             new WebSocketEndpoint("h", 1, "/x#fragment", false).ToString());
         Assert.Equal("/a%20b", new WebSocketEndpoint("h", 1, "/a b", false).Path);
         Assert.Equal("/a%2Fb", new WebSocketEndpoint("h", 1, "/a%2Fb", false).Path);
+        Assert.Equal("ws://h:1/a%20b",
+            new WebSocketEndpoint("h", 1, "/a b", false).ToString());
         Assert.Equal("ws://h:1/x?a=b",
             new WebSocketEndpoint("h", 1, "/x?a=b#c", false).ToString());
 

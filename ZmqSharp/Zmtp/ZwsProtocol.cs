@@ -51,7 +51,7 @@ internal sealed class ZwsProtocol : IZWireProtocol
                 throw new NotSupportedException(
                     $"the WebSocket subprotocol '{zws.SubProtocol}' selects the no-mechanism profile; the socket is configured for the '{mechanism.Name}' mechanism");
 
-            return await EstablishNoMechanismAsync(connection, localReadyBody, token);
+            return await EstablishNoMechanismAsync(zws, localReadyBody, token);
         }
 
         var negotiated = zws.NegotiatedMechanism;
@@ -77,7 +77,7 @@ internal sealed class ZwsProtocol : IZWireProtocol
     /// result.
     /// </summary>
     private static async ValueTask<ZMechanismResult?> EstablishNoMechanismAsync(
-        IZMessageConnection connection, ReadOnlyMemory<byte> localReadyBody, CancellationToken token)
+        ZwsConnection connection, ReadOnlyMemory<byte> localReadyBody, CancellationToken token)
     {
         // The local READY body is the full command body (name plus metadata).
         // It is the only place the configured routing identity reaches the
@@ -100,16 +100,27 @@ internal sealed class ZwsProtocol : IZWireProtocol
         using (unit.Message)
         {
             if (unit.IsCommand)
+            {
+                await CloseProtocolErrorAsync(connection);
                 throw new ZeroMqProtocolException(
                     "the ZWS2.0 no-mechanism handshake requires an identity message, not a command");
+            }
+
             if (unit.Message.Count != 1 || unit.Message[0].More)
+            {
+                await CloseProtocolErrorAsync(connection);
                 throw new ZeroMqProtocolException(
                     "the ZWS2.0 no-mechanism identity must be a single frame");
+            }
 
             var peerIdentity = unit.Message[0].ToSequence().ToArray();
             return ZMechanismResult.WithoutReady(codec: null, peerIdentity);
         }
     }
+
+    private static ValueTask CloseProtocolErrorAsync(ZwsConnection connection)
+        => ((IZCloseHandshake)connection).CloseAsync(
+            ZCloseReason.ProtocolError, CancellationToken.None);
 
     public IZWireSession CreateSession(IZMessageConnection connection, IZFrameCodec? codec,
         Action<Exception>? retire = null, ZFrameAllocator? decodedAllocator = null,

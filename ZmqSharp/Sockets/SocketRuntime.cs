@@ -969,13 +969,14 @@ internal sealed class SocketRuntime : IZSocket
         // Establishment bound: a command frame header declaring more than the
         // socket's limit rejects before any body is staged (0008 Slice B).
         // The traffic composition replaces it after establishment. The
-        // establishment exchange is command/identity-only; two frames are
-        // allowed so the no-mechanism identity shape check can report its
-        // specific error, while a longer MORE chain is rejected while it is
-        // still being read.
+        // message/frame caps are scoped to the connection's handshake shape:
+        // ZWS needs two frames for its identity diagnostic, while a custom
+        // native protocol keeps its historical unlimited handshake.
+        var handshakeLimit = frames as IZHandshakeFrameLimit;
         frames.ConfigureReceive(new ZReceiveComposition(
             allocator: null, _maxCommandSize, onMessageBoundary: null,
-            maxMessageLength: _maxCommandSize, maxFramesPerMessage: 2,
+            maxMessageLength: handshakeLimit is null ? long.MaxValue : _maxCommandSize,
+            maxFramesPerMessage: handshakeLimit?.HandshakeFrameLimit ?? int.MaxValue,
             onRejected: OnMaterializerRejected));
 
         _ = RunConnectionAsync(record);

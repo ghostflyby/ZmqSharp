@@ -14,7 +14,8 @@ namespace ZmqSharp.Transports;
 /// framing; the ZWS flag values differ from ZMTP's and convert explicitly in
 /// <see cref="ZwsWire"/>.
 /// </summary>
-internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
+internal sealed class ZwsConnection
+    : IZMessageConnection, IZProtocolCarrier, IZCloseHandshake, IZHandshakeFrameLimit
 {
     private readonly ClientWebSocket _webSocket;
     private readonly MemoryPool<byte> _pool;
@@ -95,14 +96,16 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
                     more = (flags & ZmtpFrameFlags.More) != 0;
                     var bodyLength = length - 1;
                     if (bodyLength > _maxFrameLength)
-                        throw RejectSize(
-                            $"ZWS frame exceeds maximum length of {_maxFrameLength} bytes");
-                    if (frameCount >= _maxFramesPerMessage)
-                        throw RejectFrames(
-                            $"ZWS message exceeds the maximum of {_maxFramesPerMessage} frames");
+                        throw Reject(
+                            ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, bodyLength);
                     if (bodyLength > _maxMessageLength - accumulatedLength)
-                        throw RejectSize(
-                            $"ZWS message exceeds maximum length of {_maxMessageLength} bytes");
+                        throw Reject(
+                            ZReceiveRejectionReason.MessageTooLarge, _maxMessageLength,
+                            accumulatedLength + bodyLength);
+                    if (frameCount >= _maxFramesPerMessage)
+                        throw Reject(
+                            ZReceiveRejectionReason.TooManyFrames, _maxFramesPerMessage,
+                            frameCount + 1L);
                     accumulatedLength += bodyLength;
                     frameCount++;
 
@@ -134,15 +137,18 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
         }
         catch (Exception ex)
         {
-            if (ex is ZeroMqProtocolException)
+            if (ex is ZeroMqProtocolException or ZReceiveRejectedException)
             {
                 // RFC 6455 7.1.7 and 7.4.1: a failing endpoint should close
                 // with an appropriate status - 1009 for a message too big,
                 // 1002 for the other protocol violations.
+                var tooBig = ex is ZReceiveRejectedException
+                {
+                    Rejection.Reason: ZReceiveRejectionReason.FrameTooLarge
+                        or ZReceiveRejectionReason.MessageTooLarge,
+                };
                 await TrySendCloseAsync(
-                    ex is MessageTooBigException
-                        ? WebSocketCloseStatus.MessageTooBig
-                        : WebSocketCloseStatus.ProtocolError,
+                    tooBig ? WebSocketCloseStatus.MessageTooBig : WebSocketCloseStatus.ProtocolError,
                     CancellationToken.None);
             }
 
@@ -199,6 +205,16 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
         _webSocket.Dispose();
     }
 
+    /// <summary>The establishment identity shape needs one frame plus its diagnostic frame.</summary>
+    int IZHandshakeFrameLimit.HandshakeFrameLimit => 2;
+
+    ValueTask IZCloseHandshake.CloseAsync(ZCloseReason reason, CancellationToken token)
+        => TrySendCloseAsync(
+            reason == ZCloseReason.MessageTooBig
+                ? WebSocketCloseStatus.MessageTooBig
+                : WebSocketCloseStatus.ProtocolError,
+            token);
+
     /// <summary>
     /// Sends one ZWS frame as a single unfragmented binary message: the wire
     /// flag byte followed by the frame body.
@@ -230,24 +246,20 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
 
     /// <summary>
     /// Reports a numeric-limit rejection through the runtime callback and
-    /// returns the rightsizing exception; the connection is the first layer
-    /// that knows the bound was exceeded, before the message is delivered.
+    /// returns the same public rejection type the byte receive guard uses, so
+    /// callers observe a uniform reason/limit/actual payload.
     /// </summary>
-    private ZeroMqProtocolException RejectSize(string message)
+    private ZReceiveRejectedException Reject(
+        ZReceiveRejectionReason reason, long? limit, long? actual)
     {
         _onRejected?.Invoke();
-        return new MessageTooBigException(message);
+        return new ZReceiveRejectedException(new ZReceiveRejection
+        {
+            Reason = reason,
+            Limit = limit,
+            Actual = actual,
+        });
     }
-
-    /// <summary>Reports a non-size limit rejection (frame count).</summary>
-    private ZeroMqProtocolException RejectFrames(string message)
-    {
-        _onRejected?.Invoke();
-        return new ZeroMqProtocolException(message);
-    }
-
-    /// <summary>Marks the rejection for the RFC 6455 1009 close status.</summary>
-    private sealed class MessageTooBigException(string message) : ZeroMqProtocolException(message);
 
     /// <summary>
     /// Sends the closing handshake reply (RFC 6455 5.5.1). Best effort: the
@@ -311,10 +323,15 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
                     }
 
                     if (next <= filled)
-                        throw RejectSize(
-                            bufferedLimit == _maxFrameLength
-                                ? $"ZWS frame exceeds maximum length of {_maxFrameLength} bytes"
-                                : $"ZWS message exceeds maximum length of {_maxMessageLength} bytes");
+                    {
+                        var frameBound = bufferedLimit == _maxFrameLength;
+                        throw Reject(
+                            frameBound
+                                ? ZReceiveRejectionReason.FrameTooLarge
+                                : ZReceiveRejectionReason.MessageTooLarge,
+                            frameBound ? _maxFrameLength : _maxMessageLength,
+                            frameBound ? filled - 1L : null);
+                    }
 
                     var larger = _pool.Rent(next);
                     owner.Memory[..filled].CopyTo(larger.Memory);
@@ -336,8 +353,8 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
 
                 filled += result.Count;
                 if (filled > 1 && filled - 1L > _maxFrameLength)
-                    throw RejectSize(
-                        $"ZWS frame exceeds maximum length of {_maxFrameLength} bytes");
+                    throw Reject(
+                        ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, filled - 1L);
                 if (result.EndOfMessage) break;
             }
 

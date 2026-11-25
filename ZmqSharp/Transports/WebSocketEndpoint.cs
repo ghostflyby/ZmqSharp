@@ -67,7 +67,7 @@ public sealed class WebSocketEndpoint : IEquatable<WebSocketEndpoint>
     /// <summary>The absolute URI the client WebSocket connects to.</summary>
     internal Uri Uri => _uri;
 
-    public override string ToString() => _uri.ToString();
+    public override string ToString() => _uri.AbsoluteUri;
 
     /// <summary>Uri requires IPv6 literals in brackets; accept both forms.</summary>
     private static string NormalizeHost(string host)

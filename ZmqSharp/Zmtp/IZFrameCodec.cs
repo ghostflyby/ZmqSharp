@@ -8,6 +8,13 @@ namespace ZmqSharp.Zmtp;
 public interface IZFrameCodec : IDisposable
 {
     ZmtpFrameData Encode(ZmtpFrameData logicalFrame);
+
+    /// <summary>
+    /// Decodes one wire frame. The decoded frame must preserve the wire MORE
+    /// flag: the receive pipeline uses it as the message boundary for the
+    /// per-message limits and materializer reset.
+    /// </summary>
     ZmtpFrameData Decode(ZmtpFrameData wireFrame);
+
     long GetMaximumEncodedLength(long logicalBodyLimit);
 }

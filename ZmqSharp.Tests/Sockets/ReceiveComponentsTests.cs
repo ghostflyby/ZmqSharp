@@ -149,14 +149,23 @@ public sealed class ReceiveComponentsTests
             0x00, 0x01, (byte)'D',
         ];
         using var bytes = new FeedConnection(wire);
-        using var messages = ZmtpFraming.Instance.Adapt(bytes, pool, ownsConnection: false);
-        messages.ConfigureReceive(new ZReceiveComposition(
-            materializer.CreateAllocator(), 100, materializer.Reset, 100, 1));
+        using (var messages = ZmtpFraming.Instance.Adapt(bytes, pool, ownsConnection: false))
+        {
+            messages.ConfigureReceive(new ZReceiveComposition(
+                materializer.CreateAllocator(), 100, materializer.Reset, 100, 1));
 
-        using var session = ZmqProtocol.Instance.CreateSession(messages, null);
-        using var message = await session.ReadMessageAsync(token);
-        var received = Assert.IsType<ZMessage>(message);
-        Assert.Equal("D"u8.ToArray(), received[0].ToSequence().ToArray());
+            using (var session = ZmqProtocol.Instance.CreateSession(messages, null))
+            {
+                using var message = await session.ReadMessageAsync(token);
+                var received = Assert.IsType<ZMessage>(message);
+                Assert.Equal("D"u8.ToArray(), received[0].ToSequence().ToArray());
+            }
+        }
+
+        // The materializer-owned command frame must be released with the
+        // command unit; a copy-and-drop would leak it.
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
+        Assert.Equal(0, pool.Outstanding);
         Assert.Equal(0, rejected);
     }
 
