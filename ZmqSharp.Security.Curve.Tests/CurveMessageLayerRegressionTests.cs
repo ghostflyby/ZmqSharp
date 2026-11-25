@@ -150,6 +150,76 @@ public sealed class CurveMessageLayerRegressionTests
         }
     }
 
+    [Fact(Timeout = 60_000)]
+    public async Task CodecSession_ResetsMessageLimitsAtEachMessage()
+    {
+        // The materializer's per-message counters are driven by the decoded
+        // allocator in codec mode; without a boundary reset they accumulate
+        // across messages and the fifth one-frame message trips limits meant
+        // for a single message.
+        var keys = Keys();
+        await using var server = new ZPairSocket(new ZSocketOptions
+        {
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(keys.ServerSecret.Span) },
+            MaxFramesPerMessage = 4,
+            MaxMessageLength = 3,
+        });
+        await using var client = new ZPairSocket(new ZSocketOptions
+        {
+            Security = new ZSecurityOptions
+            {
+                Mechanism = new CurveMechanism(keys.ClientSecret.Span, keys.ServerPublic.Span),
+            },
+        });
+        var token = TestContext.Current.CancellationToken;
+        var endpoint = new CurveLoopbackEndpoint();
+
+        await server.BindAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
+        await client.ConnectAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
+
+        for (var i = 0; i < 5; i++)
+            await client.SendAsync(ZMessage.FromOwned([(byte)('a' + i)]), token);
+
+        for (var i = 0; i < 5; i++)
+        {
+            using var message = await server.Messages.ReadAsync(token);
+            Assert.Equal([(byte)('a' + i)], message[0].ToSequence().ToArray());
+        }
+    }
+
+    [Fact(Timeout = 60_000)]
+    public async Task CodecSession_RejectsMultipartMessageAtTheFrameLimit()
+    {
+        // The reset must run at the decoded message's last frame, not after
+        // every allocation: otherwise each frame gets its own frame budget
+        // and a two-frame message slips past MaxFramesPerMessage = 1.
+        var keys = Keys();
+        await using var server = new ZPairSocket(new ZSocketOptions
+        {
+            Security = new ZSecurityOptions { Mechanism = new CurveMechanism(keys.ServerSecret.Span) },
+            MaxFramesPerMessage = 1,
+        });
+        await using var client = new ZPairSocket(new ZSocketOptions
+        {
+            Security = new ZSecurityOptions
+            {
+                Mechanism = new CurveMechanism(keys.ClientSecret.Span, keys.ServerPublic.Span),
+            },
+        });
+        var ended = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.PeerEnded += (_, failure) => ended.TrySetResult(failure);
+        var token = TestContext.Current.CancellationToken;
+        var endpoint = new CurveLoopbackEndpoint();
+
+        await server.BindAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
+        await client.ConnectAsync<CurveLoopbackEndpoint, CurveLoopbackTransport>(endpoint, token);
+        await client.SendAsync(ZMessage.Copy(["a"u8.ToArray(), "b"u8.ToArray()]), token);
+
+        var failure = await ended.Task.WaitAsync(token);
+        var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.TooManyFrames, rejection.Rejection.Reason);
+    }
+
     private static CurveFrameCodec NewCodec() => new(Key32.From(new byte[32]),
         encodeServerToClient: false, decodeServerToClient: false, 1, 0);
 

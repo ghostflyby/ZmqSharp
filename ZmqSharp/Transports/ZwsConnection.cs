@@ -18,6 +18,11 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
 {
     private readonly ClientWebSocket _webSocket;
     private readonly MemoryPool<byte> _pool;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private long _maxFrameLength = long.MaxValue;
+    private long _maxMessageLength = long.MaxValue;
+    private int _maxFramesPerMessage = int.MaxValue;
+    private Action? _onRejected;
     private bool _eof;
     private int _aborted;
     private int _disposed;
@@ -44,16 +49,33 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
     /// <summary>Copying connection: writes consume the frames during the call.</summary>
     public bool RetainsMessages => false;
 
+    /// <summary>
+    /// Applies the runtime's receive policy. Unlike a native connection that
+    /// hands over whole frames, ZWS re-aggregates WebSocket messages and can
+    /// grow a buffer, so it enforces the bounds while reading instead of
+    /// relying on the post-delivery validation (0035).
+    /// </summary>
+    public void ConfigureReceive(in ZReceiveComposition composition)
+    {
+        _maxFrameLength = composition.MaxFrameLength;
+        _maxMessageLength = composition.MaxMessageLength;
+        _maxFramesPerMessage = composition.MaxFramesPerMessage;
+        _onRejected = composition.OnRejected;
+    }
+
     public async ValueTask<ZWireUnit?> ReadUnitAsync(CancellationToken token = default)
     {
         if (_eof) return null;
 
         List<ZFrame>? frames = null;
+        long accumulatedLength = 0;
+        var frameCount = 0;
         try
         {
             while (true)
             {
-                if (await ReceiveMessageAsync(token) is not { } wire)
+                var remainingMessageLength = _maxMessageLength - accumulatedLength;
+                if (await ReceiveMessageAsync(remainingMessageLength, token) is not { } wire)
                 {
                     // A peer close ends the stream; a partial MORE chain is
                     // released, matching the ZMTP framing's close behavior.
@@ -71,6 +93,19 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
                 {
                     var flags = ZwsWire.FromWireByte(owner.Memory.Span[0]);
                     more = (flags & ZmtpFrameFlags.More) != 0;
+                    var bodyLength = length - 1;
+                    if (bodyLength > _maxFrameLength)
+                        throw RejectSize(
+                            $"ZWS frame exceeds maximum length of {_maxFrameLength} bytes");
+                    if (frameCount >= _maxFramesPerMessage)
+                        throw RejectFrames(
+                            $"ZWS message exceeds the maximum of {_maxFramesPerMessage} frames");
+                    if (bodyLength > _maxMessageLength - accumulatedLength)
+                        throw RejectSize(
+                            $"ZWS message exceeds maximum length of {_maxMessageLength} bytes");
+                    accumulatedLength += bodyLength;
+                    frameCount++;
+
                     frame = new ZFrame(new ZSegment(owner, 1, length - 1), more);
                     if ((flags & ZmtpFrameFlags.Command) != 0)
                     {
@@ -97,8 +132,20 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
                 return ZWireUnit.Data(message);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            if (ex is ZeroMqProtocolException)
+            {
+                // RFC 6455 7.1.7 and 7.4.1: a failing endpoint should close
+                // with an appropriate status - 1009 for a message too big,
+                // 1002 for the other protocol violations.
+                await TrySendCloseAsync(
+                    ex is MessageTooBigException
+                        ? WebSocketCloseStatus.MessageTooBig
+                        : WebSocketCloseStatus.ProtocolError,
+                    CancellationToken.None);
+            }
+
             if (frames is not null)
                 foreach (var frame in frames)
                     frame.Dispose();
@@ -109,17 +156,36 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
 
     public async ValueTask WriteMessageAsync(ZMessage message, CancellationToken token = default)
     {
-        // One binary message per frame, never fragmented (libzmq rejects
-        // fragmented ZWS messages).
-        for (var i = 0; i < message.Count; i++)
+        await _sendGate.WaitAsync(token);
+        try
         {
-            var flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None;
-            await SendFrameAsync(flags, message[i].ToSequence(), token);
+            // One binary message per frame, never fragmented (libzmq rejects
+            // fragmented ZWS messages).
+            for (var i = 0; i < message.Count; i++)
+            {
+                var flags = i < message.Count - 1 ? ZmtpFrameFlags.More : ZmtpFrameFlags.None;
+                await SendFrameAsync(flags, message[i].ToSequence(), token);
+            }
+        }
+        finally
+        {
+            _sendGate.Release();
         }
     }
 
-    public ValueTask WriteCommandAsync(ReadOnlyMemory<byte> body, CancellationToken token = default)
-        => SendFrameAsync(ZmtpFrameFlags.Command, new ReadOnlySequence<byte>(body), token);
+    public async ValueTask WriteCommandAsync(
+        ReadOnlyMemory<byte> body, CancellationToken token = default)
+    {
+        await _sendGate.WaitAsync(token);
+        try
+        {
+            await SendFrameAsync(ZmtpFrameFlags.Command, new ReadOnlySequence<byte>(body), token);
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
+    }
 
     public void Abort()
     {
@@ -163,22 +229,93 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
     }
 
     /// <summary>
+    /// Reports a numeric-limit rejection through the runtime callback and
+    /// returns the rightsizing exception; the connection is the first layer
+    /// that knows the bound was exceeded, before the message is delivered.
+    /// </summary>
+    private ZeroMqProtocolException RejectSize(string message)
+    {
+        _onRejected?.Invoke();
+        return new MessageTooBigException(message);
+    }
+
+    /// <summary>Reports a non-size limit rejection (frame count).</summary>
+    private ZeroMqProtocolException RejectFrames(string message)
+    {
+        _onRejected?.Invoke();
+        return new ZeroMqProtocolException(message);
+    }
+
+    /// <summary>Marks the rejection for the RFC 6455 1009 close status.</summary>
+    private sealed class MessageTooBigException(string message) : ZeroMqProtocolException(message);
+
+    /// <summary>
+    /// Sends the closing handshake reply (RFC 6455 5.5.1). Best effort: the
+    /// peer may already be gone, the socket may be aborted, or teardown may
+    /// have canceled the token; none of those is a protocol failure of its
+    /// own. The send gate keeps the close frame from interleaving with a
+    /// multipart message write.
+    /// </summary>
+    private async ValueTask TrySendCloseAsync(WebSocketCloseStatus status, CancellationToken token)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(1));
+            await _sendGate.WaitAsync(timeout.Token);
+            try
+            {
+                if (_webSocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                    await _webSocket.CloseOutputAsync(status, null, timeout.Token);
+            }
+            finally
+            {
+                _sendGate.Release();
+            }
+        }
+        catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException
+                                       or InvalidOperationException or OperationCanceledException)
+        {
+            // Best effort only; the read side reports the actual failure.
+        }
+    }
+
+    /// <summary>
     /// Receives one whole WebSocket binary message into an owned pooled
     /// buffer. The caller owns the owner; null means WebSocket close (EOF).
     /// Text messages and empty messages are ZWS protocol violations.
     /// </summary>
     private async ValueTask<(IMemoryOwner<byte> Owner, int Length)?> ReceiveMessageAsync(
-        CancellationToken token)
+        long remainingMessageLength, CancellationToken token)
     {
         var owner = _pool.Rent(4096);
         var filled = 0;
+        var bufferedLimit = Math.Min(_maxFrameLength, remainingMessageLength);
         try
         {
             while (true)
             {
                 if (filled == owner.Memory.Length)
                 {
-                    var next = owner.Memory.Length > int.MaxValue / 2 ? int.MaxValue : owner.Memory.Length * 2;
+                    var next = owner.Memory.Length > int.MaxValue / 2
+                        ? int.MaxValue
+                        : owner.Memory.Length * 2;
+                    if (bufferedLimit != long.MaxValue)
+                    {
+                        // Two spare bytes: one detects EndOfMessage exactly at
+                        // the bound, the other a body over it.
+                        var bounded = bufferedLimit > int.MaxValue - 2
+                            ? int.MaxValue
+                            : (int)bufferedLimit + 2;
+                        if (next > bounded) next = bounded;
+                    }
+
+                    if (next <= filled)
+                        throw RejectSize(
+                            bufferedLimit == _maxFrameLength
+                                ? $"ZWS frame exceeds maximum length of {_maxFrameLength} bytes"
+                                : $"ZWS message exceeds maximum length of {_maxMessageLength} bytes");
+
                     var larger = _pool.Rent(next);
                     owner.Memory[..filled].CopyTo(larger.Memory);
                     owner.Dispose();
@@ -190,6 +327,7 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
                 {
                     _eof = true;
                     owner.Dispose();
+                    await TrySendCloseAsync(WebSocketCloseStatus.NormalClosure, token);
                     return null;
                 }
 
@@ -197,6 +335,9 @@ internal sealed class ZwsConnection : IZMessageConnection, IZProtocolCarrier
                     throw new ZeroMqProtocolException("ZWS requires binary WebSocket messages");
 
                 filled += result.Count;
+                if (filled > 1 && filled - 1L > _maxFrameLength)
+                    throw RejectSize(
+                        $"ZWS frame exceeds maximum length of {_maxFrameLength} bytes");
                 if (result.EndOfMessage) break;
             }
 

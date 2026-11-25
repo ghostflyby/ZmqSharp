@@ -17,6 +17,8 @@ internal sealed class ZwsTestServer : IAsyncDisposable
 {
     internal const string SubProtocol = "ZWS2.0+NULL";
 
+    internal const string NoMechanismSubProtocol = "ZWS2.0";
+
     private const string WebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private const int MaxRequestBytes = 16 * 1024;
 
@@ -201,6 +203,27 @@ internal static class ZwsTestWire
     public static Task SendCommandAsync(WebSocket socket, ReadOnlyMemory<byte> body, CancellationToken token)
         => SendFrameAsync(socket, 0x02, body, token);
 
+    /// <summary>Sends one ZWS frame as a WebSocket message split into three fragments.</summary>
+    public static async Task SendFragmentedFrameAsync(
+        WebSocket socket, byte flag, ReadOnlyMemory<byte> body, CancellationToken token)
+    {
+        var message = new byte[1 + body.Length];
+        message[0] = flag;
+        body.CopyTo(message.AsMemory(1));
+        if (message.Length < 3)
+        {
+            await socket.SendAsync(message, WebSocketMessageType.Binary, true, token);
+            return;
+        }
+
+        var first = message.Length / 3;
+        var second = message.Length / 3;
+        await socket.SendAsync(message.AsMemory(0, first), WebSocketMessageType.Binary, false, token);
+        await socket.SendAsync(message.AsMemory(first, second), WebSocketMessageType.Binary, false, token);
+        await socket.SendAsync(
+            message.AsMemory(first + second), WebSocketMessageType.Binary, true, token);
+    }
+
     public static async Task<(byte Flag, byte[] Body)> ReceiveFrameAsync(
         WebSocket socket, CancellationToken token)
     {
@@ -223,5 +246,17 @@ internal static class ZwsTestWire
             filled += result.Count;
             if (result.EndOfMessage) return buffer[..filled];
         }
+    }
+
+    /// <summary>Waits for a Close frame (the next frame must be Close) and returns its status.</summary>
+    public static async Task<WebSocketCloseStatus?> ReceiveCloseStatusAsync(
+        WebSocket socket, CancellationToken token)
+    {
+        var buffer = new byte[256];
+        var result = await socket.ReceiveAsync(buffer, token);
+        return result.MessageType == WebSocketMessageType.Close
+            ? result.CloseStatus
+            : throw new InvalidOperationException(
+                $"expected a WebSocket close frame, got {result.MessageType}");
     }
 }

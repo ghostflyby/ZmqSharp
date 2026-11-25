@@ -30,7 +30,7 @@ public sealed class ZwsClientTests
         await using var session = await accept;
 
         Assert.Contains("GET /chat HTTP/1.1", session.Request, StringComparison.Ordinal);
-        Assert.Equal("ZWS2.0+NULL",
+        Assert.Equal("ZWS2.0+NULL, ZWS2.0",
             ZwsTestServer.ReadHeader(session.Request, "Sec-WebSocket-Protocol"));
         Assert.DoesNotContain("ZWS2.0/NULL", session.Request, StringComparison.Ordinal);
 
@@ -49,6 +49,144 @@ public sealed class ZwsClientTests
         await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "pong"u8.ToArray(), token);
         using var message = await ReadMessageAsync(pair.Messages, token);
         Assert.Equal("pong"u8.ToArray(), message[0].ToSequence().ToArray());
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task Connect_NoMechanismFallbackExchangesIdentities()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        Assert.Equal("ZWS2.0+NULL, ZWS2.0",
+            ZwsTestServer.ReadHeader(session.Request, "Sec-WebSocket-Protocol"));
+        Assert.Equal(ZwsTestServer.NoMechanismSubProtocol, session.Socket.SubProtocol);
+
+        // RFC 45 no mechanism: the first message each way is the routing
+        // identity; there is no READY exchange.
+        var (identityFlag, identityBody) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        Assert.Equal(0x00, identityFlag);
+        Assert.Empty(identityBody);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, ReadOnlyMemory<byte>.Empty, token);
+        await connect;
+
+        await pair.SendAsync("no-mechanism"u8.ToArray(), token);
+        var (dataFlag, dataBody) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        Assert.Equal(0x00, dataFlag);
+        Assert.Equal("no-mechanism"u8.ToArray(), dataBody);
+
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "reply"u8.ToArray(), token);
+        using var message = await ReadMessageAsync(pair.Messages, token);
+        Assert.Equal("reply"u8.ToArray(), message[0].ToSequence().ToArray());
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task NoMechanism_AdvertisesTheConfiguredRoutingIdentity()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var dealer = new ZDealerSocket(
+            new ZSocketOptions { Identity = "dealer-1"u8.ToArray() });
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = dealer.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (flag, body) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        Assert.Equal(0x00, flag);
+        Assert.Equal("dealer-1"u8.ToArray(), body);
+
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "server-1"u8.ToArray(), token);
+        await connect;
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task NoMechanism_PeerIdentityIsRegisteredByRouter()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var router = new ZRouterSocket();
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = router.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (clientFlag, clientIdentity) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        Assert.Equal(0x00, clientFlag);
+        Assert.Empty(clientIdentity);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "peer-1"u8.ToArray(), token);
+        await connect;
+
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "hello"u8.ToArray(), token);
+        using var message = await ReadMessageAsync(router.Messages, token);
+        Assert.Equal(2, message.Count);
+        Assert.Equal("peer-1"u8.ToArray(), message[0].ToSequence().ToArray());
+        Assert.Equal("hello"u8.ToArray(), message[1].ToSequence().ToArray());
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task NoMechanism_MultipartIdentity_FaultsThePeer()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (_, _) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x01, "a"u8.ToArray(), token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "b"u8.ToArray(), token);
+
+        var error = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => connect);
+        Assert.Contains("identity must be a single frame", error.Message);
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task NoMechanism_IsRejectedForANonNullSocket()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket(new ZSocketOptions
+        {
+            Security = new ZSecurityOptions { Mechanism = new ZPlainMechanism("user", "pass"u8) },
+        });
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var error = await Assert.ThrowsAsync<NotSupportedException>(() => connect);
+        Assert.Contains("no-mechanism profile", error.Message);
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task NoMechanism_CommandInsteadOfIdentity_FaultsThePeer()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (_, _) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        await ZwsTestWire.SendCommandAsync(session.Socket, ZmtpCommands.BuildReady("PAIR"), token);
+
+        var error = await Assert.ThrowsAsync<ZeroMqProtocolException>(() => connect);
+        Assert.Contains("identity message, not a command", error.Message);
     }
 
     [Fact(Timeout = 15_000)]
@@ -73,6 +211,162 @@ public sealed class ZwsClientTests
         Assert.Equal("x"u8.ToArray(), firstBody);
         Assert.Equal(0x00, secondFlag);
         Assert.Equal("y"u8.ToArray(), secondBody);
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task LargeMessage_IsReceivedIntact()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var payload = new byte[10 * 1024];
+        Random.Shared.NextBytes(payload);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, payload, token);
+
+        using var message = await ReadMessageAsync(pair.Messages, token);
+        Assert.Equal(payload, message[0].ToSequence().ToArray());
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task FragmentedWebSocketMessage_IsReassembled()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var payload = "fragmented-payload"u8.ToArray();
+        await ZwsTestWire.SendFragmentedFrameAsync(session.Socket, 0x00, payload, token);
+
+        using var message = await ReadMessageAsync(pair.Messages, token);
+        Assert.Equal(payload, message[0].ToSequence().ToArray());
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task OversizedFrame_IsRejectedBeforeTheWholeMessageIsBuffered()
+    {
+        await using var server = ZwsTestServer.Start();
+        using var pool = new ProbingMemoryPool();
+        await using var pair = new ZPairSocket(new ZSocketOptions
+        {
+            Pool = pool,
+            MaxFrameLength = 64,
+        });
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var ended = PeerEndedAsync(pair);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, new byte[64 * 1024], token);
+        var failure = await ended.WaitAsync(token);
+        var error = Assert.IsAssignableFrom<ZeroMqProtocolException>(failure);
+        Assert.Contains("maximum length of 64", error.Message);
+        Assert.Equal(1, pair.ReceiveRejections);
+        Assert.Equal(
+            WebSocketCloseStatus.MessageTooBig,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
+
+        // The read stopped at the first 4 KiB chunk instead of growing the
+        // buffer to the peer's message size (the frame bound was checked
+        // before allocation).
+        Assert.True(pool.MaxRequested <= 4096, $"receive path rented {pool.MaxRequested} bytes");
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task OversizedCommand_IsRejectedBeforeTheWholeMessageIsBuffered()
+    {
+        await using var server = ZwsTestServer.Start();
+        using var pool = new ProbingMemoryPool();
+        await using var pair = new ZPairSocket(new ZSocketOptions
+        {
+            Pool = pool,
+            MaxCommandSize = 256,
+        });
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (readyFlag, _) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        Assert.Equal(0x02, readyFlag);
+        await ZwsTestWire.SendCommandAsync(session.Socket, new byte[64 * 1024], token);
+
+        var error = await Assert.ThrowsAnyAsync<ZeroMqProtocolException>(() => connect);
+        Assert.Contains("maximum length of 256", error.Message);
+        Assert.Equal(1, pair.ReceiveRejections);
+        Assert.Equal(
+            WebSocketCloseStatus.MessageTooBig,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
+        Assert.True(pool.MaxRequested <= 4096, $"handshake rented {pool.MaxRequested} bytes");
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task OversizedMessage_IsRejectedBeforeDelivery()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket(new ZSocketOptions { MaxMessageLength = 150 });
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var ended = PeerEndedAsync(pair);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x01, new byte[100], token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, new byte[100], token);
+
+        var failure = await ended.WaitAsync(token);
+        var error = Assert.IsAssignableFrom<ZeroMqProtocolException>(failure);
+        Assert.Contains("maximum length of 150", error.Message);
+        Assert.Equal(1, pair.ReceiveRejections);
+        Assert.Equal(
+            WebSocketCloseStatus.MessageTooBig,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task OversizedSingleFrameMessage_IsRejectedBeforeBuffering()
+    {
+        await using var server = ZwsTestServer.Start();
+        using var pool = new ProbingMemoryPool();
+        await using var pair = new ZPairSocket(new ZSocketOptions
+        {
+            Pool = pool,
+            MaxMessageLength = 150,
+        });
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var ended = PeerEndedAsync(pair);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, new byte[64 * 1024], token);
+        var failure = await ended.WaitAsync(token);
+        var error = Assert.IsAssignableFrom<ZeroMqProtocolException>(failure);
+        Assert.Contains("maximum length of 150", error.Message);
+        Assert.Equal(1, pair.ReceiveRejections);
+        Assert.Equal(
+            WebSocketCloseStatus.MessageTooBig,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
+        Assert.True(pool.MaxRequested <= 4096, $"receive path rented {pool.MaxRequested} bytes");
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task ExcessiveFrameCount_IsRejectedBeforeDelivery()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket(new ZSocketOptions { MaxFramesPerMessage = 1 });
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var ended = PeerEndedAsync(pair);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x01, "a"u8.ToArray(), token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "b"u8.ToArray(), token);
+
+        var failure = await ended.WaitAsync(token);
+        var error = Assert.IsType<ZeroMqProtocolException>(failure);
+        Assert.Contains("maximum of 1 frames", error.Message);
+        Assert.Equal(1, pair.ReceiveRejections);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Theory(Timeout = 15_000)]
@@ -106,6 +400,11 @@ public sealed class ZwsClientTests
         var failure = await ended.WaitAsync(token);
         var error = Assert.IsType<ZeroMqProtocolException>(failure);
         Assert.Contains("binary", error.Message);
+
+        // RFC 6455 7.1.7: a protocol failure closes with an appropriate status.
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -150,6 +449,11 @@ public sealed class ZwsClientTests
         await session.Socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", token);
         var failure = await ended.WaitAsync(token);
         Assert.Null(failure);
+
+        // RFC 6455 5.5.1: the endpoint that received Close replies with Close.
+        Assert.Equal(
+            WebSocketCloseStatus.NormalClosure,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -338,6 +642,36 @@ public sealed class ZwsClientTests
         Assert.NotEqual(endpoint, new WebSocketEndpoint("server.example.com", 9000, "/chat", secure: true));
         Assert.NotEqual(endpoint, new WebSocketEndpoint("server.example.com", 9001, "/chat", secure: false));
         Assert.Equal("/", new WebSocketEndpoint("h", 1, "", false).Path);
+
+        // The URL form follows the BCL WebSocket/Uri rules: default ports are
+        // omitted, IPv6 literals are bracketed, a missing leading slash is
+        // added, and query strings survive.
+        Assert.Equal("ws://h/", new WebSocketEndpoint("h", 80, "", false).ToString());
+        Assert.Equal("wss://h/", new WebSocketEndpoint("h", 443, "", true).ToString());
+        Assert.Equal("ws://[::1]:9000/x",
+            new WebSocketEndpoint("::1", 9000, "/x", false).ToString());
+        Assert.Equal("/x", new WebSocketEndpoint("h", 1, "x", false).Path);
+        Assert.Equal("ws://h:1/x?a=b",
+            new WebSocketEndpoint("h", 1, "/x?a=b", false).ToString());
+        Assert.Equal("ws://h:1/x",
+            new WebSocketEndpoint("h", 1, "/x#fragment", false).ToString());
+        Assert.Equal("/a%20b", new WebSocketEndpoint("h", 1, "/a b", false).Path);
+        Assert.Equal("/a%2Fb", new WebSocketEndpoint("h", 1, "/a%2Fb", false).Path);
+        Assert.Equal("ws://h:1/x?a=b",
+            new WebSocketEndpoint("h", 1, "/x?a=b#c", false).ToString());
+
+        Assert.Throws<ArgumentException>(() => new WebSocketEndpoint("bad/host", 1, "/", false));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WebSocketEndpoint("h", -1, "/", false));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WebSocketEndpoint("h", 70_000, "/", false));
+    }
+
+    [Fact]
+    public async Task Teardown_UnknownScheme_IsANoOp()
+    {
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+        await pair.DisconnectAsync("udp://a:1", token);
+        await pair.UnbindAsync("udp://a:1", token);
     }
 
     /// <summary>Runs the server's READY first, then the client's, and completes ConnectAsync.</summary>

@@ -96,6 +96,12 @@ public sealed class ZmtpFraming : IZFraming
                     if (_messageFrames.Count > 0)
                         throw new ZeroMqProtocolException("command frame interrupts a More chain");
 
+                    // A command is itself a complete single-frame wire
+                    // message: reset the materializer's per-message counters
+                    // before returning it, or the next data message would
+                    // inherit the command frame's index and length.
+                    _onMessageBoundary?.Invoke();
+
                     // A command is a single-frame control message, copied to
                     // an owned buffer so every unit honors the same caller
                     // ownership (the scratch view would die at the next

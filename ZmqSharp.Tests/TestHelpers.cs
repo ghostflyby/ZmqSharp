@@ -309,28 +309,45 @@ internal sealed class DropTrackingQueueFactory(int capacity, BoundedChannelFullM
 }
 
 /// <summary>
-/// Pool that probes the receive path: counts every Rent, proving whether an
-/// over-limit frame was allocated.
+/// Pool that probes the receive path: counts every Rent and records the
+/// largest requested size, proving whether an over-limit frame was buffered.
 /// </summary>
 internal sealed class ProbingMemoryPool : MemoryPool<byte>
 {
     private readonly MemoryPool<byte> _inner = Shared;
     private int _rented;
+    private int _maxRequested;
 
     /// <summary>Total Rent calls since construction or the last <see cref="Reset"/>.</summary>
     public int Rentals => Volatile.Read(ref _rented);
+
+    /// <summary>The largest minimumBufferSize passed to Rent since construction.</summary>
+    public int MaxRequested => Volatile.Read(ref _maxRequested);
 
     public override int MaxBufferSize => _inner.MaxBufferSize;
 
     public override IMemoryOwner<byte> Rent(int minimumBufferSize = -1)
     {
         Interlocked.Increment(ref _rented);
+        if (minimumBufferSize > 0)
+        {
+            var current = Volatile.Read(ref _maxRequested);
+            while (minimumBufferSize > current)
+            {
+                var observed = Interlocked.CompareExchange(
+                    ref _maxRequested, minimumBufferSize, current);
+                if (observed == current) break;
+                current = observed;
+            }
+        }
+
         return _inner.Rent(minimumBufferSize);
     }
 
     public void Reset()
     {
         Interlocked.Exchange(ref _rented, 0);
+        Interlocked.Exchange(ref _maxRequested, 0);
     }
 
     protected override void Dispose(bool disposing)

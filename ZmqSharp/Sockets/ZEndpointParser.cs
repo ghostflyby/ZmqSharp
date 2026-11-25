@@ -28,7 +28,10 @@ internal static class ZEndpointParser
     /// <summary>
     /// The transport type a scheme routes to, used by the string teardown
     /// overloads, which match registrations by transport type plus the saved
-    /// address string and never re-parse the endpoint.
+    /// address string and never re-parse the endpoint. An unknown scheme
+    /// reports the byte transport so the match finds nothing: teardown stays a
+    /// no-op for an address this socket never registered, matching the
+    /// pre-ZWS behavior (connect/bind still reject unknown schemes).
     /// </summary>
     internal static Type TransportTypeOf(string endpoint)
     {
@@ -39,13 +42,10 @@ internal static class ZEndpointParser
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) return typeof(SocketTransport);
 
         var scheme = uri.Scheme;
-        if (scheme.Equals("tcp", StringComparison.OrdinalIgnoreCase) ||
-            scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)) return typeof(SocketTransport);
-
         return scheme.Equals("ws", StringComparison.OrdinalIgnoreCase) ||
                scheme.Equals("wss", StringComparison.OrdinalIgnoreCase)
             ? typeof(WebSocketTransport)
-            : throw new NotSupportedException($"unsupported endpoint scheme '{scheme}' in '{endpoint}'");
+            : typeof(SocketTransport);
     }
 
     private static async Task<IPEndPoint> ParseTcpAsync(Uri uri, CancellationToken token)
@@ -60,19 +60,14 @@ internal static class ZEndpointParser
     }
 
     /// <summary>
-    /// "ws://host:port/path" / "wss://host:port/path" (ZWS, 0035): the path is
-    /// preserved verbatim (including the query) because the WebSocket request
-    /// line carries it, and port sharing setups route on it. The URI parser
-    /// fills in the scheme default ports (80/443).
+    /// "ws://host:port/path" / "wss://host:port/path" (ZWS, 0035): the parsed
+    /// URI supplies the request target (path and query) and the scheme
+    /// default ports (80/443). The endpoint normalizes the accepted form
+    /// through the same <see cref="Uri"/> rules the BCL client uses.
     /// </summary>
     private static WebSocketEndpoint ParseWebSocket(Uri uri)
-    {
-        // Uri.Host may or may not keep IPv6 brackets depending on the runtime;
-        // normalize to the bracketed display form.
-        var host = uri.Host.Contains(':') && !uri.Host.StartsWith('[') ? $"[{uri.Host}]" : uri.Host;
-        var path = uri.PathAndQuery.Length == 0 ? "/" : uri.PathAndQuery;
-        return new WebSocketEndpoint(host, uri.Port, path, uri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase));
-    }
+        => new(uri.Host, uri.Port, uri.PathAndQuery,
+            uri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// "ipc://path" addresses a Unix domain socket: an absolute path keeps its

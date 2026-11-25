@@ -69,10 +69,13 @@ public interface IZMessageConnection : IDisposable
     IZConnection? ByteOrigin => null;
 
     /// <summary>
-    /// Applies the post-establishment receive policy - the zero-copy
-    /// allocator, the encoded frame bound, and the message-boundary callback.
-    /// Native message transports already own their frames, so the default is
-    /// a no-op (0034).
+    /// Applies the runtime's receive policy: the establishment bound before
+    /// the handshake, then the traffic composition after it. It carries the
+    /// zero-copy allocator, the encoded frame bound, the message-level limits,
+    /// the message-boundary callback, and the rejection signal. A native
+    /// message transport that hands over whole owned frames may ignore it
+    /// (the default); one that re-aggregates frames while reading (ZWS)
+    /// enforces the bounds itself (0034, 0035).
     /// </summary>
     void ConfigureReceive(in ZReceiveComposition composition) { }
 }

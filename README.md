@@ -13,8 +13,11 @@ libzmq-compatible socket semantics.
   `ipc://path`). libzmq supports ipc on Unix only, and NetMQ's `ipc://` is a TCP hash rather than a Unix domain
   socket; ZmqSharp offers true `ipc://` Unix domain sockets on every platform, including Windows — a concrete
   differentiator (0015 section 5.3, 0020 section 7/8).
-- **ZWS (RFC 45) client transport** over `ws://`/`wss://` using the pending `ZWS2.0+NULL` subprotocol, built on
-  the BCL WebSocket client. Client-only: the library deliberately ships no WebSocket server (0035).
+- **ZWS (RFC 45) client transport** over `ws://`/`wss://` using the proposed `ZWS2.0+NULL` subprotocol plus the
+  RFC-mandated bare `ZWS2.0` no-mechanism fallback, built on the BCL WebSocket client. Current libzmq servers
+  interoperate through the bare profile when configured with NULL; servers that only accept the published `/`
+  spellings remain unreachable until RFC 45 is revised. Client-only: the library deliberately ships no WebSocket
+  server (0035).
 - **Per-peer bounded queues** with configurable full modes (Wait, DropWrite, DropNewest, DropOldest) and mandatory
   reclamation of dropped messages.
 - **Copy-on-write peer snapshots**: zero-allocation send and receive hot paths in optimized builds.
