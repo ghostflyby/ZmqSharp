@@ -290,7 +290,9 @@ internal sealed class ZwsConnection
                                        or InvalidOperationException or OperationCanceledException
                                        or IOException or SocketException)
         {
-            // Best effort only; the read side reports the actual failure.
+            // Best effort: a fault close still reports the original failure,
+            // while a failed reply to the peer's Close leaves the clean EOF
+            // intact.
         }
     }
 
