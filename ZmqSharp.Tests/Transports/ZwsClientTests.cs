@@ -155,6 +155,32 @@ public sealed class ZwsClientTests
     }
 
     [Fact(Timeout = 15_000)]
+    public async Task NoMechanism_ThirdHandshakeFrame_IsRejected()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(
+            selectedProtocol: ZwsTestServer.NoMechanismSubProtocol, token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (_, _) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x01, "a"u8.ToArray(), token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x01, "b"u8.ToArray(), token);
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, "c"u8.ToArray(), token);
+
+        var rejection = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => connect);
+        Assert.Equal(ZReceiveRejectionReason.TooManyFrames, rejection.Rejection.Reason);
+        Assert.Equal(2, rejection.Rejection.Limit);
+        Assert.Equal(3, rejection.Rejection.Actual);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
+    }
+
+    [Fact(Timeout = 15_000)]
     public async Task NoMechanism_IsRejectedForANonNullSocket()
     {
         await using var server = ZwsTestServer.Start();
@@ -269,6 +295,7 @@ public sealed class ZwsClientTests
         var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
         Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejection.Rejection.Reason);
         Assert.Equal(64, rejection.Rejection.Limit);
+        Assert.True(rejection.Rejection.Actual is > 64);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -303,6 +330,7 @@ public sealed class ZwsClientTests
         var rejection = await Assert.ThrowsAsync<ZReceiveRejectedException>(() => connect);
         Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejection.Rejection.Reason);
         Assert.Equal(256, rejection.Rejection.Limit);
+        Assert.True(rejection.Rejection.Actual is > 256);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -326,6 +354,7 @@ public sealed class ZwsClientTests
         var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
         Assert.Equal(ZReceiveRejectionReason.MessageTooLarge, rejection.Rejection.Reason);
         Assert.Equal(150, rejection.Rejection.Limit);
+        Assert.Equal(200, rejection.Rejection.Actual);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -351,6 +380,7 @@ public sealed class ZwsClientTests
         var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
         Assert.Equal(ZReceiveRejectionReason.MessageTooLarge, rejection.Rejection.Reason);
         Assert.Equal(150, rejection.Rejection.Limit);
+        Assert.True(rejection.Rejection.Actual is > 150);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.MessageTooBig,
@@ -374,6 +404,7 @@ public sealed class ZwsClientTests
         var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
         Assert.Equal(ZReceiveRejectionReason.TooManyFrames, rejection.Rejection.Reason);
         Assert.Equal(1, rejection.Rejection.Limit);
+        Assert.Equal(2, rejection.Rejection.Actual);
         Assert.Equal(1, pair.ReceiveRejections);
         Assert.Equal(
             WebSocketCloseStatus.ProtocolError,
@@ -451,6 +482,28 @@ public sealed class ZwsClientTests
         await ZwsTestWire.SendCommandAsync(session.Socket, ZmtpCommands.BuildError("boom"), token);
         var failure = await ended.WaitAsync(token);
         var error = Assert.IsType<ZeroMqProtocolException>(failure);
+        Assert.Contains("peer sent ERROR", error.Message);
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task NullReadyError_FailsConnectWithProtocolClose()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket();
+        var token = TestContext.Current.CancellationToken;
+
+        var accept = server.AcceptAsync(token: token);
+        var connect = pair.ConnectAsync(server.Endpoint(), token);
+        await using var session = await accept;
+
+        var (readyFlag, _) = await ZwsTestWire.ReceiveFrameAsync(session.Socket, token);
+        Assert.Equal(0x02, readyFlag);
+        await ZwsTestWire.SendCommandAsync(session.Socket, ZmtpCommands.BuildError("boom"), token);
+
+        var error = await Assert.ThrowsAnyAsync<ZeroMqProtocolException>(() => connect);
         Assert.Contains("peer sent ERROR", error.Message);
         Assert.Equal(
             WebSocketCloseStatus.ProtocolError,
@@ -584,6 +637,9 @@ public sealed class ZwsClientTests
         Assert.Equal(0x02, errorFlag);
         Assert.True(ZmtpCommandCodec.TryReadCommandName(errorBody, out var name));
         Assert.True(name.SequenceEqual("ERROR"u8));
+        Assert.Equal(
+            WebSocketCloseStatus.ProtocolError,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]

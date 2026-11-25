@@ -95,9 +95,9 @@ internal sealed class ZwsConnection
                     var flags = ZwsWire.FromWireByte(owner.Memory.Span[0]);
                     more = (flags & ZmtpFrameFlags.More) != 0;
                     var bodyLength = length - 1;
-                    if (bodyLength > _maxFrameLength)
-                        throw Reject(
-                            ZReceiveRejectionReason.FrameTooLarge, _maxFrameLength, bodyLength);
+                    // The frame bound is enforced while the WebSocket chunk
+                    // streams in (ReceiveMessageAsync); only the per-message
+                    // total and frame count remain to check here.
                     if (bodyLength > _maxMessageLength - accumulatedLength)
                         throw Reject(
                             ZReceiveRejectionReason.MessageTooLarge, _maxMessageLength,
@@ -325,12 +325,17 @@ internal sealed class ZwsConnection
                     if (next <= filled)
                     {
                         var frameBound = bufferedLimit == _maxFrameLength;
+                        // The message branch reports the bytes observed so
+                        // far: the frame's start offset in the message plus
+                        // the bytes read into this frame.
+                        var messageActual =
+                            _maxMessageLength - remainingMessageLength + filled - 1L;
                         throw Reject(
                             frameBound
                                 ? ZReceiveRejectionReason.FrameTooLarge
                                 : ZReceiveRejectionReason.MessageTooLarge,
                             frameBound ? _maxFrameLength : _maxMessageLength,
-                            frameBound ? filled - 1L : null);
+                            frameBound ? filled - 1L : messageActual);
                     }
 
                     var larger = _pool.Rent(next);

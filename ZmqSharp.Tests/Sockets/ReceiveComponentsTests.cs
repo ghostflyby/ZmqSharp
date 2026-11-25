@@ -169,6 +169,30 @@ public sealed class ReceiveComponentsTests
         Assert.Equal(0, rejected);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task Parser_ThrowingBoundary_ReleasesTheCommandFrame()
+    {
+        var token = TestContext.Current.CancellationToken;
+        using var pool = new CountingMemoryPool();
+        var materializer = new ReceiveMaterializer(
+            pool, new ZReceiveOptions(), 100, 100, maxFramesPerMessage: 10, () => { });
+
+        byte[] wire = [0x04, 0x05, 4, (byte)'P', (byte)'I', (byte)'N', (byte)'G'];
+        using var bytes = new FeedConnection(wire);
+        using (var messages = ZmtpFraming.Instance.Adapt(bytes, pool, ownsConnection: false))
+        {
+            messages.ConfigureReceive(new ZReceiveComposition(
+                materializer.CreateAllocator(), 100,
+                () => throw new InvalidOperationException("boundary"), 100, 10));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => messages.ReadUnitAsync(token).AsTask());
+        }
+
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
+        Assert.Equal(0, pool.Outstanding);
+    }
+
     private sealed class HeaderThenFailure : ZByteConnection
     {
         private int _position;

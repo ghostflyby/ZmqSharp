@@ -1061,6 +1061,8 @@ internal sealed class SocketRuntime : IZSocket
                 if (!_type.AcceptsPeer(peerType))
                 {
                     await record.Session.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), token);
+                    if (record.Frames is IZCloseHandshake close)
+                        await close.CloseAsync(ZCloseReason.ProtocolError, CancellationToken.None);
                     throw new ZeroMqProtocolException($"peer socket type '{peerType}' is not accepted by local socket type '{_type.Name}'");
                 }
 

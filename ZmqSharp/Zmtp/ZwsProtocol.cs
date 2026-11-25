@@ -66,7 +66,15 @@ internal sealed class ZwsProtocol : IZWireProtocol
         // starts it).
         using var context = new ZMechanismContext(
             new UnitCommandChannel(connection, maxCommandSize), localReadyBody, maxCommandSize);
-        return await mechanism.CreateSession().RunAsync(context, token);
+        try
+        {
+            return await mechanism.CreateSession().RunAsync(context, token);
+        }
+        catch (Exception failure) when (failure is ZeroMqProtocolException or ZReceiveRejectedException)
+        {
+            await CloseProtocolErrorAsync(zws);
+            throw;
+        }
     }
 
     /// <summary>
