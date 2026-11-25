@@ -9,6 +9,10 @@ public readonly struct ZReceiveRejection
     /// <summary>The configured limit, when the rejection is a numeric-limit violation.</summary>
     public long? Limit { get; init; }
 
-    /// <summary>The observed value, when the rejection is a numeric-limit violation.</summary>
+    /// <summary>
+    /// The observed value, when the rejection is a numeric-limit violation.
+    /// A streaming transport may report the bytes observed so far rather than
+    /// the final size (the value is then a lower bound on the violation).
+    /// </summary>
     public long? Actual { get; init; }
 }

@@ -155,7 +155,7 @@ public sealed class ZwsClientTests
     }
 
     [Fact(Timeout = 15_000)]
-    public async Task NoMechanism_ThirdHandshakeFrame_IsRejected()
+    public async Task NoMechanism_ThirdIdentityFrame_IsRejected()
     {
         await using var server = ZwsTestServer.Start();
         await using var pair = new ZPairSocket();
@@ -305,6 +305,44 @@ public sealed class ZwsClientTests
         // buffer to the peer's message size (the frame bound was checked
         // before allocation).
         Assert.True(pool.MaxRequested <= 4096, $"receive path rented {pool.MaxRequested} bytes");
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task FrameAtExactBoundary_IsAccepted()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket(new ZSocketOptions { MaxFrameLength = 5 });
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var payload = "abcde"u8.ToArray();
+        await ZwsTestWire.SendFrameAsync(session.Socket, 0x00, payload, token);
+
+        using var message = await ReadMessageAsync(pair.Messages, token);
+        Assert.Equal(payload, message[0].ToSequence().ToArray());
+    }
+
+    [Fact(Timeout = 15_000)]
+    public async Task FragmentedFrameOnePastBoundary_IsRejected()
+    {
+        await using var server = ZwsTestServer.Start();
+        await using var pair = new ZPairSocket(new ZSocketOptions { MaxFrameLength = 5 });
+        var token = TestContext.Current.CancellationToken;
+        await using var session = await ConnectAsync(server, pair, token);
+
+        var ended = PeerEndedAsync(pair);
+        await ZwsTestWire.SendFragmentedFrameAsync(
+            session.Socket, 0x00, "abcdef"u8.ToArray(), token);
+
+        var failure = await ended.WaitAsync(token);
+        var rejection = Assert.IsType<ZReceiveRejectedException>(failure);
+        Assert.Equal(ZReceiveRejectionReason.FrameTooLarge, rejection.Rejection.Reason);
+        Assert.Equal(5, rejection.Rejection.Limit);
+        Assert.Equal(6, rejection.Rejection.Actual);
+        Assert.Equal(1, pair.ReceiveRejections);
+        Assert.Equal(
+            WebSocketCloseStatus.MessageTooBig,
+            await ZwsTestWire.ReceiveCloseStatusAsync(session.Socket, token));
     }
 
     [Fact(Timeout = 15_000)]
@@ -503,7 +541,7 @@ public sealed class ZwsClientTests
         Assert.Equal(0x02, readyFlag);
         await ZwsTestWire.SendCommandAsync(session.Socket, ZmtpCommands.BuildError("boom"), token);
 
-        var error = await Assert.ThrowsAnyAsync<ZeroMqProtocolException>(() => connect);
+        var error = await Assert.ThrowsAsync<ZMechanismException>(() => connect);
         Assert.Contains("peer sent ERROR", error.Message);
         Assert.Equal(
             WebSocketCloseStatus.ProtocolError,

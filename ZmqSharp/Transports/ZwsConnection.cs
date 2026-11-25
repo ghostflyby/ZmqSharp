@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using ZmqSharp.Zmtp;
 
@@ -286,7 +287,8 @@ internal sealed class ZwsConnection
             }
         }
         catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException
-                                       or InvalidOperationException or OperationCanceledException)
+                                       or InvalidOperationException or OperationCanceledException
+                                       or IOException or SocketException)
         {
             // Best effort only; the read side reports the actual failure.
         }

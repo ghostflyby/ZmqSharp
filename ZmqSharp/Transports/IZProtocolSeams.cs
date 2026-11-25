@@ -12,8 +12,8 @@ internal enum ZCloseReason
 
 /// <summary>
 /// A message connection with a transport-level close handshake (ZWS). The
-/// session and the wire protocol report a fatal fault through this seam;
-/// transports without a close handshake simply do not implement it.
+/// session, the wire protocol, and the runtime report a fatal fault through
+/// this seam; transports without a close handshake simply do not implement it.
 /// </summary>
 internal interface IZCloseHandshake
 {
