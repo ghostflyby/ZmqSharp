@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using ZmqSharp.Patterns;
 using ZmqSharp.Security;
 using ZmqSharp.Transports;
@@ -313,13 +314,35 @@ internal sealed class SocketRuntime : IZSocket
     public async Task ConnectAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await ConnectCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+        switch (parsed)
+        {
+            case WebSocketEndpoint webSocket:
+                await ConnectCoreAsync<WebSocketEndpoint, WebSocketTransport>(webSocket, endpoint, token);
+                break;
+            case EndPoint socketEndpoint:
+                await ConnectCoreAsync<EndPoint, SocketTransport>(socketEndpoint, endpoint, token);
+                break;
+            default:
+                throw new NotSupportedException($"unsupported endpoint in '{endpoint}'");
+        }
     }
 
     public async Task BindAsync(string endpoint, CancellationToken token = default)
     {
         var parsed = await ZEndpointParser.ParseEndpointAsync(endpoint, token);
-        await BindCoreAsync<EndPoint, SocketTransport>(parsed, endpoint, token);
+        switch (parsed)
+        {
+            case WebSocketEndpoint:
+                // The ZWS transport is client-only (0035): there is no
+                // hand-rolled WebSocket server to accept with.
+                throw new NotSupportedException(
+                    $"the ZWS transport is client-only; ws/wss endpoint '{endpoint}' cannot be bound");
+            case EndPoint socketEndpoint:
+                await BindCoreAsync<EndPoint, SocketTransport>(socketEndpoint, endpoint, token);
+                break;
+            default:
+                throw new NotSupportedException($"unsupported endpoint in '{endpoint}'");
+        }
     }
 
     private async Task ConnectCoreAsync<TEndpoint, TTransport>(TEndpoint endpoint, string? address,
@@ -418,13 +441,13 @@ internal sealed class SocketRuntime : IZSocket
     public ValueTask UnbindAsync(string endpoint, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, true, token);
+        return StopEndpointAsync(null, ZEndpointParser.TransportTypeOf(endpoint), endpoint, true, token);
     }
 
     public ValueTask DisconnectAsync(string endpoint, CancellationToken token = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        return StopEndpointAsync(null, typeof(SocketTransport), endpoint, false, token);
+        return StopEndpointAsync(null, ZEndpointParser.TransportTypeOf(endpoint), endpoint, false, token);
     }
 
     private ZEndpointRegistration[] RequestEndpointStop(object? endpoint, Type transport, string? address, bool listening)
@@ -704,6 +727,23 @@ internal sealed class SocketRuntime : IZSocket
         return (length, more) => new ZFrame(new ZSegment(RentDecoded(length), 0, length), more);
     }
 
+    /// <summary>
+    /// Codec sessions allocate decoded frames through the materializer, whose
+    /// per-message counters must reset at the last frame of every message. The
+    /// encoded framing's boundary callback is not installed in codec mode, so
+    /// the reset travels with the allocator itself.
+    /// </summary>
+    private ZFrameAllocator ResettingDecodedAllocator(ReceiveMaterializer materializer)
+    {
+        var allocate = materializer.CreateAllocator();
+        return (length, more) =>
+        {
+            var frame = allocate(length, more);
+            if (!more) materializer.Reset();
+            return frame;
+        };
+    }
+
     private readonly ZRecycledBufferPool _decodedPool;
 
     private IMemoryOwner<byte> RentDecoded(int length) => _decodedPool.Rent(length);
@@ -813,7 +853,8 @@ internal sealed class SocketRuntime : IZSocket
             retained = session.RetainsSentMessages;
         }
         catch (Exception ex) when (suppressRetirement &&
-                                   ex is ObjectDisposedException or IOException or SocketException)
+                                   ex is ObjectDisposedException or IOException or SocketException
+                                       or WebSocketException)
         { }
         catch (OperationCanceledException) when (suppressRetirement && record is { Registration.Token.IsCancellationRequested: true }) { }
         finally
@@ -927,9 +968,16 @@ internal sealed class SocketRuntime : IZSocket
 
         // Establishment bound: a command frame header declaring more than the
         // socket's limit rejects before any body is staged (0008 Slice B).
-        // The traffic composition replaces it after establishment.
+        // The traffic composition replaces it after establishment. The
+        // message/frame caps are scoped to the connection's handshake shape:
+        // ZWS needs two frames for its identity diagnostic, while a custom
+        // native protocol keeps its historical unlimited handshake.
+        var handshakeLimit = frames as IZHandshakeFrameLimit;
         frames.ConfigureReceive(new ZReceiveComposition(
-            allocator: null, _maxCommandSize, onMessageBoundary: null));
+            allocator: null, _maxCommandSize, onMessageBoundary: null,
+            maxMessageLength: handshakeLimit is null ? long.MaxValue : _maxCommandSize,
+            maxFramesPerMessage: handshakeLimit?.HandshakeFrameLimit ?? int.MaxValue,
+            onRejected: OnMaterializerRejected));
 
         _ = RunConnectionAsync(record);
         return record.Established;
@@ -950,8 +998,8 @@ internal sealed class SocketRuntime : IZSocket
 
             // The wire protocol drives establishment and the session over the
             // connection (0034). A connection that negotiates its own protocol
-            // in the transport supplies it here; an explicit socket-level
-            // WireProtocol still wins.
+            // in the transport (ZWS, 0035) supplies it here; an explicit
+            // socket-level WireProtocol still wins.
             var protocol = _configuredProtocol
                            ?? (record.Frames is IZProtocolCarrier carrier ? carrier.Protocol : _protocol);
             var result = await EstablishWithTimeoutAsync(record, protocol);
@@ -969,31 +1017,59 @@ internal sealed class SocketRuntime : IZSocket
                 record.Frames.ConfigureReceive(new ZReceiveComposition(
                     allocator: null,
                     codec.GetMaximumEncodedLength(Math.Max(_maxFrameLength, _maxCommandSize)),
-                    onMessageBoundary: null));
+                    onMessageBoundary: null,
+                    onRejected: OnMaterializerRejected));
             }
             else
             {
                 // No codec: the allocator owns the semantic limits and rejects
                 // before renting; the boundary callback resets its counters at
-                // every complete wire message.
+                // every complete wire message. A byte framing keeps the wide
+                // bound so the allocator remains the rejection source (the
+                // MaterializerRejected signal); a native connection that
+                // re-aggregates frames enforces the real limits while reading.
+                var native = record.Frames.ByteOrigin is null;
                 record.Frames.ConfigureReceive(new ZReceiveComposition(
                     record.Materializer?.CreateAllocator(),
-                    long.MaxValue,
-                    record.Materializer is { } materializer ? materializer.Reset : null));
+                    native ? _maxFrameLength : long.MaxValue,
+                    record.Materializer is { } materializer ? materializer.Reset : null,
+                    _maxMessageLength,
+                    _maxFramesPerMessage,
+                    OnMaterializerRejected));
             }
 
             record.Session = protocol.CreateSession(
                 record.Frames, established.Codec, fault => RetirePeer(record.Peer, fault),
-                established.Codec is null ? null : record.Materializer?.CreateAllocator() ?? PooledDecodedAllocator(),
+                established.Codec is null
+                    ? null
+                    : record.Materializer is { } resetMaterializer
+                        ? ResettingDecodedAllocator(resetMaterializer)
+                        : PooledDecodedAllocator(),
                 _maxCommandSize, _maxFrameLength, Pool);
-            var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
-            if (!_type.AcceptsPeer(peerType))
+            ReadOnlyMemory<byte>? peerIdentity;
+            if (established.PeerIdentity is { } advertisedIdentity)
             {
-                await record.Session.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), token);
-                throw new ZeroMqProtocolException($"peer socket type '{peerType}' is not accepted by local socket type '{_type.Name}'");
+                // The no-mechanism profile exchanged a routing identity
+                // message instead of READY metadata; without a Socket-Type
+                // property the RFC 45 compatibility check has no wire source
+                // and is skipped (0035).
+                peerIdentity = advertisedIdentity.Length == 0 ? null : advertisedIdentity;
+            }
+            else
+            {
+                var peerType = ZmtpCommandCodec.ParseReadySocketType(established.PeerReadyBody.Span);
+                if (!_type.AcceptsPeer(peerType))
+                {
+                    await record.Session.SendCommandAsync(ZmtpCommands.BuildError("Invalid socket type"), token);
+                    if (record.Frames is IZCloseHandshake close)
+                        await close.CloseAsync(ZCloseReason.ProtocolError, CancellationToken.None);
+                    throw new ZeroMqProtocolException($"peer socket type '{peerType}' is not accepted by local socket type '{_type.Name}'");
+                }
+
+                peerIdentity = ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span);
             }
 
-            PeerEstablished?.Invoke(record.Peer, ZmtpCommandCodec.ParseReadyIdentity(established.PeerReadyBody.Span));
+            PeerEstablished?.Invoke(record.Peer, peerIdentity);
             var aggregate = NeedsAggregation;
             lock (StateLock)
             {

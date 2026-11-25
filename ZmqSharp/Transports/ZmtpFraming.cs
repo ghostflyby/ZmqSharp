@@ -96,15 +96,32 @@ public sealed class ZmtpFraming : IZFraming
                     if (_messageFrames.Count > 0)
                         throw new ZeroMqProtocolException("command frame interrupts a More chain");
 
-                    // A command is a single-frame control message, copied to
-                    // an owned buffer so every unit honors the same caller
-                    // ownership (the scratch view would die at the next
-                    // read); command consumption (ERROR faulting, skipping)
-                    // belongs to the protocol above - the framing is
-                    // codec-blind and must not inspect possibly-encoded
-                    // bodies.
-                    return ZWireUnit.Command(
-                        new ZMessage(new ZSingleMessage(CopyToOwned(wire.frame))));
+                    // A command is itself a complete single-frame wire
+                    // message: reset the materializer's per-message counters
+                    // before returning it, or the next data message would
+                    // inherit the command frame's index and length. A
+                    // throwing callback releases the frame it was given.
+                    //
+                    // An allocator frame is already owned and travels as-is;
+                    // only the scratch path's borrowed view is copied (its
+                    // dispose would be a no-op). Dropping the allocator frame
+                    // here would leak one buffer per command.
+                    var commandFrame =
+                        wire.frame.TryGetValue(out ZSegments _) ||
+                        (wire.frame.TryGetValue(out ZSegment owned) && !owned.IsBorrowed)
+                            ? wire.frame
+                            : CopyToOwned(wire.frame);
+                    try
+                    {
+                        _onMessageBoundary?.Invoke();
+                    }
+                    catch
+                    {
+                        commandFrame.Dispose();
+                        throw;
+                    }
+
+                    return ZWireUnit.Command(new ZMessage(new ZSingleMessage(commandFrame)));
                 }
 
                 // Aggregated frames must be OWNED: a message outlives the

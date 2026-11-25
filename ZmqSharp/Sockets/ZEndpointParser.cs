@@ -1,24 +1,51 @@
 using System.Net;
 using System.Net.Sockets;
+using ZmqSharp.Transports;
 
 namespace ZmqSharp.Sockets;
 
 /// <summary>
 /// Parses the string endpoints used by the socket's transport facade
-/// (0015 section 5.2, 0029).
+/// (0015 section 5.2, 0029) and routes each scheme to its transport type.
 /// </summary>
 internal static class ZEndpointParser
 {
-    internal static async Task<EndPoint> ParseEndpointAsync(string endpoint, CancellationToken token)
+    internal static async Task<object> ParseEndpointAsync(string endpoint, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
         var uri = new Uri(endpoint);
         if (uri.Scheme.Equals("tcp", StringComparison.OrdinalIgnoreCase))
             return await ParseTcpAsync(uri, token);
 
-        return uri.Scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)
-            ? ParseIpc(endpoint, uri)
+        if (uri.Scheme.Equals("ipc", StringComparison.OrdinalIgnoreCase)) return ParseIpc(endpoint, uri);
+
+        return uri.Scheme.Equals("ws", StringComparison.OrdinalIgnoreCase) ||
+               uri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase)
+            ? ParseWebSocket(uri)
             : throw new NotSupportedException($"unsupported endpoint scheme '{uri.Scheme}' in '{endpoint}'");
+    }
+
+    /// <summary>
+    /// The transport type a scheme routes to, used by the string teardown
+    /// overloads, which match registrations by transport type plus the saved
+    /// address string and never re-parse the endpoint. An unknown scheme
+    /// reports the byte transport so the match finds nothing: teardown stays a
+    /// no-op for an address this socket never registered, matching the
+    /// pre-ZWS behavior (connect/bind still reject unknown schemes).
+    /// </summary>
+    internal static Type TransportTypeOf(string endpoint)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        // Teardown historically matched an unparseable address against the
+        // byte transport and found nothing; keep that behavior instead of
+        // turning a stray string into a new UriFormatException.
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) return typeof(SocketTransport);
+
+        var scheme = uri.Scheme;
+        return scheme.Equals("ws", StringComparison.OrdinalIgnoreCase) ||
+               scheme.Equals("wss", StringComparison.OrdinalIgnoreCase)
+            ? typeof(WebSocketTransport)
+            : typeof(SocketTransport);
     }
 
     private static async Task<IPEndPoint> ParseTcpAsync(Uri uri, CancellationToken token)
@@ -31,6 +58,16 @@ internal static class ZEndpointParser
             ? throw new InvalidOperationException($"could not resolve endpoint host '{uri.Host}'")
             : new IPEndPoint(addresses[0], port);
     }
+
+    /// <summary>
+    /// "ws://host:port/path" / "wss://host:port/path" (ZWS, 0035): the parsed
+    /// URI supplies the request target (path and query) and the scheme
+    /// default ports (80/443). The endpoint normalizes the accepted form
+    /// through the same <see cref="Uri"/> rules the BCL client uses.
+    /// </summary>
+    private static WebSocketEndpoint ParseWebSocket(Uri uri)
+        => new(uri.Host, uri.Port, uri.PathAndQuery,
+            uri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// "ipc://path" addresses a Unix domain socket: an absolute path keeps its

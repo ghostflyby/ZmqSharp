@@ -87,7 +87,7 @@ internal sealed class ZMessageSession(
         }
         catch (Exception failure)
         {
-            Fail(failure);
+            await FailAsync(failure);
             throw;
         }
         finally
@@ -124,7 +124,7 @@ internal sealed class ZMessageSession(
         }
         catch (Exception failure)
         {
-            Fail(failure);
+            await FailAsync(failure);
             throw;
         }
         finally
@@ -145,15 +145,23 @@ internal sealed class ZMessageSession(
 
             if (unit.IsCommand)
             {
-                using (unit.Message)
+                try
                 {
-                    if (ZWireFrameLogic.ByteLength(unit.Message[0]) > maxCommandSize)
-                        throw new ZeroMqProtocolException(
-                            $"command frame exceeds maximum size of {maxCommandSize} bytes");
+                    using (unit.Message)
+                    {
+                        if (ZWireFrameLogic.ByteLength(unit.Message[0]) > maxCommandSize)
+                            throw new ZeroMqProtocolException(
+                                $"command frame exceeds maximum size of {maxCommandSize} bytes");
 
-                    var body = codec is { } decoder ? DecodeBody(decoder, unit.Message)
-                        : ZWireFrameLogic.Contiguous(unit.Message[0]);
-                    CheckCommand(body.Span);
+                        var body = codec is { } decoder ? DecodeBody(decoder, unit.Message)
+                            : ZWireFrameLogic.Contiguous(unit.Message[0]);
+                        CheckCommand(body.Span);
+                    }
+                }
+                catch (Exception failure) when (failure is ZeroMqProtocolException or ZReceiveRejectedException)
+                {
+                    await CloseFaultAsync(failure);
+                    throw;
                 }
 
                 // The staged command body was consumed by CheckCommand
@@ -222,12 +230,14 @@ internal sealed class ZMessageSession(
                     }
                 }
             }
-            catch
+            catch (Exception failure)
             {
                 foreach (var frame in decodedFrames) frame.Dispose();
 
                 _decodedFrames.Clear();
                 unit.Message.Dispose();
+                if (failure is ZeroMqProtocolException or ZReceiveRejectedException)
+                    await CloseFaultAsync(failure);
                 throw;
             }
 
@@ -378,9 +388,27 @@ internal sealed class ZMessageSession(
                 $"peer sent ERROR: {ZmtpCommandCodec.ParseErrorReason(body[(1 + name.Length)..])}");
     }
 
-    private void Fail(Exception failure)
+    private async ValueTask FailAsync(Exception failure)
     {
+        if (failure is ZeroMqProtocolException or ZReceiveRejectedException)
+            await CloseFaultAsync(failure);
+
         if (retire is not null) retire(failure);
         else connection.Abort();
     }
+
+    private async ValueTask CloseFaultAsync(Exception failure)
+    {
+        if (connection is IZCloseHandshake close)
+            await close.CloseAsync(ClassifyClose(failure), CancellationToken.None);
+    }
+
+    private static ZCloseReason ClassifyClose(Exception failure)
+        => failure is ZReceiveRejectedException
+        {
+            Rejection.Reason: ZReceiveRejectionReason.FrameTooLarge
+                or ZReceiveRejectionReason.MessageTooLarge,
+        }
+            ? ZCloseReason.MessageTooBig
+            : ZCloseReason.ProtocolError;
 }

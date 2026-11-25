@@ -131,6 +131,68 @@ public sealed class ReceiveComponentsTests
         Assert.Equal(0, pool.Outstanding);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task Parser_CommandFrame_ResetsTheMaterializerBoundary()
+    {
+        var token = TestContext.Current.CancellationToken;
+        using var pool = new CountingMemoryPool();
+        var rejected = 0;
+        var materializer = new ReceiveMaterializer(
+            pool, new ZReceiveOptions(), 100, 100, maxFramesPerMessage: 1, () => rejected++);
+
+        // A valid PING command frame (flags 0x04, size 5, name length 4) then
+        // a one-byte data frame. The command's allocation must not consume the
+        // single-frame budget of the following data message.
+        byte[] wire =
+        [
+            0x04, 0x05, 4, (byte)'P', (byte)'I', (byte)'N', (byte)'G',
+            0x00, 0x01, (byte)'D',
+        ];
+        using var bytes = new FeedConnection(wire);
+        using (var messages = ZmtpFraming.Instance.Adapt(bytes, pool, ownsConnection: false))
+        {
+            messages.ConfigureReceive(new ZReceiveComposition(
+                materializer.CreateAllocator(), 100, materializer.Reset, 100, 1));
+
+            using (var session = ZmqProtocol.Instance.CreateSession(messages, null))
+            {
+                using var message = await session.ReadMessageAsync(token);
+                var received = Assert.IsType<ZMessage>(message);
+                Assert.Equal("D"u8.ToArray(), received[0].ToSequence().ToArray());
+            }
+        }
+
+        // The materializer-owned command frame must be released with the
+        // command unit; a copy-and-drop would leak it.
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
+        Assert.Equal(0, pool.Outstanding);
+        Assert.Equal(0, rejected);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task Parser_ThrowingBoundary_ReleasesTheCommandFrame()
+    {
+        var token = TestContext.Current.CancellationToken;
+        using var pool = new CountingMemoryPool();
+        var materializer = new ReceiveMaterializer(
+            pool, new ZReceiveOptions(), 100, 100, maxFramesPerMessage: 10, () => { });
+
+        byte[] wire = [0x04, 0x05, 4, (byte)'P', (byte)'I', (byte)'N', (byte)'G'];
+        using var bytes = new FeedConnection(wire);
+        using (var messages = ZmtpFraming.Instance.Adapt(bytes, pool, ownsConnection: false))
+        {
+            messages.ConfigureReceive(new ZReceiveComposition(
+                materializer.CreateAllocator(), 100,
+                () => throw new InvalidOperationException("boundary"), 100, 10));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => messages.ReadUnitAsync(token).AsTask());
+        }
+
+        await pool.WaitForOutstandingAsync(0, TimeSpan.FromSeconds(5));
+        Assert.Equal(0, pool.Outstanding);
+    }
+
     private sealed class HeaderThenFailure : ZByteConnection
     {
         private int _position;
@@ -147,6 +209,27 @@ public sealed class ReceiveComponentsTests
 
         public override ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
             => throw new NotSupportedException("the read-failure fixture never writes");
+
+        public override void Abort() { }
+    }
+
+    private sealed class FeedConnection(byte[] feed) : ZByteConnection
+    {
+        private int _position;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> destination, CancellationToken token = default)
+        {
+            var count = Math.Min(destination.Length, feed.Length - _position);
+            feed.AsMemory(_position, count).CopyTo(destination);
+            _position += count;
+            return ValueTask.FromResult(count);
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+            => throw new NotSupportedException("the feed fixture never writes");
+
+        public override ValueTask WriteAsync(ReadOnlySequence<byte> bytes, CancellationToken token = default)
+            => throw new NotSupportedException("the feed fixture never writes");
 
         public override void Abort() { }
     }
